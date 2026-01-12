@@ -26,20 +26,27 @@ class SamplerConfigDashboardViewer:
         # 1. If connected to Sampler (Fresh Generation)
         if dashboard_html:
             # --- MAGIC: EXTRACT SESSION NAME FROM HTML ---
-            # We look for the value="{title}" we put in the HTML generator
             match = re.search(r'id="session-input" class="session-input" value="(.*?)"', dashboard_html)
             found_session = match.group(1) if match else None
             
-            # Return both HTML and the Found Name to the frontend
+            # --- CRITICAL FIX: INJECT CORRECT DASHBOARD NODE ID ---
+            # The HTML coming from Sampler might have the Sampler's ID or a placeholder.
+            # We must overwrite it with THIS dashboard node's ID so listeners work.
+            # We look for the const TARGET_NODE_ID = "..." line in the JS.
+            fixed_html = re.sub(
+                r'const TARGET_NODE_ID = ".*?";', 
+                f'const TARGET_NODE_ID = "{unique_id}";', 
+                dashboard_html
+            )
+            
             return {
                 "ui": {
-                    "html": [dashboard_html],
+                    "html": [fixed_html],
                     "update_session_name": [found_session] if found_session else []
                 }
             }
         
         # 2. View Mode (Load from Disk)
-        # Sanitize
         session_name = re.sub(r'[^\w\-]', '', session_name)
         if not session_name: session_name = "default_session"
 
@@ -50,7 +57,8 @@ class SamplerConfigDashboardViewer:
             try:
                 with open(manifest_path, "r") as f:
                     manifest = json.load(f)
-                html = get_html_template(session_name, manifest, unique_id)
+                # Pass unique_id here, which get_html_template uses correctly
+                html = get_html_template(session_name, manifest, unique_id) 
                 return {"ui": {"html": [html]}}
             except Exception as e:
                 return {"ui": {"html": [f"Error loading session: {e}"]}}

@@ -10,31 +10,60 @@
 <body>
 
 <div id="header">
-    <div class="meta-box"><div class="meta-label">Model</div><div class="meta-val" id="meta-model"></div></div>
-    <div class="meta-box"><div class="meta-label">Positive</div><div class="meta-val" id="meta-pos"></div></div>
-    <div class="meta-box"><div class="meta-label">Negative</div><div class="meta-val" id="meta-neg"></div></div>
+    <div class="meta-box">
+        <span class="meta-label">Model</span>
+        <span id="meta-model" class="meta-val">-</span>
+    </div>
+    
+    <div style="width:1px; height:12px; background:#222;"></div>
+
+    <div class="meta-box">
+        <span class="meta-label">Pos</span>
+        <span id="meta-pos" class="meta-val">-</span>
+    </div>
+    <div class="meta-box">
+        <span class="meta-label">Neg</span>
+        <span id="meta-neg" class="meta-val">-</span>
+    </div>
+    
+    <div style="flex-grow: 1;"></div>
+
+    <div class="zoom-controls">
+        <button class="action-btn" onclick="resetZoom()" title="Reset Zoom (0)">⊙</button>
+        <button class="action-btn" onclick="zoomOut()" title="Zoom Out (-)">−</button>
+        <button class="action-btn" onclick="zoomIn()" title="Zoom In (+)">+</button>
+    </div>
+
+    <div class="meta-box">
+        <span class="meta-label">Cols</span>
+        <input type="number" id="col-count" min="0" max="20" placeholder="Auto" title="Set grid columns (0 = Auto)">
+    </div>
 </div>
 
 <div id="toolbar">
     <div class="session-ctrl">
-        <input id="session-input" class="session-input" value="__TITLE__">
+        <span style="color:#666; font-size:10px; align-self:center; margin-left:4px;">SESSION:</span>
+        <input id="session-input" class="session-input" type="text" value="__TITLE__" onchange="loadSession()">
+        <button class="action-btn" onclick="saveState()">SAVE</button>
         <button class="action-btn" onclick="loadSession()">LOAD</button>
     </div>
+    
+    <div class="filter-group"><span class="filter-label">Model</span> <div id="filter-model"></div></div>
+    <div class="filter-group"><span class="filter-label">Sampler</span> <div id="filter-sampler"></div></div>
+    <div class="filter-group"><span class="filter-label">Sched</span> <div id="filter-scheduler"></div></div>
+    <div class="filter-group"><span class="filter-label">Denoise</span> <div id="filter-denoise"></div></div>
+    <div class="filter-group"><span class="filter-label">LoRA</span> <div id="filter-lora"></div></div>
 
-    <div style="width:1px; height:20px; background:#333; margin:0 5px;"></div>
-    <button class="action-btn" onclick="toggleSort()" id="sort-btn">Sort: Newest</button>
-    
-    <div style="width:1px; height:20px; background:#333; margin:0 5px;"></div>
-    <div class="filter-group"><span class="filter-label">Smp</span><div id="filter-sampler" style="display:flex; gap:2px;"></div></div>
-    <div class="filter-group"><span class="filter-label">Sch</span><div id="filter-scheduler" style="display:flex; gap:2px;"></div></div>
-    <div class="filter-group"><span class="filter-label">Den</span><div id="filter-denoise" style="display:flex; gap:2px;"></div></div>
-    <div class="filter-group"><span class="filter-label">LoRA</span><div id="filter-lora" style="display:flex; gap:2px;"></div></div>
-    
-    <div style="flex-grow:1"></div>
+    <div class="toolbar-spacer"></div> 
+
+    <button id="sort-btn" class="action-btn" onclick="toggleSort()">Sort: Oldest</button>
+    <button class="fs-btn" onclick="toggleFullscreen()" title="Toggle Fullscreen">⛶</button>
 </div>
 
 <div id="viewport">
-    <div id="canvas"><div class="grid" id="grid"></div></div>
+    <div id="canvas">
+        <div class="grid" id="grid"></div>
+    </div>
 </div>
 
 <div class="json-container">
