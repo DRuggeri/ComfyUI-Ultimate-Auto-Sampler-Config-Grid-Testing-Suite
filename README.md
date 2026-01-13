@@ -4,7 +4,7 @@
 <img width="1856" height="1030" alt="image" src="https://github.com/user-attachments/assets/e1d57553-80a8-4058-aea5-455e6bfbdf8a" />
 
 
-**ComfyUI Sampler testing & benchmarking tool for testing Stable Diffusion samplers, schedulers, CFG scales, prompts, img2img denoise values, and LoRA combinations. Features infinite-canvas dashboard image grids with virtual scrolling that can handle thousands of images, multi-model comparison, automatic resume on interrupt, and real-time visualization. Test entire checkpoint folders, stack multiple LoRAs, generate random seed variations, and export optimized configs. Includes fullscreen mode, keyboard navigation, smart filtering by parameters, and one-click regeneration workflow. Perfect for sampler output optimization and hyperparameter tuning.**
+**A professional-grade benchmarking and "IDE-like" testing suite for ComfyUI.**
 
 Stop guessing which Sampler, Scheduler, or CFG value works best. This custom node suite allows you to generate massive Cartesian product grids, view them in an interactive infinite-canvas dashboard, and refine your settings with a "Revise & Generate" workflow without ever leaving the interface.
 
@@ -14,20 +14,29 @@ Stop guessing which Sampler, Scheduler, or CFG value works best. This custom nod
 
 ### 🚀 Powerful Grid Generation
 * **Cartesian Product Engine:** Automatically generates every permutation of your input settings. Test unlimited Samplers, Schedulers, CFG scales, Sizes, Prompts, LoRA combinations all in one go.
+* **Non-Standard Model Support:** Full support for SD3, Flux, Z-Image, and other non-standard architectures with automatic latent channel detection.
 * **Multi-Model Support:** Test multiple checkpoints in a single run by passing an array of model names or folder paths.
 * **Multi-LoRA Stacking:** Layer multiple LoRAs with custom strengths using the `+` separator. Supports folder expansion for testing entire LoRA directories.
+* **Auto LoRA Trigger Words:** Automatically fetches and appends LoRA trigger words from CivitAI API using SHA256 hash lookup. Results are cached locally for offline use.
 * **Multi-Seed Generation:** Add extra random variations per config with the `add_random_seeds_to_gens` parameter - perfect for evaluating consistency.
 * **Smart Caching:** Intelligently skips model and LoRA reloading when consecutive runs share the same resources, making generation instant for parameter tweaks.
 * **Stop & Resume:** Intelligent skip detection - if you stop a generation mid-run, resuming will skip already-generated images and continue where you left off.
+* **Advanced Skip Logic:** Uses conditioning tensor hashing to detect prompt changes even when using pre-encoded conditioning from CLIP nodes.
+* **LoRA Compatibility Detection:** Automatically detects and skips incompatible LoRAs with detailed error reporting, preventing log spam.
 * **VAE Batching:** Includes a `vae_batch_size` input to batch decode images, significantly speeding up large grid runs.
 * **Live Dashboard Updates:** Configure `flush_batch_every` to update the dashboard incrementally (e.g., every 4 images) instead of waiting for the entire batch to complete.
 
 ### 🎨 Interactive Dashboard (The "IDE")
 * **Infinite Canvas with Pan/Zoom:** Google Maps-style navigation with mouse drag, mousewheel zoom, and keyboard shortcuts.
 * **Virtual Scrolling:** Ultra-optimized rendering handles thousands of images smoothly by only loading visible items - scroll through 5000+ images without lag.
+* **Mobile Touch Support:** Full pinch-to-zoom and pan gestures on mobile devices with optimized touch controls.
 * **Fullscreen Mode:** Click the fullscreen button (⛶) to expand the dashboard to fill your entire screen.
+* **Favorites System:** Star your best images with a ⭐ button - favorites are collected in a separate gold JSON bar for easy export.
 * **Smart Filtering:** Toggle visibility by Model, Sampler, Scheduler, Denoise, or LoRA type.
+  - **Shift+Click:** Isolate a single filter (deselect all others) for quick A/B testing
 * **Intelligent Sorting:** Instantly sort your grid by **Oldest**, **Newest**, or **Fastest** (generation time). Your preference is saved to localStorage.
+* **Go to Image #:** Jump directly to any image number with the "Go to #" input field in the header.
+* **Auto-Load Sessions:** Dashboard automatically loads when generation starts - no manual session name entry needed.
 * **Session Management:** Save and Load previous testing sessions directly from the UI.
 * **Keyboard Navigation:**
   - `Space` - Pan down one row
@@ -39,6 +48,7 @@ Stop guessing which Sampler, Scheduler, or CFG value works best. This custom nod
 
 ### ⚡ The "Revise & Generate" Workflow
 * **One-Click Revision:** Click "REVISE" on any image to open a detail view.
+* **Complete Metadata View:** Shows model, seed, prompts (with trigger words), and all generation parameters.
 * **Instant Tweak:** Adjust CFG, Steps, or Sampler for *just that specific image*.
 * **Generate New:** A "GENERATE NEW" button queues the new variation immediately without needing to disconnect wires or change the main batch.
 * **Similarity Reel:** The revision modal shows a side-scrolling reel of all other images that share the same seed, allowing for perfect A/B comparison.
@@ -46,9 +56,10 @@ Stop guessing which Sampler, Scheduler, or CFG value works best. This custom nod
 
 ### 🧹 Curation & JSON Export
 * **Rejection System:** Click the red **"✕"** on bad generations to hide them.
-* **Dual JSON Bars:**
-    * **Green Bar:** Automatically groups all *accepted* configs into a clean, optimized JSON array ready for copy-pasting.
-    * **Red Bar:** Collects all *rejected* configs so you know exactly what settings to avoid.
+* **Triple JSON Bars (Horizontal Layout):**
+    * **Green Bar (Left):** Automatically groups all *accepted* configs into a clean, optimized JSON array ready for copy-pasting.
+    * **Gold Bar (Center):** Contains all *favorited* configs - your best-performing settings.
+    * **Red Bar (Right):** Collects all *rejected* configs so you know exactly what settings to avoid.
 
 ---
 
@@ -109,6 +120,12 @@ This suite consists of two main nodes found under the `sampling/testing` categor
   - `0` (default): Only use base seed
   - `3`: Generate 3 additional random seed variations per config
   - Random seeds are deterministic per base seed - changing base seed generates new random variations
+
+* **`lookup_and_append_lora_triggerwords`**: Automatically fetch and append LoRA trigger words.
+  - `False` (default): Use prompts as-is
+  - `True`: Calculate SHA256 hash of each LoRA, query CivitAI API for trigger words, cache results locally, and prepend to prompts
+  - Example: LoRA has trigger word "character_name" → Prompt becomes "character_name, your original prompt"
+  - Cache stored in `loras_tags.json` for offline use
 
 * **`session_name`**: Folder name where results are saved (`ComfyUI/output/benchmarks/{session_name}/`).
 
@@ -205,7 +222,14 @@ The `configs_json` widget determines your grid. It accepts an array of objects. 
 The Generator node features built-in widgets for Model Selection and Prompts, but also has **Optional Inputs** for flexibility:
 * **Standalone Mode:** Use the dropdown menu to select a checkpoint and type prompts into the text boxes.
 * **Hybrid Mode:** Connect a `MODEL`, `CLIP`, `VAE`, or `CONDITIONING` wire. The node will automatically ignore the internal widget and use the connected input instead.
+* **Non-Standard Models:** For SD3, Flux, Z-Image, and other architectures:
+  - Connect `optional_model`, `optional_clip`, and `optional_vae` from your model loader
+  - Connect `optional_positive` and `optional_negative` for pre-encoded conditioning
+  - The node automatically detects latent channel count (4 for SD1.5/SDXL, 16 for SD3/Flux/Z-Image)
+  - Skip detection uses conditioning tensor hashing to properly detect prompt changes
 * **Latent Input:** Connect a `LATENT` to use img2img or upscaling workflows.
+  - For SD3/Flux: Use `EmptySD3LatentImage` instead of `EmptyLatentImage`
+  - Latent dimensions are automatically preserved
 
 ---
 
@@ -213,8 +237,77 @@ The Generator node features built-in widgets for Model Selection and Prompts, bu
 
 ### Header Bar
 * **Model/Prompt Info:** Shows current model and prompt metadata
+* **Go to Image #:** Jump directly to any image by entering its number (shown in bottom-left of cards)
 * **Column Count:** Set fixed grid columns or leave at 0 for auto-sizing
 * **Zoom Controls:** `⊙` (reset), `−` (zoom out), `+` (zoom in)
+
+### Toolbar
+* **Session Controls:** 
+  - Dashboard auto-loads when connected to sampler and generation starts
+  - **SAVE** to persist current state to disk
+  - **DELETE** to remove session and all images
+  
+* **Filter Groups:** Click colored buttons to toggle visibility:
+  - **Model** (Purple): Filter by checkpoint
+  - **Sampler** (Cyan): Filter by sampler type
+  - **Scheduler** (Blue): Filter by scheduler
+  - **Denoise** (Red): Filter by denoise value
+  - **LoRA** (Orange): Filter by LoRA configs
+  - **Shift+Click:** Isolate single filter (deselect all others)
+  
+* **Sort Button:** Cycles between:
+  - **Sort: Oldest** - Original generation order (default)
+  - **Sort: Newest** - Most recent first
+  - **Sort: Fastest** - By generation time
+  - *Sort preference is saved to localStorage*
+  
+* **Fullscreen Button (⛶):** Expand dashboard to fill entire screen
+
+### Navigation & Controls
+* **Mouse:**
+  - Left-click drag to pan
+  - Middle-click drag to pan  
+  - Scroll wheel to zoom in/out
+  - Right-click on canvas to focus for keyboard controls
+  
+* **Touch (Mobile/Tablet):**
+  - Single finger drag to pan
+  - Two finger pinch/spread to zoom
+  - Tap card to reveal buttons
+  
+* **Keyboard:**
+  - `Space` - Scroll down one row
+  - `Shift+Space` - Scroll up one row
+  - `↑↓←→` - Pan in any direction
+  - `+/-` - Zoom in/out
+  - `0` - Reset zoom to 1:1
+  - `F` - Auto-fit first row to viewport width
+
+### Card Overlays
+* **Bottom Left:** Index number (#1, #2, etc.) - used for "Go to #" feature
+* **Bottom Right:** Generation time in seconds
+* **Top Left (on hover):** Red ✕ button to reject/hide image
+* **Top Right (on hover):** 
+  - Gold ⭐ button to favorite image
+  - Green "REVISE" button (below star) to open studio view
+
+### JSON Bars (Bottom - Horizontal Layout)
+* **Green Bar (Left - Accepted):** Contains optimized JSON of all currently visible images. Click to select all, then copy-paste back into the `configs_json` widget to refine your batch.
+* **Gold Bar (Center - Favorites):** Contains configs of all images you starred with ⭐. Your best-performing settings in one place.
+* **Red Bar (Right - Rejected):** Contains the configs of images you deleted with the **"✕"** button. Know what to avoid.
+
+### Revision Modal
+Clicking **REVISE** on a card opens the studio view:
+1. **Left:** Full-resolution preview.
+2. **Top Right - Read-Only Info:**
+   - Model used
+   - Seed number
+   - Positive prompt (with trigger words if applicable)
+   - Negative prompt
+3. **Bottom Right - Adjustable Parameters:**
+   - Sampler, Scheduler, Steps, CFG, Denoise, LoRA
+4. **Bottom:** "Related Variants" reel showing other images with the same seed.
+5. **GENERATE NEW:** Queues the specific config you just edited.
 
 ### Toolbar
 * **Session Controls:** 
@@ -458,6 +551,15 @@ Tests ALL checkpoints in the `realistic_models` folder.
 * **OOM Errors:** If you crash during decoding, lower the `vae_batch_size` to 1 or 2.
 * **Images not resuming:** Make sure `overwrite_existing: False`. Check console for skip messages.
 * **Random seeds different each run:** This is intentional - random seeds are tied to the base seed. Change the base `seed` parameter to generate new random variations.
+* **"mat1 and mat2 shapes cannot be multiplied" error:**
+  - This indicates a model architecture mismatch
+  - For SD3/Flux/Z-Image models, ensure you connect ALL optional inputs (model, clip, vae, positive, negative)
+  - Check that your LoRAs are compatible with your model architecture
+  - Incompatible LoRAs are automatically detected and skipped with detailed error messages
+* **Dashboard not auto-loading:**
+  - Ensure the dashboard node is connected to the sampler's `dashboard_html` output
+  - Check browser console for connection errors
+  - Try manually clicking "RELOAD / SHOW SESSION" button
 
 ### Dashboard Issues
 * **Cards not appearing:** Click inside the viewport area first to give it focus, then use keyboard navigation.
@@ -468,16 +570,54 @@ Tests ALL checkpoints in the `realistic_models` folder.
   - Clearing localStorage (`F12` → Console → `localStorage.clear()`)
 * **Images not loading:** Scroll slower to give the lazy loader time to fetch images.
 * **Hover z-index issues:** Ensure you're using the latest CSS file with `z-index: 999999 !important` on card hover.
+* **Mobile touch not working:** 
+  - Ensure you're using the latest version with touch support
+  - Try tapping and holding to reveal card buttons
+  - Use two fingers for pinch-to-zoom
+
+### LoRA & Trigger Word Issues
+* **Trigger words not appearing:** 
+  - Enable `lookup_and_append_lora_triggerwords` in the sampler node
+  - Ensure internet connection for first-time LoRA lookup
+  - Check `loras_tags.json` in ComfyUI root for cached results
+* **"INCOMPATIBLE LORA DETECTED" messages:**
+  - This is normal - the node automatically skips incompatible LoRAs
+  - Check the summary at the end of generation for list of incompatible LoRAs
+  - Ensure your LoRAs match your model architecture (SD1.5 LoRAs won't work on SDXL, etc.)
 
 ### Browser Compatibility
 * **Chrome/Edge:** Full support ✅
 * **Firefox:** Full support ✅  
 * **Safari:** Mostly works, some keyboard shortcuts may conflict
-* **Mobile:** Touch gestures work but not optimized for small screens
+* **Mobile:** Full touch support ✅ (iOS Safari, Android Chrome tested)
 
 ---
 
 ## 📝 Changelog
+
+### Update 1/14/26 - Major Feature Update
+* 🎯 **Non-Standard Model Support:** Full compatibility with SD3, Flux, Z-Image, and other architectures
+  - Automatic latent channel detection (4 for SD1.5/SDXL, 16 for SD3/Flux/Z-Image)
+  - Smart model/clip/vae override handling
+  - Proper dimension handling for non-standard architectures
+* ⭐ **Favorites System:** Star your best images with dedicated gold JSON bar for favorited configs
+* 🎨 **Horizontal JSON Bars:** Redesigned layout with three side-by-side bars (Accepted/Favorites/Rejected)
+* 🔍 **LoRA Auto Trigger Words:** Automatic CivitAI API integration
+  - SHA256 hash-based LoRA lookup
+  - Automatic trigger word prepending to prompts
+  - Local caching in `loras_tags.json`
+* 🚫 **LoRA Compatibility Detection:** Automatically detects and skips incompatible LoRAs
+  - Clear error messages once per LoRA+Model combination
+  - End-of-run summary of incompatible LoRAs
+  - No more log spam from dimension mismatches
+* ⌨️ **Shift+Click Filter Isolation:** Shift+click any filter to isolate it (deselect all others)
+* 🎯 **Go to Image #:** Jump directly to any image number from header input field
+* 🚀 **Dashboard Auto-Load:** Automatically loads session when generation starts (no manual entry needed)
+* 📱 **Mobile Touch Support:** Full pinch-to-zoom and pan gestures on mobile devices
+* 🔐 **Conditioning Change Detection:** Uses tensor hashing to detect prompt changes in pre-encoded conditioning
+* 📋 **Enhanced Revise Modal:** Now shows model, seed, and complete prompts (with trigger words)
+* 💾 **Prompt Persistence:** Saves actual prompts (with trigger words) to manifest.json
+* ⚡ **Performance Improvements:** Optimized skip logic, better cache invalidation, reduced redundant operations
 
 ### Update 1/11/26 - Major Overhaul
 * ✨ **Virtual Scrolling:** Handles 5000+ images smoothly with automatic load/unload
