@@ -28,6 +28,11 @@
     
     <div style="flex-grow: 1;"></div>
 
+    <div class="meta-box" style="gap: 4px;">
+        <span class="meta-label">Go to #</span>
+        <input type="number" id="goto-input" min="1" placeholder="#" title="Jump to image number (press Enter)" style="width: 50px;">
+    </div>
+
     <div class="zoom-controls">
         <button class="action-btn" onclick="resetZoom()" title="Reset Zoom (0)">⊙</button>
         <button class="action-btn" onclick="zoomOut()" title="Zoom Out (-)">−</button>
@@ -67,8 +72,9 @@
 </div>
 
 <div class="json-container">
-    <div id="json-bar-good" class="json-bar" title="ACCEPTED CONFIGS" onclick="selectJSON('json-bar-good')">[]</div>
-    <div id="json-bar-bad" class="json-bar" title="REJECTED CONFIGS" onclick="selectJSON('json-bar-bad')">[]</div>
+    <div id="json-bar-good" class="json-bar" title="ACCEPTED CONFIGS (Click to select)" onclick="selectJSON('json-bar-good')">[]</div>
+    <div id="json-bar-favorite" class="json-bar" title="FAVORITED CONFIGS (Click to select)" onclick="selectJSON('json-bar-favorite')">[]</div>
+    <div id="json-bar-bad" class="json-bar" title="REJECTED CONFIGS (Click to select)" onclick="selectJSON('json-bar-bad')">[]</div>
 </div>
 
 <div id="modal">
@@ -76,6 +82,13 @@
         <div class="preview"><img id="m-img" src=""></div>
         <div class="controls">
             <h2 style="margin:0 0 10px 0; color:#fff;">Revise & Generate</h2>
+            <div class="field"><label>Model</label><input id="f-model" disabled style="opacity:0.6;"></div>
+            <div class="field"><label>Seed</label><input id="f-seed" type="number" disabled style="opacity:0.6;"></div>
+            <div class="field"><label>Positive Prompt</label><textarea id="f-pos" rows="3" style="background:#000; border:1px solid #333; color:#fff; padding:8px; font-size:12px; font-family:inherit; resize:vertical;" disabled></textarea></div>
+            <div class="field"><label>Negative Prompt</label><textarea id="f-neg" rows="2" style="background:#000; border:1px solid #333; color:#fff; padding:8px; font-size:12px; font-family:inherit; resize:vertical;" disabled></textarea></div>
+            <div style="border-top:1px solid #333; margin:10px 0; padding-top:10px;">
+                <div style="font-size:11px; color:#666; margin-bottom:8px;">ADJUST PARAMETERS:</div>
+            </div>
             <div class="field"><label>Sampler</label><input id="f-smp"></div>
             <div class="field"><label>Scheduler</label><input id="f-sch"></div>
             <div class="field"><label>Steps</label><input id="f-stp" type="number"></div>

@@ -22,30 +22,75 @@ app.registerExtension({
         }
 
         // 2. LIVE UPDATE LISTENER (FIXED)
-        api.addEventListener("ultimate_grid.update", (event) => {
-            // FIX: Get the WHOLE detail object (new_items + manifest)
-            const payload = event.detail; 
-            const { session_name } = payload;
 
+        // 2. LIVE UPDATE LISTENER - AUTO-LOAD SESSION
+        api.addEventListener("ultimate_grid.update", (event) => {
+            const payload = event.detail;
+            const { session_name, node } = payload;  // node is the SAMPLER node ID
+
+            console.log(`[UltimateGrid] Received update for session: ${session_name}`);
+
+            // Find all dashboard nodes
             const nodes = app.graph._nodes.filter(n => n.type === "UltimateGridDashboard");
 
-            nodes.forEach(node => {
-                const w = node.widgets.find(w => w.name === "session_name");
-                if (w && w.value === session_name) {
+            nodes.forEach(dashboardNode => {
+                const sessionWidget = dashboardNode.widgets.find(w => w.name === "session_name");
 
-                    if (node.loaded_session === session_name && node.iframe && node.iframe.contentWindow) {
-                        // FIX: Send the FULL payload so report_logic.js sees 'new_items'
-                        node.iframe.contentWindow.postMessage({ type: 'update_data', data: payload }, '*');
-                    } else {
-                        // Auto-boot if not loaded
-                        if (node.forceLoadSession) {
-                            console.log(`[UltimateGrid] Auto-booting dashboard for session: ${session_name}`);
-                            node.forceLoadSession(session_name);
+                if (!sessionWidget) {
+                    console.warn(`[UltimateGrid] Dashboard node ${dashboardNode.id} has no session_name widget`);
+                    return;
+                }
+
+                const currentSessionName = sessionWidget.value;
+
+                // CASE 1: Session matches and dashboard is loaded → send update
+                if (currentSessionName === session_name &&
+                    dashboardNode.loaded_session === session_name &&
+                    dashboardNode.iframe &&
+                    dashboardNode.iframe.contentWindow) {
+
+                    console.log(`[UltimateGrid] Sending live update to loaded dashboard ${dashboardNode.id}`);
+                    dashboardNode.iframe.contentWindow.postMessage({
+                        type: 'update_data',
+                        data: payload
+                    }, '*');
+                }
+
+                // CASE 2: Session matches but dashboard not loaded → auto-load
+                else if (currentSessionName === session_name &&
+                    dashboardNode.loaded_session !== session_name) {
+
+                    console.log(`[UltimateGrid] Auto-loading session ${session_name} in dashboard ${dashboardNode.id}`);
+                    if (dashboardNode.forceLoadSession) {
+                        dashboardNode.forceLoadSession(session_name);
+                    }
+                }
+
+                // CASE 3: Session doesn't match but dashboard is connected to this sampler
+                // This happens when dashboard is blank/empty but connected
+                else if (currentSessionName !== session_name) {
+                    // Check if this dashboard is connected to the sampler node
+                    // by looking at node connections
+                    const isConnected = dashboardNode.inputs?.some(input => {
+                        const link = app.graph.links[input.link];
+                        return link && link.origin_id === parseInt(node);
+                    });
+
+                    if (isConnected) {
+                        console.log(`[UltimateGrid] Dashboard ${dashboardNode.id} is connected to sampler - updating session name to ${session_name}`);
+
+                        // Update the session_name widget
+                        sessionWidget.value = session_name;
+
+                        // Auto-load the session
+                        if (dashboardNode.forceLoadSession) {
+                            dashboardNode.forceLoadSession(session_name);
                         }
                     }
                 }
             });
         });
+        ;
 
         // 3. FULLSCREEN LISTENER
         window.addEventListener("message", (event) => {
@@ -120,7 +165,7 @@ app.registerExtension({
                 this.addWidget("button", "DELETE SESSION (Files)", null, async () => {
                     const s = getSessionName();
                     if (!s) return alert("No session name set.");
-                    if(!confirm("Are you sure you want to delete this session?")) return;
+                    if (!confirm("Are you sure you want to delete this session?")) return;
                     try {
                         const resp = await fetch("/config_tester/delete_session", {
                             method: "POST",

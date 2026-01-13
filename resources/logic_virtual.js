@@ -305,7 +305,7 @@ function autoFitZoom() {
     const viewportWidth = viewport.clientWidth;
 
     // Calculate scale to fit width
-    const targetScale = (viewportWidth / totalWidth) * 0.98; // 95% to add small padding
+    const targetScale = (viewportWidth / totalWidth) * 0.95; // 95% to add small padding
 
     // Clamp to min/max
     currentScale = Math.max(MIN_SCALE, Math.min(MAX_SCALE, targetScale));
@@ -319,6 +319,70 @@ function autoFitZoom() {
     updateTransform();
     
     console.log(`[Grid] 🎯 Auto-fit first row: ${columnsCount} columns, scale: ${currentScale.toFixed(2)}`);
+}
+
+// --- GO TO IMAGE: Navigate to specific image number ---
+function goToImage(imageNumber) {
+    if (!processedData || processedData.length === 0) {
+        console.log('[Grid] No data to navigate');
+        return;
+    }
+
+    // Find item by index number (not ID)
+    let targetItem = null;
+    let targetIndex = -1;
+    
+    for (let i = 0; i < processedData.length; i++) {
+        const item = processedData[i];
+        const itemIndex = idToIndexMap.get(item.id) || 0;
+        if (itemIndex === imageNumber) {
+            targetItem = item;
+            targetIndex = i;
+            break;
+        }
+    }
+
+    if (!targetItem || targetIndex === -1) {
+        console.log(`[Grid] Image #${imageNumber} not found`);
+        alert(`Image #${imageNumber} not found in current view`);
+        return;
+    }
+
+    // Calculate position in grid
+    const row = Math.floor(targetIndex / columnsCount);
+    const col = targetIndex % columnsCount;
+    const x = col * itemWidth;
+    const y = row * rowHeight;
+
+    // Center the image in viewport
+    const viewportWidth = viewport.clientWidth;
+    const viewportHeight = viewport.clientHeight;
+
+    // Calculate pan offsets to center this card
+    panOffsetX = (viewportWidth / 2) - (x * currentScale) - ((itemWidth * currentScale) / 2);
+    panOffsetY = (viewportHeight / 2) - (y * currentScale) - ((rowHeight * currentScale) / 2);
+
+    updateTransform();
+    
+    // Make sure the item is rendered
+    updateVisibleItems();
+    
+    // Highlight the card briefly
+    setTimeout(() => {
+        const card = document.getElementById(`card-${targetItem.id}`);
+        if (card) {
+            card.style.transition = 'box-shadow 0.3s, border-color 0.3s';
+            card.style.boxShadow = '0 0 30px rgba(0, 209, 178, 0.8)';
+            card.style.borderColor = 'var(--accent)';
+            
+            setTimeout(() => {
+                card.style.boxShadow = '';
+                card.style.borderColor = '';
+            }, 2000);
+        }
+    }, 200);
+
+    console.log(`[Grid] 📍 Navigated to image #${imageNumber} at position (${row}, ${col})`);
 }
 
 // --- MOUSE CONTROLS ---
@@ -368,12 +432,93 @@ if (viewport) {
     viewport.addEventListener('contextmenu', (e) => {
         if (e.button === 1) e.preventDefault();
     });
+
+    // --- TOUCH CONTROLS FOR MOBILE ---
+    let touchStartDistance = 0;
+    let touchStartScale = 1;
+    let isTouching = false;
+    let touchStartX = 0;
+    let touchStartY = 0;
+
+    viewport.addEventListener('touchstart', (e) => {
+        viewport.focus();
+        viewport.setAttribute('tabindex', '0');
+        
+        if (e.touches.length === 1) {
+            // Single touch - pan
+            isTouching = true;
+            const touch = e.touches[0];
+            touchStartX = touch.clientX - panOffsetX;
+            touchStartY = touch.clientY - panOffsetY;
+        } else if (e.touches.length === 2) {
+            // Two fingers - pinch to zoom
+            e.preventDefault();
+            const touch1 = e.touches[0];
+            const touch2 = e.touches[1];
+            touchStartDistance = Math.hypot(
+                touch2.clientX - touch1.clientX,
+                touch2.clientY - touch1.clientY
+            );
+            touchStartScale = currentScale;
+        }
+    }, { passive: false });
+
+    viewport.addEventListener('touchmove', (e) => {
+        if (e.touches.length === 1 && isTouching) {
+            // Single touch - pan
+            e.preventDefault();
+            const touch = e.touches[0];
+            panOffsetX = touch.clientX - touchStartX;
+            panOffsetY = touch.clientY - touchStartY;
+            updateTransform();
+        } else if (e.touches.length === 2) {
+            // Two fingers - pinch to zoom
+            e.preventDefault();
+            const touch1 = e.touches[0];
+            const touch2 = e.touches[1];
+            
+            // Calculate current distance between fingers
+            const currentDistance = Math.hypot(
+                touch2.clientX - touch1.clientX,
+                touch2.clientY - touch1.clientY
+            );
+            
+            // Calculate center point between fingers
+            const centerX = (touch1.clientX + touch2.clientX) / 2;
+            const centerY = (touch1.clientY + touch2.clientY) / 2;
+            
+            // Calculate new scale
+            const scaleChange = currentDistance / touchStartDistance;
+            const newScale = Math.max(MIN_SCALE, Math.min(MAX_SCALE, touchStartScale * scaleChange));
+            
+            if (newScale !== currentScale) {
+                const rect = viewport.getBoundingClientRect();
+                const offsetX = centerX - rect.left;
+                const offsetY = centerY - rect.top;
+                
+                const scaleFactor = newScale / currentScale;
+                panOffsetX = offsetX - (offsetX - panOffsetX) * scaleFactor;
+                panOffsetY = offsetY - (offsetY - panOffsetY) * scaleFactor;
+                currentScale = newScale;
+                
+                updateTransform();
+            }
+        }
+    }, { passive: false });
+
+    viewport.addEventListener('touchend', (e) => {
+        if (e.touches.length === 0) {
+            isTouching = false;
+        }
+        if (e.touches.length < 2) {
+            touchStartDistance = 0;
+        }
+    });
 }
 
 // --- RESIZE OBSERVER ---
 const resizeObserver = new ResizeObserver(() => {
     recalculateLayout();
-    autoFitZoom();
 });
 
 if (viewport) {
@@ -399,7 +544,6 @@ function setupKeyboardShortcuts() {
             case '0':
                 e.preventDefault();
                 resetZoom();
-                autoFitZoom();
                 break;
             case 'f':
             case 'F':
@@ -455,7 +599,6 @@ function measureGridItem() {
 
 function recalcColumns() {
     recalculateLayout();
-    autoFitZoom();
 }
 
 function updateVirtualWindow(force = false) {
@@ -475,6 +618,30 @@ window.zoomIn = zoomIn;
 window.zoomOut = zoomOut;
 window.resetZoom = resetZoom;
 window.autoFitZoom = autoFitZoom;
+window.goToImage = goToImage;
 window.updateVisibleItems = updateVisibleItems;
 window.forceVisibleRangeUpdate = forceVisibleRangeUpdate;
 setupKeyboardShortcuts();
+
+// Set up Go To Image input handler
+if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', setupGoToInput);
+} else {
+    setupGoToInput();
+}
+
+function setupGoToInput() {
+    const gotoInput = document.getElementById('goto-input');
+    if (gotoInput) {
+        gotoInput.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter') {
+                const imageNum = parseInt(gotoInput.value);
+                if (imageNum && imageNum > 0) {
+                    goToImage(imageNum);
+                    gotoInput.value = ''; // Clear after navigation
+                    gotoInput.blur(); // Remove focus
+                }
+            }
+        });
+    }
+}
