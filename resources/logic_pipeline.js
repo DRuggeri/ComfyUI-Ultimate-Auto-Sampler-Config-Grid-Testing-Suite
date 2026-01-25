@@ -1,6 +1,7 @@
 /**
  * OPTIMIZED DATA PIPELINE
  * Fixed: New items appear immediately when prepended to top
+ * Added: Prompt, Size, and Seed filters
  */
 
 let isPipelinePending = false;
@@ -22,7 +23,11 @@ function getFilterKey() {
         [...filters.scheduler].sort().join(','),
         [...filters.denoise].sort().join(','),
         [...filters.lora].sort().join(','),
-        [...filters.model].sort().join(',')
+        [...filters.model].sort().join(','),
+        [...filters.positive].sort().join(','),
+        [...filters.negative].sort().join(','),
+        [...filters.size].sort().join(','),
+        [...filters.seed].sort().join(',')
     ];
     return parts.join('|');
 }
@@ -33,7 +38,11 @@ function incrementalFilter(newItems) {
                        filters.scheduler.size > 0 || 
                        filters.denoise.size > 0 ||
                        filters.lora.size > 0 ||
-                       filters.model.size > 0;
+                       filters.model.size > 0 ||
+                       filters.positive.size > 0 ||
+                       filters.negative.size > 0 ||
+                       filters.size.size > 0 ||
+                       filters.seed.size > 0;
     
     if (!hasFilters) {
         return newItems.filter(d => !d.rejected);
@@ -47,6 +56,19 @@ function incrementalFilter(newItems) {
         if (filters.denoise.size > 0 && !filters.denoise.has(d.denoise)) return false;
         if (filters.lora.size > 0 && !filters.lora.has(d.lora)) return false;
         if (filters.model.size > 0 && !filters.model.has(d.model || meta.model || "Default")) return false;
+        
+        // Prompt filters
+        if (filters.positive.size > 0 && !filters.positive.has(d.positive || meta.positive || "")) return false;
+        if (filters.negative.size > 0 && !filters.negative.has(d.negative || meta.negative || "")) return false;
+        
+        // Size filter
+        if (filters.size.size > 0) {
+            const sizeStr = `${d.width}x${d.height}`;
+            if (!filters.size.has(sizeStr)) return false;
+        }
+        
+        // Seed filter
+        if (filters.seed.size > 0 && !filters.seed.has(d.seed)) return false;
         
         return true;
     });
@@ -82,6 +104,19 @@ function executePipeline() {
             if (filters.lora.size > 0 && !filters.lora.has(d.lora)) return false;
             if (filters.model.size > 0 && !filters.model.has(d.model || meta.model || "Default")) return false;
             
+            // Prompt filters
+            if (filters.positive.size > 0 && !filters.positive.has(d.positive || meta.positive || "")) return false;
+            if (filters.negative.size > 0 && !filters.negative.has(d.negative || meta.negative || "")) return false;
+            
+            // Size filter
+            if (filters.size.size > 0) {
+                const sizeStr = `${d.width}x${d.height}`;
+                if (!filters.size.has(sizeStr)) return false;
+            }
+            
+            // Seed filter
+            if (filters.seed.size > 0 && !filters.seed.has(d.seed)) return false;
+            
             return true;
         });
     } else {
@@ -89,12 +124,58 @@ function executePipeline() {
     }
 
     // Sort
-    if (currentSort === 'newest') {
-        processedData.sort((a, b) => b.id - a.id);
-    } else if (currentSort === 'fastest') {
-        processedData.sort((a, b) => a.duration - b.duration);
-    } else {
-        processedData.sort((a, b) => a.id - b.id);
+    switch (currentSort) {
+        case 'newest':
+            processedData.sort((a, b) => b.id - a.id);
+            break;
+        case 'fastest':
+            processedData.sort((a, b) => a.duration - b.duration);
+            break;
+        case 'favorited':
+            // Favorited first, then by ID
+            processedData.sort((a, b) => {
+                const aFav = a.favorited ? 1 : 0;
+                const bFav = b.favorited ? 1 : 0;
+                if (bFav !== aFav) return bFav - aFav;
+                return a.id - b.id;
+            });
+            break;
+        case 'model':
+            processedData.sort((a, b) => {
+                const aModel = (a.model || meta.model || "Default").toLowerCase();
+                const bModel = (b.model || meta.model || "Default").toLowerCase();
+                return aModel.localeCompare(bModel);
+            });
+            break;
+        case 'prompt':
+            processedData.sort((a, b) => {
+                const aPrompt = (a.positive || meta.positive || "").toLowerCase();
+                const bPrompt = (b.positive || meta.positive || "").toLowerCase();
+                return aPrompt.localeCompare(bPrompt);
+            });
+            break;
+        case 'cfg':
+            processedData.sort((a, b) => a.cfg - b.cfg);
+            break;
+        case 'denoise':
+            processedData.sort((a, b) => a.denoise - b.denoise);
+            break;
+        case 'lora':
+            processedData.sort((a, b) => {
+                const aLora = (a.lora || "None").toLowerCase();
+                const bLora = (b.lora || "None").toLowerCase();
+                return aLora.localeCompare(bLora);
+            });
+            break;
+        case 'sampler':
+            processedData.sort((a, b) => {
+                const aSampler = (a.sampler || "").toLowerCase();
+                const bSampler = (b.sampler || "").toLowerCase();
+                return aSampler.localeCompare(bSampler);
+            });
+            break;
+        default: // oldest
+            processedData.sort((a, b) => a.id - b.id);
     }
 
     const elapsed = performance.now() - startTime;
@@ -132,9 +213,56 @@ function processNewData(newItems) {
         // Append to end
         processedData.push(...filtered);
     } else {
-        // Fastest: need to re-sort
+        // All other sort modes: add items and re-sort entire array
         processedData.push(...filtered);
-        processedData.sort((a, b) => a.duration - b.duration);
+        
+        switch (currentSort) {
+            case 'fastest':
+                processedData.sort((a, b) => a.duration - b.duration);
+                break;
+            case 'favorited':
+                processedData.sort((a, b) => {
+                    const aFav = a.favorited ? 1 : 0;
+                    const bFav = b.favorited ? 1 : 0;
+                    if (bFav !== aFav) return bFav - aFav;
+                    return a.id - b.id;
+                });
+                break;
+            case 'model':
+                processedData.sort((a, b) => {
+                    const aModel = (a.model || meta.model || "Default").toLowerCase();
+                    const bModel = (b.model || meta.model || "Default").toLowerCase();
+                    return aModel.localeCompare(bModel);
+                });
+                break;
+            case 'prompt':
+                processedData.sort((a, b) => {
+                    const aPrompt = (a.positive || meta.positive || "").toLowerCase();
+                    const bPrompt = (b.positive || meta.positive || "").toLowerCase();
+                    return aPrompt.localeCompare(bPrompt);
+                });
+                break;
+            case 'cfg':
+                processedData.sort((a, b) => a.cfg - b.cfg);
+                break;
+            case 'denoise':
+                processedData.sort((a, b) => a.denoise - b.denoise);
+                break;
+            case 'lora':
+                processedData.sort((a, b) => {
+                    const aLora = (a.lora || "None").toLowerCase();
+                    const bLora = (b.lora || "None").toLowerCase();
+                    return aLora.localeCompare(bLora);
+                });
+                break;
+            case 'sampler':
+                processedData.sort((a, b) => {
+                    const aSampler = (a.sampler || "").toLowerCase();
+                    const bSampler = (b.sampler || "").toLowerCase();
+                    return aSampler.localeCompare(bSampler);
+                });
+                break;
+        }
     }
     
     console.log(`[Pipeline] Now have ${processedData.length} items`);
@@ -149,40 +277,31 @@ function processNewData(newItems) {
     }
 }
 
-// Toggle Sort Order with localStorage
-function toggleSort() {
-    const b = document.getElementById('sort-btn');
-    if (currentSort === 'oldest') { 
-        currentSort = 'newest'; 
-        b.innerText = "Sort: Newest"; 
-    } else if (currentSort === 'newest') { 
-        currentSort = 'fastest'; 
-        b.innerText = "Sort: Fastest"; 
-    } else { 
-        currentSort = 'oldest'; 
-        b.innerText = "Sort: Oldest"; 
-    }
+// Change Sort Order with dropdown
+function changeSort() {
+    const select = document.getElementById('sort-select');
+    if (!select) return;
+    
+    currentSort = select.value;
     
     // Save to localStorage
     localStorage.setItem('ultimate_grid_sort', currentSort);
     
+    console.log(`[Pipeline] Sort changed to: ${currentSort}`);
     updateDataPipeline();
 }
 
 // Load sort order from localStorage
 function loadSortPreference() {
     const savedSort = localStorage.getItem('ultimate_grid_sort');
-    if (savedSort && ['oldest', 'newest', 'fastest'].includes(savedSort)) {
+    const select = document.getElementById('sort-select');
+    
+    const validSortOptions = ['oldest', 'newest', 'fastest', 'favorited', 'model', 'prompt', 'cfg', 'denoise', 'lora', 'sampler'];
+    
+    if (savedSort && validSortOptions.includes(savedSort)) {
         currentSort = savedSort;
-        const b = document.getElementById('sort-btn');
-        if (b) {
-            if (currentSort === 'newest') {
-                b.innerText = "Sort: Newest";
-            } else if (currentSort === 'fastest') {
-                b.innerText = "Sort: Fastest";
-            } else {
-                b.innerText = "Sort: Oldest";
-            }
+        if (select) {
+            select.value = currentSort;
         }
         console.log(`[Pipeline] Loaded sort preference: ${currentSort}`);
     }
@@ -192,9 +311,21 @@ function loadSortPreference() {
 function updateFiltersForNewData(newItems) {
     let changed = false;
     
-    ['model', 'sampler', 'scheduler', 'denoise', 'lora'].forEach(key => {
+    ['model', 'sampler', 'scheduler', 'denoise', 'lora', 'positive', 'negative', 'size', 'seed'].forEach(key => {
         newItems.forEach(d => {
-            const val = (key === 'model') ? (d.model || meta.model || "Default") : d[key];
+            let val;
+            
+            if (key === 'model') {
+                val = d.model || meta.model || "Default";
+            } else if (key === 'positive') {
+                val = d.positive || meta.positive || "";
+            } else if (key === 'negative') {
+                val = d.negative || meta.negative || "";
+            } else if (key === 'size') {
+                val = `${d.width}x${d.height}`;
+            } else {
+                val = d[key];
+            }
             
             if (!filters[key].has(val)) {
                 changed = true;

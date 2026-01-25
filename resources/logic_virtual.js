@@ -23,7 +23,7 @@ let panOffsetY = 0;
 let itemHeight = 400;
 let itemWidth = 260;
 let columnsCount = 4;
-let rowHeight = 410;
+let rowHeight = 350;
 
 // --- LAZY LOADING ---
 const imageObserver = new IntersectionObserver((entries) => {
@@ -291,6 +291,7 @@ function resetZoom() {
     panOffsetX = 0;
     panOffsetY = 0;
     updateTransform();
+    autoFitZoom();
 }
 
 // --- AUTO-FIT ZOOM: Fit first row perfectly in viewport ---
@@ -317,7 +318,7 @@ function autoFitZoom() {
     panOffsetY = 20; // Small top margin
 
     updateTransform();
-    
+
     console.log(`[Grid] 🎯 Auto-fit first row: ${columnsCount} columns, scale: ${currentScale.toFixed(2)}`);
 }
 
@@ -331,7 +332,7 @@ function goToImage(imageNumber) {
     // Find item by index number (not ID)
     let targetItem = null;
     let targetIndex = -1;
-    
+
     for (let i = 0; i < processedData.length; i++) {
         const item = processedData[i];
         const itemIndex = idToIndexMap.get(item.id) || 0;
@@ -363,10 +364,10 @@ function goToImage(imageNumber) {
     panOffsetY = (viewportHeight / 2) - (y * currentScale) - ((rowHeight * currentScale) / 2);
 
     updateTransform();
-    
+
     // Make sure the item is rendered
     updateVisibleItems();
-    
+
     // Highlight the card briefly
     setTimeout(() => {
         const card = document.getElementById(`card-${targetItem.id}`);
@@ -374,7 +375,7 @@ function goToImage(imageNumber) {
             card.style.transition = 'box-shadow 0.3s, border-color 0.3s';
             card.style.boxShadow = '0 0 30px rgba(0, 209, 178, 0.8)';
             card.style.borderColor = 'var(--accent)';
-            
+
             setTimeout(() => {
                 card.style.boxShadow = '';
                 card.style.borderColor = '';
@@ -432,18 +433,18 @@ if (viewport) {
     viewport.addEventListener('contextmenu', (e) => {
         if (e.button === 1) e.preventDefault();
     });
-
     // --- TOUCH CONTROLS FOR MOBILE ---
     let touchStartDistance = 0;
     let touchStartScale = 1;
     let isTouching = false;
     let touchStartX = 0;
     let touchStartY = 0;
+    let wasZooming = false; // NEW: Track if we were just zooming
 
     viewport.addEventListener('touchstart', (e) => {
         viewport.focus();
         viewport.setAttribute('tabindex', '0');
-        
+
         if (e.touches.length === 1) {
             // Single touch - pan
             isTouching = true;
@@ -453,6 +454,7 @@ if (viewport) {
         } else if (e.touches.length === 2) {
             // Two fingers - pinch to zoom
             e.preventDefault();
+            wasZooming = true; // NEW: Mark that we're zooming
             const touch1 = e.touches[0];
             const touch2 = e.touches[1];
             touchStartDistance = Math.hypot(
@@ -465,6 +467,15 @@ if (viewport) {
 
     viewport.addEventListener('touchmove', (e) => {
         if (e.touches.length === 1 && isTouching) {
+            // NEW: If we just finished zooming, reset pan start position
+            if (wasZooming) {
+                const touch = e.touches[0];
+                touchStartX = touch.clientX - panOffsetX;
+                touchStartY = touch.clientY - panOffsetY;
+                wasZooming = false;
+                return; // Skip this frame to avoid jump
+            }
+
             // Single touch - pan
             e.preventDefault();
             const touch = e.touches[0];
@@ -476,31 +487,31 @@ if (viewport) {
             e.preventDefault();
             const touch1 = e.touches[0];
             const touch2 = e.touches[1];
-            
+
             // Calculate current distance between fingers
             const currentDistance = Math.hypot(
                 touch2.clientX - touch1.clientX,
                 touch2.clientY - touch1.clientY
             );
-            
+
             // Calculate center point between fingers
             const centerX = (touch1.clientX + touch2.clientX) / 2;
             const centerY = (touch1.clientY + touch2.clientY) / 2;
-            
+
             // Calculate new scale
             const scaleChange = currentDistance / touchStartDistance;
             const newScale = Math.max(MIN_SCALE, Math.min(MAX_SCALE, touchStartScale * scaleChange));
-            
+
             if (newScale !== currentScale) {
                 const rect = viewport.getBoundingClientRect();
                 const offsetX = centerX - rect.left;
                 const offsetY = centerY - rect.top;
-                
+
                 const scaleFactor = newScale / currentScale;
                 panOffsetX = offsetX - (offsetX - panOffsetX) * scaleFactor;
                 panOffsetY = offsetY - (offsetY - panOffsetY) * scaleFactor;
                 currentScale = newScale;
-                
+
                 updateTransform();
             }
         }
@@ -509,6 +520,7 @@ if (viewport) {
     viewport.addEventListener('touchend', (e) => {
         if (e.touches.length === 0) {
             isTouching = false;
+            wasZooming = false; // NEW: Reset zoom flag
         }
         if (e.touches.length < 2) {
             touchStartDistance = 0;
@@ -529,8 +541,8 @@ if (viewport) {
 function setupKeyboardShortcuts() {
     document.addEventListener('keydown', (e) => {
         if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
-        
-        switch(e.key) {
+
+        switch (e.key) {
             case '+':
             case '=':
                 e.preventDefault();
@@ -543,7 +555,8 @@ function setupKeyboardShortcuts() {
                 break;
             case '0':
                 e.preventDefault();
-                resetZoom();
+                // resetZoom();
+                autoFitZoom();
                 break;
             case 'f':
             case 'F':
@@ -599,6 +612,7 @@ function measureGridItem() {
 
 function recalcColumns() {
     recalculateLayout();
+    autoFitZoom();
 }
 
 function updateVirtualWindow(force = false) {
@@ -621,6 +635,26 @@ window.autoFitZoom = autoFitZoom;
 window.goToImage = goToImage;
 window.updateVisibleItems = updateVisibleItems;
 window.forceVisibleRangeUpdate = forceVisibleRangeUpdate;
+
+// --- MOBILE NAVIGATION FUNCTIONS ---
+function scrollDownOneRow() {
+    const rowScroll = rowHeight * currentScale;
+    panOffsetY -= rowScroll;
+    updateTransform();
+    updateVisibleItems();
+}
+
+function scrollUpOneRow() {
+    const rowScroll = rowHeight * currentScale;
+    panOffsetY += rowScroll;
+    updateTransform();
+    updateVisibleItems();
+}
+
+// Expose mobile navigation functions
+window.scrollDownOneRow = scrollDownOneRow;
+window.scrollUpOneRow = scrollUpOneRow;
+
 setupKeyboardShortcuts();
 
 // Set up Go To Image input handler
@@ -633,14 +667,18 @@ if (document.readyState === 'loading') {
 function setupGoToInput() {
     const gotoInput = document.getElementById('goto-input');
     if (gotoInput) {
+        gotoInput.addEventListener('blur', () => {
+            const imageNum = parseInt(gotoInput.value);
+            if (imageNum && imageNum > 0) {
+                goToImage(imageNum);
+                gotoInput.value = ''; // Clear after navigation
+            }
+        });
+        
+        // Still support Enter key for desktop users
         gotoInput.addEventListener('keydown', (e) => {
             if (e.key === 'Enter') {
-                const imageNum = parseInt(gotoInput.value);
-                if (imageNum && imageNum > 0) {
-                    goToImage(imageNum);
-                    gotoInput.value = ''; // Clear after navigation
-                    gotoInput.blur(); // Remove focus
-                }
+                gotoInput.blur(); // Trigger the blur event
             }
         });
     }

@@ -22,12 +22,7 @@ window.addEventListener('message', (event) => {
             fullManifest.items.unshift(...payload.new_items);
             activeData = fullManifest.items;
             
-            // Update metadata
-            if (payload.meta) {
-                meta = payload.meta;
-                const el = document.getElementById('meta-model');
-                if (el && meta.model) el.innerText = meta.model;
-            }
+
             
             // CRITICAL: Process only new items, don't refilter everything
             refreshIndices();
@@ -54,10 +49,7 @@ window.addEventListener('message', (event) => {
             activeData = fullManifest.items || [];
             meta = payload.meta || {};
             
-            if (meta.model) {
-                const el = document.getElementById('meta-model');
-                if (el) el.innerText = meta.model;
-            }
+
             
             refreshIndices();
             

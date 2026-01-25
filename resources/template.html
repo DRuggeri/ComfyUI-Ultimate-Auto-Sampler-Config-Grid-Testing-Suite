@@ -1,119 +1,206 @@
 <!DOCTYPE html>
 <html>
+
 <head>
-<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-<style>
-    /* INJECTED CSS */
-    __CSS_CONTENT__
-</style>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <style>
+        /* INJECTED CSS */
+        __CSS_CONTENT__
+    </style>
 </head>
+
 <body>
 
-<div id="header">
-    <div class="meta-box">
-        <span class="meta-label">Model</span>
-        <span id="meta-model" class="meta-val">-</span>
-    </div>
-    
-    <div style="width:1px; height:12px; background:#222;"></div>
+    <!-- COMPACT SINGLE-LINE HEADER -->
+    <div id="header">
+        <button class="session-popup-btn" onclick="toggleSessionPopup()" title="Session Management">
+            SESSION
+        </button>
+        <button class="filter-popup-btn" onclick="toggleFiltersPopup()" title="Open Filters & Info">
+            FILTERS
+        </button>
 
-    <div class="meta-box">
-        <span class="meta-label">Pos</span>
-        <span id="meta-pos" class="meta-val">-</span>
-    </div>
-    <div class="meta-box">
-        <span class="meta-label">Neg</span>
-        <span id="meta-neg" class="meta-val">-</span>
-    </div>
-    
-    <div style="flex-grow: 1;"></div>
+        <div style="flex-grow: 1;"></div>
 
-    <div class="meta-box" style="gap: 4px;">
-        <span class="meta-label">Go to #</span>
-        <input type="number" id="goto-input" min="1" placeholder="#" title="Jump to image number (press Enter)" style="width: 50px;">
-    </div>
+        <div class="meta-box">
+            <input type="text" inputmode="numeric" id="goto-input" min="1" placeholder="Go to # "
+                title="Jump to image number (press Enter)" style="width: 50px;">
+        </div>
 
-    <div class="zoom-controls">
+        <div class="meta-box">
+            <span class="meta-label">Cols</span>
+            <input  type="text" inputmode="numeric" id="col-count" min="0" placeholder="Auto" title="Set grid columns (0 = Auto)">
+        </div>
+
+        <div class="meta-box">
+            <span class="meta-label">Sort</span>
+            <select id="sort-select" class="sort-select" onchange="changeSort()">
+                <option value="oldest">Oldest</option>
+                <option value="newest">Newest</option>
+                <option value="fastest">Fastest</option>
+                <option value="favorited">Favorited</option>
+                <option value="model">Model</option>
+                <option value="prompt">Prompt</option>
+                <option value="cfg">CFG</option>
+                <option value="denoise">Denoise</option>
+                <option value="lora">LoRA</option>
+                <option value="sampler">Sampler</option>
+            </select>
+        </div>
+
         <button class="action-btn" onclick="resetZoom()" title="Reset Zoom (0)">⊙</button>
-        <button class="action-btn" onclick="zoomOut()" title="Zoom Out (-)">−</button>
-        <button class="action-btn" onclick="zoomIn()" title="Zoom In (+)">+</button>
+
+        <button class="fs-btn" onclick="toggleFullscreen()" title="Toggle Fullscreen">⛶</button>
     </div>
 
-    <div class="meta-box">
-        <span class="meta-label">Cols</span>
-        <input type="number" id="col-count" min="0" max="20" placeholder="Auto" title="Set grid columns (0 = Auto)">
-    </div>
-</div>
+    <!-- FILTERS POPUP PANEL -->
+    <div id="filters-popup" class="filters-popup" style="display: none;">
+        <div class="filters-popup-header">
+            <h3>Filters & Info</h3>
+            <button class="close-popup-btn" onclick="toggleFiltersPopup()">✕</button>
+        </div>
 
-<div id="toolbar">
-    <div class="session-ctrl">
-        <span style="color:#666; font-size:10px; align-self:center; margin-left:4px;">SESSION:</span>
-        <input id="session-input" class="session-input" type="text" value="__TITLE__" onchange="loadSession()">
-        <button class="action-btn" onclick="saveState()">SAVE</button>
-        <button class="action-btn" onclick="loadSession()">LOAD</button>
-    </div>
-    
-    <div class="filter-group"><span class="filter-label">Model</span> <div id="filter-model"></div></div>
-    <div class="filter-group"><span class="filter-label">Sampler</span> <div id="filter-sampler"></div></div>
-    <div class="filter-group"><span class="filter-label">Sched</span> <div id="filter-scheduler"></div></div>
-    <div class="filter-group"><span class="filter-label">Denoise</span> <div id="filter-denoise"></div></div>
-    <div class="filter-group"><span class="filter-label">LoRA</span> <div id="filter-lora"></div></div>
+        <div class="filters-popup-content">
+            <!-- Meta Info Section -->
 
-    <div class="toolbar-spacer"></div> 
 
-    <button id="sort-btn" class="action-btn" onclick="toggleSort()">Sort: Oldest</button>
-    <button class="fs-btn" onclick="toggleFullscreen()" title="Toggle Fullscreen">⛶</button>
-</div>
+            <!-- Filters Section -->
+            <div class="popup-section">
+                <div class="popup-section-title">FILTERS <span
+                        style="font-size: 9px; color: #555; font-weight: normal;">(Shift+Click to isolate)</span></div>
+                    <br />
+                <div class="filter-row">
+                    <span class="filter-label">Model</span>
+                    <div id="filter-model" class="filter-buttons-container"></div>
+                </div>
 
-<div id="viewport">
-    <div id="canvas">
-        <div class="grid" id="grid"></div>
-    </div>
-</div>
+                <div class="filter-row">
+                    <span class="filter-label">Positive Prompt</span>
+                    <div id="filter-positive" class="filter-buttons-container"></div>
+                </div>
 
-<div class="json-container">
-    <div id="json-bar-good" class="json-bar" title="ACCEPTED CONFIGS (Click to select)" onclick="selectJSON('json-bar-good')">[]</div>
-    <div id="json-bar-favorite" class="json-bar" title="FAVORITED CONFIGS (Click to select)" onclick="selectJSON('json-bar-favorite')">[]</div>
-    <div id="json-bar-bad" class="json-bar" title="REJECTED CONFIGS (Click to select)" onclick="selectJSON('json-bar-bad')">[]</div>
-</div>
+                <div class="filter-row">
+                    <span class="filter-label">Negative Prompt</span>
+                    <div id="filter-negative" class="filter-buttons-container"></div>
+                </div>
 
-<div id="modal">
-    <div class="modal-main">
-        <div class="preview"><img id="m-img" src=""></div>
-        <div class="controls">
-            <h2 style="margin:0 0 10px 0; color:#fff;">Revise & Generate</h2>
-            <div class="field"><label>Model</label><input id="f-model" disabled style="opacity:0.6;"></div>
-            <div class="field"><label>Seed</label><input id="f-seed" type="number" disabled style="opacity:0.6;"></div>
-            <div class="field"><label>Positive Prompt</label><textarea id="f-pos" rows="3" style="background:#000; border:1px solid #333; color:#fff; padding:8px; font-size:12px; font-family:inherit; resize:vertical;" disabled></textarea></div>
-            <div class="field"><label>Negative Prompt</label><textarea id="f-neg" rows="2" style="background:#000; border:1px solid #333; color:#fff; padding:8px; font-size:12px; font-family:inherit; resize:vertical;" disabled></textarea></div>
-            <div style="border-top:1px solid #333; margin:10px 0; padding-top:10px;">
-                <div style="font-size:11px; color:#666; margin-bottom:8px;">ADJUST PARAMETERS:</div>
-            </div>
-            <div class="field"><label>Sampler</label><input id="f-smp"></div>
-            <div class="field"><label>Scheduler</label><input id="f-sch"></div>
-            <div class="field"><label>Steps</label><input id="f-stp" type="number"></div>
-            <div class="field"><label>CFG</label><input id="f-cfg" type="number" step="0.5"></div>
-            <div class="field"><label>Denoise</label><input id="f-den" type="number" step="0.05"></div>
-            <div class="field"><label>LoRA</label><input id="f-lor"></div>
-            <div style="margin-top:auto; display:flex; gap:10px;">
-                <button class="action-btn" style="flex:2; background:var(--accent); color:#000; border:none; height:36px; font-weight:800" onclick="triggerGen()">GENERATE NEW</button>
-                <button class="action-btn" style="flex:1" onclick="closeM()">CANCEL</button>
+                <div class="filter-row">
+                    <span class="filter-label">Sampler</span>
+                    <div id="filter-sampler" class="filter-buttons-container"></div>
+                </div>
+
+                <div class="filter-row">
+                    <span class="filter-label">Scheduler</span>
+                    <div id="filter-scheduler" class="filter-buttons-container"></div>
+                </div>
+
+                <div class="filter-row">
+                    <span class="filter-label">Denoise</span>
+                    <div id="filter-denoise" class="filter-buttons-container"></div>
+                </div>
+
+                <div class="filter-row">
+                    <span class="filter-label">LoRA</span>
+                    <div id="filter-lora" class="filter-buttons-container"></div>
+                </div>
+
+                <div class="filter-row">
+                    <span class="filter-label">Size</span>
+                    <div id="filter-size" class="filter-buttons-container"></div>
+                </div>
+
+                <div class="filter-row">
+                    <span class="filter-label">Seed</span>
+                    <div id="filter-seed" class="filter-buttons-container"></div>
+                </div>
             </div>
         </div>
     </div>
-    <div class="reel-wrap">
-        <div style="font-size:10px; font-weight:bold; color:#666;">RELATED VARIANTS</div>
-        <div class="reel" id="reel"></div>
+
+    <!-- Overlay for popup -->
+    <div id="filters-overlay" class="filters-overlay" onclick="toggleFiltersPopup()" style="display: none;"></div>
+
+
+    <!-- SESSION POPUP PANEL -->
+    <div id="session-popup" class="session-dropdown" style="display: none;">
+        <div class="session-dropdown-content">
+            <input id="session-input" class="session-name-input" type="text" value="__TITLE__"
+                placeholder="Session name...">
+            <div class="session-actions">
+                <button class="session-action-btn save-btn" onclick="saveState()">SAVE</button>
+                <button class="session-action-btn load-btn" onclick="loadSession()">LOAD</button>
+            </div>
+        </div>
     </div>
-</div>
 
-<script>
-    // INJECTED DATA
-    const TARGET_NODE_ID = "__NODE_ID__"; 
-    let fullManifest = __JSON_DATA__;
+    <div id="viewport">
+        <div id="canvas">
+            <div class="grid" id="grid"></div>
+        </div>
+    </div>
 
-    // INJECTED LOGIC
-    __JS_CONTENT__
-</script>
+    <!-- MOBILE NAVIGATION BUTTONS -->
+    <button id="mobile-nav-up" class="mobile-nav-btn mobile-nav-up" onclick="scrollUpOneRow()" title="Scroll Up">
+        ▲
+    </button>
+    <button id="mobile-nav-down" class="mobile-nav-btn mobile-nav-down" onclick="scrollDownOneRow()" title="Scroll Down">
+        ▼
+    </button>
+
+    <div class="json-container">
+        <div id="json-bar-good" class="json-bar" title="ACCEPTED CONFIGS (Click to select)"
+            onclick="selectJSON('json-bar-good')">[]</div>
+        <div id="json-bar-favorite" class="json-bar" title="FAVORITED CONFIGS (Click to select)"
+            onclick="selectJSON('json-bar-favorite')">[]</div>
+        <div id="json-bar-bad" class="json-bar" title="REJECTED CONFIGS (Click to select)"
+            onclick="selectJSON('json-bar-bad')">[]</div>
+    </div>
+
+    <div id="modal">
+        <div class="modal-main">
+            <div class="preview"><img id="m-img" src=""></div>
+            <div class="controls">
+                <h2 style="margin:0 0 10px 0; color:#fff;">Revise & Generate</h2>
+                <div class="field"><label>Model</label><input id="f-model" disabled style="opacity:0.6;"></div>
+                <div class="field"><label>Seed</label><input id="f-seed" type="number" disabled style="opacity:0.6;">
+                </div>
+                <div class="field"><label>Positive Prompt</label><textarea id="f-pos" rows="3"
+                        style="background:#000; border:1px solid #333; color:#fff; padding:8px; font-size:12px; font-family:inherit; resize:vertical;"></textarea>
+                </div>
+                <div class="field"><label>Negative Prompt</label><textarea id="f-neg" rows="2"
+                        style="background:#000; border:1px solid #333; color:#fff; padding:8px; font-size:12px; font-family:inherit; resize:vertical;"></textarea>
+                </div>
+                <div style="border-top:1px solid #333; margin:10px 0; padding-top:10px;">
+                    <div style="font-size:11px; color:#666; margin-bottom:8px;">ADJUST PARAMETERS:</div>
+                </div>
+                <div class="field"><label>Sampler</label><input id="f-smp"></div>
+                <div class="field"><label>Scheduler</label><input id="f-sch"></div>
+                <div class="field"><label>Steps</label><input id="f-stp" type="number"></div>
+                <div class="field"><label>CFG</label><input id="f-cfg" type="number" step="0.5"></div>
+                <div class="field"><label>Denoise</label><input id="f-den" type="number" step="0.05"></div>
+                <div class="field"><label>LoRA</label><input id="f-lor"></div>
+                <div style="margin-top:auto; display:flex; gap:10px;">
+                    <button class="action-btn"
+                        style="flex:2; background:var(--accent); color:#000; border:none; height:36px; font-weight:800"
+                        onclick="triggerGen(this)">GENERATE NEW</button>
+                    <button class="action-btn" style="flex:1" onclick="closeM()">CANCEL</button>
+                </div>
+            </div>
+        </div>
+        <div class="reel-wrap">
+            <div style="font-size:10px; font-weight:bold; color:#666;">RELATED VARIANTS</div>
+            <div class="reel" id="reel"></div>
+        </div>
+    </div>
+
+    <script>
+        // INJECTED DATA
+        const TARGET_NODE_ID = "__NODE_ID__";
+        let fullManifest = __JSON_DATA__;
+
+        // INJECTED LOGIC
+        __JS_CONTENT__
+    </script>
 </body>
+
 </html>

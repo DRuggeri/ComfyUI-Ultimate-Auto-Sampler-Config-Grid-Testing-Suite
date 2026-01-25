@@ -77,7 +77,7 @@ function selectJSON(id) {
 }
 
 // Trigger generation from Modal
-async function triggerGen() {
+async function triggerGen(btn) {
     const newCfg = [{
         sampler: document.getElementById('f-smp').value,
         scheduler: document.getElementById('f-sch').value,
@@ -97,7 +97,7 @@ async function triggerGen() {
             if (widget) {
                 widget.value = jsonStr;
                 window.parent.app.queuePrompt(0);
-                const b = event.target; b.innerText = "QUEUED!";
+                const b = btn; b.innerText = "QUEUED!";
                 setTimeout(() => { closeM(); b.innerText = "GENERATE NEW"; }, 1000);
             }
         }
