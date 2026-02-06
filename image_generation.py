@@ -201,7 +201,7 @@ def print_generation_progress(current_job, total_jobs, config, width, height, du
     print(f"{'='*80}\n")
 
 
-def flush_batch_with_vae(pending_batch, vae, img_dir, existing_data, session_name):
+def flush_batch_with_vae(pending_batch, vae, img_dir, existing_data, session_name, manifest_path=None, unique_id=None):
     """
     Flush a batch of latents by decoding them with VAE and saving.
     
@@ -211,6 +211,8 @@ def flush_batch_with_vae(pending_batch, vae, img_dir, existing_data, session_nam
         img_dir: Image output directory
         existing_data: Manifest data dict
         session_name: Session name for filenames
+        manifest_path: Path to manifest.json file (optional, enables disk syncing)
+        unique_id: Node unique ID for dashboard updates (optional, enables dashboard updates)
         
     Returns:
         int: Number of images saved
@@ -218,46 +220,98 @@ def flush_batch_with_vae(pending_batch, vae, img_dir, existing_data, session_nam
     if not pending_batch:
         return 0
     
+    import random
+    
     saved_count = 0
     
     for latent_samples, meta in pending_batch:
         # Decode latent to image
         image = decode_latent_with_vae(vae, latent_samples)
         
-        # Generate filename
-        timestamp = int(time.time() * 1000)
-        filename = f"{session_name}_{timestamp}_{meta['seed']}.png"
+        # Generate ID using same format as remote_vae
+        ts = int(time.time() * 100000) + random.randint(0, 1000)
+        meta["id"] = ts
         
-        # Save image
-        filepath = save_image_to_disk(image, img_dir, filename)
+        # Generate filename using webp format (like remote_vae)
+        filename = f"img_{meta['id']}.webp"
         
-        # Create manifest entry
-        manifest_entry = {
-            "id": f"{session_name}_{timestamp}_{meta['seed']}",
+        # Save image as webp
+        filepath = os.path.join(img_dir, filename)
+        image.save(filepath, quality=80)
+        
+        # Normalize denoise to int if it's 1.0 (like remote_vae)
+        if meta.get("denoise") == 1.0:
+            meta["denoise"] = 1
+        
+        # Update meta with file path and rejected flag
+        meta.update({
             "file": f"/view?filename={filename}&type=output&subfolder=benchmarks/{session_name}/images",
-            "width": meta["width"],
-            "height": meta["height"],
-            "sampler": meta["sampler"],
-            "scheduler": meta["scheduler"],
-            "steps": meta["steps"],
-            "cfg": meta["cfg"],
-            "seed": meta["seed"],
-            "denoise": meta["denoise"],
-            "positive": meta["positive"],
-            "negative": meta["negative"],
-            "lora": meta["lora"],
-            "model": meta["model"],
-            "duration": meta["duration"],
-            "batch_idx": meta["batch_idx"]
-        }
+            "rejected": False
+        })
         
-        # Add conditioning hashes if present
-        if "conditioning_pos_hash" in meta:
-            manifest_entry["conditioning_pos_hash"] = meta["conditioning_pos_hash"]
-        if "conditioning_neg_hash" in meta:
-            manifest_entry["conditioning_neg_hash"] = meta["conditioning_neg_hash"]
+        # Update manifest - insert at beginning (like remote_vae)
+        existing_data["items"].insert(0, meta)
         
-        existing_data["items"].append(manifest_entry)
+        # Sync with disk manifest to preserve tags (like remote_vae) - only if manifest_path provided
+        if manifest_path and os.path.exists(manifest_path):
+            try:
+                with open(manifest_path, "r") as f:
+                    disk_manifest = json.load(f)
+                
+                # Create a lookup map for items currently in memory
+                memory_items_map = {
+                    i.get("id"): i 
+                    for i in existing_data.get("items", []) 
+                    if "id" in i
+                }
+
+                # Check every item on disk. If it exists in memory, copy the tags over.
+                for disk_item in disk_manifest.get("items", []):
+                    d_id = disk_item.get("id")
+                    if d_id and d_id in memory_items_map:
+                        local_item = memory_items_map[d_id]
+                        
+                        # PRESERVE TAGS: Copy these keys from disk to memory
+                        if "favorited" in disk_item:
+                            local_item["favorited"] = disk_item["favorited"]
+                        if "rejected" in disk_item:
+                            local_item["rejected"] = disk_item["rejected"]
+
+            except Exception as e:
+                print(f"[GridTester] ⚠️ Error syncing with disk manifest: {e}")
+
+        # Save manifest to disk (like remote_vae) - only if manifest_path provided
+        if manifest_path:
+            with open(manifest_path, "w") as f:
+                json.dump(existing_data, f, indent=4)
+        
+        # Send update to dashboard (like remote_vae) - only if unique_id provided
+        if unique_id:
+            try:
+                from server import PromptServer
+                if PromptServer:
+                    # Get meta, use empty dict if not present
+                    manifest_meta = existing_data.get("meta", {})
+                    
+                    # Debug: print what we're sending
+                    print(f"[GridTester] 📡 Sending dashboard update for node: {unique_id}")
+                    
+                    PromptServer.instance.send_sync("ultimate_grid.update", {
+                        "node": unique_id,
+                        "session_name": session_name,
+                        "new_items": [meta],
+                        "meta": manifest_meta
+                    })
+                    print(f"[GridTester] ✅ Dashboard update sent successfully")
+            except (ImportError, KeyError) as e:
+                # Silently ignore dashboard update errors
+                print(f"[GridTester] ⚠️ Dashboard update error (silently ignored): {e}")
+                pass
+            except Exception as e:
+                print(f"[GridTester] ⚠️ Unexpected dashboard error: {e}")
+                import traceback
+                traceback.print_exc()
+        
         saved_count += 1
     
     print(f"[GridTester] 💾 Flushed {saved_count} images")

@@ -347,7 +347,7 @@ def run_generation_loop(
                         if use_remote_vae:
                             flush_batch_with_remote_vae(pending_batch, remote_vae_worker, existing_data, session_name)
                         else:
-                            flush_batch_with_vae(pending_batch, loaded_vae, paths["images"], existing_data, session_name)
+                            flush_batch_with_vae(pending_batch, loaded_vae, paths["images"], existing_data, session_name, paths["manifest"], unique_id)
                         pending_batch = []
                     
                     # Wait for remote VAE if active
@@ -356,6 +356,16 @@ def run_generation_loop(
                         remote_vae_worker.wait_completion()
                         remote_vae_worker.stop()
                     
+                            
+                    existing_data["meta"] = {
+                        "positive": positive_text,  # Base positive prompt
+                        "negative": negative_text,  # Base negative prompt
+                        "model": ckpt_name,         # Base model
+                        "seed": seed,               # Base seed
+                        "vae_batch_size": vae_batch_size,
+                        "configs_json": configs_json,
+                        "resolutions_json": resolutions_json
+                    }
                     # Save manifest
                     save_manifest(paths["manifest"], existing_data)
                     
@@ -586,7 +596,7 @@ def run_generation_loop(
                         if use_remote_vae:
                             flush_batch_with_remote_vae(pending_batch, remote_vae_worker, existing_data, session_name)
                         else:
-                            flush_batch_with_vae(pending_batch, loaded_vae, paths["images"], existing_data, session_name)
+                            flush_batch_with_vae(pending_batch, loaded_vae, paths["images"], existing_data, session_name, paths["manifest"], unique_id)
                         pending_batch = []
                     
                     # Wait for remote VAE
@@ -594,7 +604,16 @@ def run_generation_loop(
                         print(f"[GridTester] 🌐 Waiting for remote VAE...")
                         remote_vae_worker.wait_completion()
                         remote_vae_worker.stop()
-                    
+                            
+                    existing_data["meta"] = {
+                        "positive": positive_text,  # Base positive prompt
+                        "negative": negative_text,  # Base negative prompt
+                        "model": ckpt_name,         # Base model
+                        "seed": seed,               # Base seed
+                        "vae_batch_size": vae_batch_size,
+                        "configs_json": configs_json,
+                        "resolutions_json": resolutions_json
+                    }
                     # Save manifest
                     save_manifest(paths["manifest"], existing_data)
                     
@@ -636,7 +655,7 @@ def run_generation_loop(
                 if use_remote_vae:
                     flush_batch_with_remote_vae(pending_batch, remote_vae_worker, existing_data, session_name)
                 else:
-                    flush_batch_with_vae(pending_batch, loaded_vae, paths["images"], existing_data, session_name)
+                    flush_batch_with_vae(pending_batch, loaded_vae, paths["images"], existing_data, session_name, paths["manifest"], unique_id)
                 pending_batch = []
     
     # ==== FINALIZATION ====
@@ -645,7 +664,7 @@ def run_generation_loop(
         if use_remote_vae:
             flush_batch_with_remote_vae(pending_batch, remote_vae_worker, existing_data, session_name)
         else:
-            flush_batch_with_vae(pending_batch, loaded_vae, paths["images"], existing_data, session_name)
+            flush_batch_with_vae(pending_batch, loaded_vae, paths["images"], existing_data, session_name, paths["manifest"], unique_id)
     
     # Wait for remote VAE
     if remote_vae_worker:
@@ -658,7 +677,16 @@ def run_generation_loop(
     
     if skipped_count > 0:
         print(f"[GridTester] ⏭️ Skipped {skipped_count} configs")
-    
+
+    existing_data["meta"] = {
+        "positive": positive_text,  # Base positive prompt
+        "negative": negative_text,  # Base negative prompt
+        "model": ckpt_name,         # Base model
+        "seed": seed,               # Base seed
+        "vae_batch_size": vae_batch_size,
+        "configs_json": configs_json,
+        "resolutions_json": resolutions_json
+    }
     # Save manifest
     save_manifest(paths["manifest"], existing_data)
     
