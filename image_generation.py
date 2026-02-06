@@ -1,0 +1,303 @@
+"""
+Image Generation and Sampling Module
+Handles the core image generation, decoding, and batch management
+"""
+
+import time
+import os
+import re
+import json
+import torch
+import nodes
+import numpy as np
+from PIL import Image
+
+
+def generate_image(
+    patched_model,
+    seed,
+    steps,
+    cfg,
+    sampler_name,
+    scheduler,
+    positive_conditioning,
+    negative_conditioning,
+    latent_input,
+    denoise
+):
+    """
+    Generate a single image using ComfyUI's KSampler.
+    
+    Args:
+        patched_model: Model (potentially with LoRAs applied)
+        seed: Random seed
+        steps: Number of sampling steps
+        cfg: CFG scale
+        sampler_name: Sampler name (e.g., "euler", "dpmpp_2m")
+        scheduler: Scheduler name (e.g., "normal", "karras")
+        positive_conditioning: Positive conditioning tensor
+        negative_conditioning: Negative conditioning tensor
+        latent_input: Input latent tensor dict
+        denoise: Denoise strength (0.0-1.0)
+        
+    Returns:
+        tuple: (result_latent_dict, generation_duration_seconds)
+    """
+    t0 = time.time()
+    
+    result = nodes.common_ksampler(
+        model=patched_model,
+        seed=seed,
+        steps=steps,
+        cfg=cfg,
+        sampler_name=sampler_name,
+        scheduler=scheduler,
+        positive=positive_conditioning,
+        negative=negative_conditioning,
+        latent=latent_input,
+        denoise=denoise
+    )
+    
+    duration = round(time.time() - t0, 3)
+    
+    return result[0], duration
+
+
+def decode_latent_with_vae(vae, latent_samples):
+    """
+    Decode latent samples to pixel space using VAE.
+    
+    Args:
+        vae: VAE model
+        latent_samples: Latent tensor to decode
+        
+    Returns:
+        PIL.Image: Decoded image
+    """
+    decoded = vae.decode(latent_samples)
+    
+    # Convert to PIL Image
+    img_np = decoded.cpu().numpy()
+    img_np = np.clip(img_np[0] * 255, 0, 255).astype(np.uint8)
+    
+    # Handle different channel orders
+    if img_np.shape[0] == 3:  # CHW format
+        img_np = np.transpose(img_np, (1, 2, 0))
+    
+    return Image.fromarray(img_np)
+
+
+def save_image_to_disk(image, output_dir, filename):
+    """
+    Save PIL Image to disk.
+    
+    Args:
+        image: PIL.Image object
+        output_dir: Directory to save in
+        filename: Filename (including extension)
+        
+    Returns:
+        str: Full path to saved image
+    """
+    os.makedirs(output_dir, exist_ok=True)
+    filepath = os.path.join(output_dir, filename)
+    image.save(filepath)
+    return filepath
+
+
+def create_image_metadata(config, width, height, duration, seed, batch_idx, actual_positive_prompt, actual_negative_prompt):
+    """
+    Create metadata dictionary for an image.
+    
+    Args:
+        config: Configuration dictionary
+        width: Image width
+        height: Image height
+        duration: Generation duration in seconds
+        seed: Random seed used
+        batch_idx: Batch index
+        actual_positive_prompt: Final positive prompt (with triggers)
+        actual_negative_prompt: Final negative prompt
+        
+    Returns:
+        dict: Metadata dictionary
+    """
+    meta = config.copy()
+    meta.update({
+        "width": width,
+        "height": height,
+        "duration": duration,
+        "seed": seed,
+        "batch_idx": batch_idx,
+        "positive": actual_positive_prompt,
+        "negative": actual_negative_prompt
+    })
+    
+    return meta
+
+
+def calculate_eta(job_durations, current_job, total_jobs):
+    """
+    Calculate ETA based on average job duration.
+    
+    Args:
+        job_durations: List of previous job durations
+        current_job: Current job number (1-indexed)
+        total_jobs: Total number of jobs
+        
+    Returns:
+        dict: Dictionary with eta info (hours, minutes, seconds, finish_time, finish_formatted)
+    """
+    if not job_durations:
+        return None
+    
+    avg_duration = sum(job_durations) / len(job_durations)
+    remaining_jobs = total_jobs - current_job
+    estimated_seconds = avg_duration * remaining_jobs
+    
+    eta_hours = int(estimated_seconds // 3600)
+    eta_minutes = int((estimated_seconds % 3600) // 60)
+    eta_seconds = int(estimated_seconds % 60)
+    eta_finish_time = time.time() + estimated_seconds
+    eta_finish_formatted = time.strftime("%H:%M:%S", time.localtime(eta_finish_time))
+    
+    return {
+        "hours": eta_hours,
+        "minutes": eta_minutes,
+        "seconds": eta_seconds,
+        "finish_time": eta_finish_time,
+        "finish_formatted": eta_finish_formatted,
+        "avg_duration": avg_duration
+    }
+
+
+def print_generation_progress(current_job, total_jobs, config, width, height, duration, eta_info):
+    """
+    Print progress information for current generation.
+    
+    Args:
+        current_job: Current job number
+        total_jobs: Total jobs
+        config: Configuration dict
+        width: Image width
+        height: Image height
+        duration: Generation duration
+        eta_info: ETA info dict from calculate_eta()
+    """
+    progress_pct = int((current_job / total_jobs) * 100)
+    
+    print(f"\n{'='*80}")
+    print(f"[GridTester] 📊 Job {current_job}/{total_jobs} ({progress_pct}%)")
+    print(f"[GridTester] 🎨 {config['sampler']} @ {config['steps']} steps | {width}x{height}")
+    print(f"[GridTester] ⏱️  {duration:.1f}s | Avg: {eta_info['avg_duration']:.1f}s/job")
+    
+    if eta_info['hours'] > 0:
+        print(f"[GridTester] 🕒 ETA: {eta_info['hours']}h {eta_info['minutes']}m (finish ~{eta_info['finish_formatted']})")
+    elif eta_info['minutes'] > 0:
+        print(f"[GridTester] 🕒 ETA: {eta_info['minutes']}m {eta_info['seconds']}s (finish ~{eta_info['finish_formatted']})")
+    else:
+        print(f"[GridTester] 🕒 ETA: {eta_info['seconds']}s (finish ~{eta_info['finish_formatted']})")
+    
+    print(f"{'='*80}\n")
+
+
+def flush_batch_with_vae(pending_batch, vae, img_dir, existing_data, session_name):
+    """
+    Flush a batch of latents by decoding them with VAE and saving.
+    
+    Args:
+        pending_batch: List of (latent_samples, metadata) tuples
+        vae: VAE model for decoding
+        img_dir: Image output directory
+        existing_data: Manifest data dict
+        session_name: Session name for filenames
+        
+    Returns:
+        int: Number of images saved
+    """
+    if not pending_batch:
+        return 0
+    
+    saved_count = 0
+    
+    for latent_samples, meta in pending_batch:
+        # Decode latent to image
+        image = decode_latent_with_vae(vae, latent_samples)
+        
+        # Generate filename
+        timestamp = int(time.time() * 1000)
+        filename = f"{session_name}_{timestamp}_{meta['seed']}.png"
+        
+        # Save image
+        filepath = save_image_to_disk(image, img_dir, filename)
+        
+        # Create manifest entry
+        manifest_entry = {
+            "id": f"{session_name}_{timestamp}_{meta['seed']}",
+            "file": f"./images/{filename}",
+            "width": meta["width"],
+            "height": meta["height"],
+            "sampler": meta["sampler"],
+            "scheduler": meta["scheduler"],
+            "steps": meta["steps"],
+            "cfg": meta["cfg"],
+            "seed": meta["seed"],
+            "denoise": meta["denoise"],
+            "positive": meta["positive"],
+            "negative": meta["negative"],
+            "lora": meta["lora"],
+            "model": meta["model"],
+            "duration": meta["duration"],
+            "batch_idx": meta["batch_idx"]
+        }
+        
+        # Add conditioning hashes if present
+        if "conditioning_pos_hash" in meta:
+            manifest_entry["conditioning_pos_hash"] = meta["conditioning_pos_hash"]
+        if "conditioning_neg_hash" in meta:
+            manifest_entry["conditioning_neg_hash"] = meta["conditioning_neg_hash"]
+        
+        existing_data["items"].append(manifest_entry)
+        saved_count += 1
+    
+    print(f"[GridTester] 💾 Flushed {saved_count} images")
+    return saved_count
+
+
+def flush_batch_with_remote_vae(pending_batch, remote_vae_worker, existing_data, session_name):
+    """
+    Flush a batch of latents by sending them to remote VAE worker.
+    
+    Args:
+        pending_batch: List of (latent_samples, metadata) tuples
+        remote_vae_worker: RemoteVAEDecodeWorker instance
+        existing_data: Manifest data dict (not used - worker handles manifest)
+        session_name: Session name for filenames
+        
+    Returns:
+        int: Number of images queued
+    """
+    if not pending_batch:
+        return 0
+    
+    import random
+    
+    queued_count = 0
+    
+    for latent_samples, meta in pending_batch:
+        # Generate ID using same format as old code
+        ts = int(time.time() * 100000) + random.randint(0, 1000)
+        meta["id"] = ts  # ← Set ID directly on meta dict
+        
+        # Queue the job - worker will create manifest entry
+        # Pass the original meta dict, not a new one
+        remote_vae_worker.add_job(
+            latent_samples, 
+            meta,  # ← Pass original meta, not a new dict
+            meta["height"],
+            meta["width"]
+        )
+        queued_count += 1
+    
+    print(f"[GridTester] 🌐 Queued {queued_count} images for remote VAE decoding")
+    return queued_count

@@ -5,7 +5,7 @@ app.registerExtension({
     name: "UltimateGrid.Dashboard",
 
     setup(app) {
-        // 1. INJECT CSS
+        // 1. INJECT CSS (once only)
         if (!document.getElementById('ultimate-grid-css')) {
             const style = document.createElement('style');
             style.id = 'ultimate-grid-css';
@@ -21,122 +21,155 @@ app.registerExtension({
             document.head.appendChild(style);
         }
 
-        // 2. LIVE UPDATE LISTENER (FIXED)
+        // 2. LIVE UPDATE LISTENER (SINGLETON - only register once)
+        if (!window.__ultimateGridUpdateListenerInstalled) {
+            api.addEventListener("ultimate_grid.update", (event) => {
+                const payload = event.detail;
+                const { session_name, node } = payload;
 
-        // 2. LIVE UPDATE LISTENER - AUTO-LOAD SESSION
-        api.addEventListener("ultimate_grid.update", (event) => {
-            const payload = event.detail;
-            const { session_name, node } = payload;  // node is the SAMPLER node ID
+                console.log(`[UltimateGrid] Update received for: ${session_name}`);
 
-            console.log(`[UltimateGrid] Received update for session: ${session_name}`);
+                // Find all dashboard nodes
+                const dashboardNodes = app.graph._nodes.filter(n => n.type === "UltimateGridDashboard");
 
-            // Find all dashboard nodes
-            const nodes = app.graph._nodes.filter(n => n.type === "UltimateGridDashboard");
+                dashboardNodes.forEach(dashboardNode => {
+                    const sessionWidget = dashboardNode.widgets.find(w => w.name === "session_name");
 
-            nodes.forEach(dashboardNode => {
-                const sessionWidget = dashboardNode.widgets.find(w => w.name === "session_name");
-
-                if (!sessionWidget) {
-                    console.warn(`[UltimateGrid] Dashboard node ${dashboardNode.id} has no session_name widget`);
-                    return;
-                }
-
-                const currentSessionName = sessionWidget.value;
-
-                // CASE 1: Session matches and dashboard is loaded → send update
-                if (currentSessionName === session_name &&
-                    dashboardNode.loaded_session === session_name &&
-                    dashboardNode.iframe &&
-                    dashboardNode.iframe.contentWindow) {
-
-                    console.log(`[UltimateGrid] Sending live update to loaded dashboard ${dashboardNode.id}`);
-                    dashboardNode.iframe.contentWindow.postMessage({
-                        type: 'update_data',
-                        data: payload
-                    }, '*');
-                }
-
-                // CASE 2: Session matches but dashboard not loaded → auto-load
-                else if (currentSessionName === session_name &&
-                    dashboardNode.loaded_session !== session_name) {
-
-                    console.log(`[UltimateGrid] Auto-loading session ${session_name} in dashboard ${dashboardNode.id}`);
-                    if (dashboardNode.forceLoadSession) {
-                        dashboardNode.forceLoadSession(session_name);
+                    if (!sessionWidget) {
+                        console.warn(`[UltimateGrid] Dashboard ${dashboardNode.id} missing session_name widget`);
+                        return;
                     }
-                }
 
-                // CASE 3: Session doesn't match but dashboard is connected to this sampler
-                // This happens when dashboard is blank/empty but connected
-                else if (currentSessionName !== session_name) {
-                    // Check if this dashboard is connected to the sampler node
-                    // by looking at node connections
-                    const isConnected = dashboardNode.inputs?.some(input => {
-                        const link = app.graph.links[input.link];
-                        return link && link.origin_id === parseInt(node);
-                    });
+                    const currentSessionName = sessionWidget.value;
 
-                    if (isConnected) {
-                        console.log(`[UltimateGrid] Dashboard ${dashboardNode.id} is connected to sampler - updating session name to ${session_name}`);
+                    // CASE 1: Session matches and dashboard is loaded → send live update
+                    if (currentSessionName === session_name &&
+                        dashboardNode.loaded_session === session_name &&
+                        dashboardNode.iframe?.contentWindow) {
 
-                        // Update the session_name widget
-                        sessionWidget.value = session_name;
+                        console.log(`[UltimateGrid] 📤 Live update → Dashboard ${dashboardNode.id}`);
 
-                        // Auto-load the session
+                        try {
+                            dashboardNode.iframe.contentWindow.postMessage({
+                                type: 'update_data',
+                                data: payload
+                            }, '*');
+                        } catch (e) {
+                            console.error('[UltimateGrid] Failed to send message:', e);
+                        }
+                    }
+
+                    // CASE 2: Session matches but not loaded → auto-load
+                    else if (currentSessionName === session_name &&
+                        dashboardNode.loaded_session !== session_name) {
+
+                        console.log(`[UltimateGrid] 🔄 Auto-loading session: ${session_name}`);
+
                         if (dashboardNode.forceLoadSession) {
                             dashboardNode.forceLoadSession(session_name);
                         }
                     }
-                }
+
+                    // CASE 3: Dashboard connected to sampler but different session → update
+                    else if (currentSessionName !== session_name) {
+                        const isConnected = dashboardNode.inputs?.some(input => {
+                            const link = app.graph.links[input.link];
+                            return link && link.origin_id === parseInt(node);
+                        });
+
+                        if (isConnected) {
+                            console.log(`[UltimateGrid] 🔗 Connected dashboard → Update to: ${session_name}`);
+
+                            sessionWidget.value = session_name;
+
+                            if (dashboardNode.forceLoadSession) {
+                                dashboardNode.forceLoadSession(session_name);
+                            }
+                        }
+                    }
+                });
             });
-        });
-        ;
 
-        // 3. FULLSCREEN LISTENER
-        window.addEventListener("message", (event) => {
-            if (event.data && event.data.type === 'toggle_fullscreen') {
-                const nodeId = parseInt(event.data.node_id);
-                const graphNode = app.graph.getNodeById(nodeId);
+            window.__ultimateGridUpdateListenerInstalled = true;
+            console.log('[UltimateGrid] ✅ Update listener installed');
+        }
 
-                if (graphNode && graphNode.iframe) {
+        // 3. FULLSCREEN LISTENER (SINGLETON - only register once)
+        if (!window.__ultimateGridFullscreenListenerInstalled) {
+            window.addEventListener("message", (event) => {
+                if (event.data?.type === 'toggle_fullscreen') {
+                    const nodeId = parseInt(event.data.node_id);
+                    const graphNode = app.graph.getNodeById(nodeId);
+
+                    if (!graphNode?.iframe) {
+                        console.warn('[UltimateGrid] Fullscreen toggle failed: node or iframe not found');
+                        return;
+                    }
+
                     const el = graphNode.iframe;
 
+                    // Exit fullscreen
                     if (el.classList.contains('dashboard-fullscreen')) {
                         el.classList.remove('dashboard-fullscreen');
-                        if (graphNode.fs_placeholder && graphNode.fs_placeholder.parentNode) {
+
+                        // Restore to original position
+                        if (graphNode.fs_placeholder?.parentNode) {
                             graphNode.fs_placeholder.parentNode.insertBefore(el, graphNode.fs_placeholder);
                             graphNode.fs_placeholder.remove();
                         }
+
                         graphNode.fs_placeholder = null;
                         el.style.width = (graphNode.size[0] - 20) + "px";
                         el.style.height = "100%";
-                    } else {
-                        const ph = document.createElement("div");
-                        ph.style.display = "none";
-                        graphNode.fs_placeholder = ph;
-                        if (el.parentNode) el.parentNode.insertBefore(ph, el);
+
+                        console.log('[UltimateGrid] ↙️ Exited fullscreen');
+                    }
+                    // Enter fullscreen
+                    else {
+                        // Create placeholder
+                        const placeholder = document.createElement("div");
+                        placeholder.style.display = "none";
+                        graphNode.fs_placeholder = placeholder;
+
+                        if (el.parentNode) {
+                            el.parentNode.insertBefore(placeholder, el);
+                        }
+
+                        // Move to body
                         document.body.appendChild(el);
                         el.classList.add('dashboard-fullscreen');
+
+                        console.log('[UltimateGrid] ↗️ Entered fullscreen');
                     }
                 }
-            }
-        });
+            });
+
+            window.__ultimateGridFullscreenListenerInstalled = true;
+            console.log('[UltimateGrid] ✅ Fullscreen listener installed');
+        }
     },
 
     async beforeRegisterNodeDef(nodeType, nodeData, app) {
         if (nodeData.name === "UltimateGridDashboard") {
             const onNodeCreated = nodeType.prototype.onNodeCreated;
+
             nodeType.prototype.onNodeCreated = function () {
                 const r = onNodeCreated ? onNodeCreated.apply(this, arguments) : undefined;
+
                 this.resizable = true;
                 const node = this;
                 node.loaded_session = null;
+                node.is_fetching = false;
 
+                // Helper: Get current session name
                 const getSessionName = () => {
-                    const w = node.widgets.find(w => w.name === "session_name");
-                    return w ? w.value : null;
+                    const widget = node.widgets.find(w => w.name === "session_name");
+                    return widget ? widget.value : null;
                 };
 
+                /**
+                 * Force load session - FIXED (no 404 call!)
+                 */
                 this.forceLoadSession = async (sessionName) => {
                     if (node.is_fetching) return;
                     node.is_fetching = true;
@@ -155,85 +188,156 @@ app.registerExtension({
                         }
                     } catch (e) { console.error(e); }
                     finally { node.is_fetching = false; }
-                };
+                };;
 
+                // Button: Reload/Show Session
                 this.addWidget("button", "RELOAD / SHOW SESSION", null, () => {
-                    const s = getSessionName();
-                    if (s) this.forceLoadSession(s);
+                    const sessionName = getSessionName();
+                    if (sessionName) {
+                        this.forceLoadSession(sessionName);
+                    } else {
+                        alert("No session name set.");
+                    }
                 });
 
+                // Button: Delete Session
                 this.addWidget("button", "DELETE SESSION (Files)", null, async () => {
-                    const s = getSessionName();
-                    if (!s) return alert("No session name set.");
-                    if (!confirm("Are you sure you want to delete this session?")) return;
+                    const sessionName = getSessionName();
+
+                    if (!sessionName) {
+                        alert("No session name set.");
+                        return;
+                    }
+
+                    if (!confirm(`Are you sure you want to delete session "${sessionName}"?\n\nThis will delete all images and data.`)) {
+                        return;
+                    }
+
                     try {
-                        const resp = await fetch("/config_tester/delete_session", {
+                        const response = await fetch("/config_tester/delete_session", {
                             method: "POST",
                             headers: { "Content-Type": "application/json" },
-                            body: JSON.stringify({ session_name: s })
+                            body: JSON.stringify({ session_name: sessionName })
                         });
-                        if (resp.ok) {
+
+                        if (response.ok) {
                             node.iframe.srcdoc = "<h3 style='color:#888; text-align:center; padding:20px;'>Session Deleted.</h3>";
                             node.loaded_session = null;
-                        } else { alert("Error: " + await resp.text()); }
-                    } catch (e) { alert("Connection Error: " + e); }
+                            alert(`Session "${sessionName}" deleted successfully.`);
+                        } else {
+                            const errorText = await response.text();
+                            alert(`Error deleting session: ${errorText}`);
+                        }
+                    } catch (error) {
+                        console.error('[UltimateGrid] Delete failed:', error);
+                        alert(`Connection error: ${error.message}`);
+                    }
                 });
 
+                /**
+                 * onExecuted - Handle dashboard HTML from server
+                 */
                 this.onExecuted = function (message) {
                     if (message?.html) {
-                        // Logic to prevent full reload if session is same
-                        if (node.loaded_session === getSessionName()) {
+                        const currentSession = getSessionName();
+
+                        // Optimization: If session already loaded, try incremental update
+                        if (node.loaded_session === currentSession) {
                             const newHtml = message.html[0];
+
+                            // Try to extract just the manifest data
                             const pattern = /\/\*__JSON_START__\*\/\s*let fullManifest = (\{[\s\S]*?\});\s*\/\*__JSON_END__\*\//;
                             const match = newHtml.match(pattern);
+
                             if (match && match[1]) {
                                 try {
-                                    const newData = JSON.parse(match[1]);
-                                    // Send full manifest update to iframe
-                                    node.iframe.contentWindow.postMessage({ type: 'update_data', data: { manifest: newData } }, '*');
-                                    return;
-                                } catch (e) { }
+                                    const newManifest = JSON.parse(match[1]);
+
+                                    // Send incremental update instead of full reload
+                                    if (node.iframe?.contentWindow) {
+                                        node.iframe.contentWindow.postMessage({
+                                            type: 'update_data',
+                                            data: {
+                                                manifest: newManifest,
+                                                meta: newManifest.meta || {}
+                                            }
+                                        }, '*');
+
+                                        console.log('[UltimateGrid] 📊 Incremental update sent');
+                                        return; // Skip full HTML reload
+                                    }
+                                } catch (error) {
+                                    console.warn('[UltimateGrid] Incremental update failed, doing full reload:', error);
+                                }
                             }
                         }
+
+                        // Full reload (when incremental fails or first load)
                         node.iframe.srcdoc = message.html[0];
-                        node.loaded_session = getSessionName();
+                        node.loaded_session = currentSession;
+                        console.log('[UltimateGrid] 🔄 Full reload');
                     }
+
+                    // Update session name widget if server sent new name
                     if (message?.update_session_name && message.update_session_name[0]) {
-                        const w = node.widgets.find(w => w.name === "session_name");
-                        if (w) { w.value = message.update_session_name[0]; node.setDirtyCanvas(true, true); }
+                        const widget = node.widgets.find(w => w.name === "session_name");
+                        if (widget) {
+                            widget.value = message.update_session_name[0];
+                            node.setDirtyCanvas(true, true);
+                        }
                     }
                 };
 
-                const widget = {
-                    type: "div",
-                    name: "dashboard_container",
-                    draw(ctx, node, widget_width, y, widget_height) {
-                        const availableHeight = (node.size[1] - y) - 26;
-                        if (this.iframe) {
-                            const isFullScreen = this.iframe.classList.contains('dashboard-fullscreen');
-                            if (!isFullScreen) {
-                                const targetW = (widget_width - 20) + "px";
-                                const targetH = Math.max(100, availableHeight) + "px";
-                                if (this.iframe.style.width !== targetW) this.iframe.style.width = targetW;
-                                if (this.iframe.style.height !== targetH) this.iframe.style.height = targetH;
-                            }
-                            this.iframe.hidden = false;
-                        }
-                    },
-                };
-
+                /**
+                 * Create iframe widget
+                 */
                 const iframe = document.createElement("iframe");
                 Object.assign(iframe.style, {
-                    border: "none", background: "#0b0b0b", width: "100%", height: "100%",
-                    display: "block", borderRadius: "0 0 4px 4px"
+                    border: "none",
+                    background: "#0b0b0b",
+                    width: "100%",
+                    height: "100%",
+                    display: "block",
+                    borderRadius: "0 0 4px 4px"
                 });
+
                 this.iframe = iframe;
                 this.addDOMWidget("dashboard_viewer", "iframe", iframe);
 
-                this.onResize = function (size) { node.setDirtyCanvas(true, true); }
+                // Handle resize
+                this.onResize = function (size) {
+                    node.setDirtyCanvas(true, true);
+                };
+
+                // Set default size
                 this.setSize([900, 750]);
+
+                // Cleanup on node removal
+                const originalOnRemoved = this.onRemoved;
+                this.onRemoved = function () {
+                    // Clean up iframe
+                    if (node.iframe) {
+                        node.iframe.remove();
+                        node.iframe = null;
+                    }
+
+                    // Clean up placeholder
+                    if (node.fs_placeholder) {
+                        node.fs_placeholder.remove();
+                        node.fs_placeholder = null;
+                    }
+
+                    console.log('[UltimateGrid] 🧹 Node cleanup complete');
+
+                    if (originalOnRemoved) {
+                        originalOnRemoved.apply(this, arguments);
+                    }
+                };
+
                 return r;
             };
         }
     },
 });
+
+console.log('[UltimateGrid] ✅ Dashboard extension loaded');

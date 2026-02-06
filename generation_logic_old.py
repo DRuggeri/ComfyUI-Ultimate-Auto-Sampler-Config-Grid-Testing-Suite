@@ -24,7 +24,7 @@ from .remote_vae import (
     detect_model_type,
     RemoteVAEDecodeWorker
 )
-from .lora_utils import load_and_save_tags
+from .lora_utils import load_and_save_tags, LoRAFileNotFoundError
 from .config_utils import (
     parse_json_with_error,
     parse_float_input,
@@ -36,12 +36,116 @@ from .config_utils import (
     parse_lora_definition
 )
 from .html_generator import get_html_template
+from .conditioning_cache import ConditioningCache  
+
 
 try:
     from server import PromptServer
 except ImportError:
     PromptServer = None
 
+
+def get_filtered_lora_triggers(lora_string, omit_list, lookup_triggers=True):
+    """
+    Get LoRA trigger words with filtering applied.
+    
+    Args:
+        lora_string: LoRA definition string (e.g., "lora1.safetensors:0.8:0.6 + lora2.safetensors:1.0:1.0")
+        omit_list: List of trigger words to omit
+        lookup_triggers: Whether to lookup triggers from Civitai
+        
+    Returns:
+        List of filtered trigger words
+    """
+    if not lookup_triggers or lora_string == "None":
+        return []
+    
+    active_loras = parse_lora_definition(lora_string)
+    trigger_list = []
+    
+    # Normalize omit list: strip whitespace and trailing commas, lowercase
+    omit_normalized = []
+    for t in omit_list:
+        normalized = str(t).lower().strip().rstrip(',').strip()
+        omit_normalized.append(normalized)
+    
+    for lora_def in active_loras:
+        lname, lstr_m, lstr_c = lora_def
+        try:
+            civitai_tags_list = load_and_save_tags(lname, force_fetch=False)
+            if len(civitai_tags_list) > 0:
+                for tags in civitai_tags_list:
+                    # Clean the trigger: strip whitespace and trailing commas
+                    cleaned_tags = tags.strip().rstrip(',').strip()
+                    
+                    # Check if this trigger should be omitted (case-insensitive)
+                    if cleaned_tags.lower() not in omit_normalized:
+                        trigger_list.append(cleaned_tags)
+        except Exception as e:
+            pass
+    
+    return trigger_list
+
+
+def batch_encode_with_cache(clip_model, prompts, cond_cache, prompt_type="positive", batch_size=16):
+    """
+    Batch encode prompts while checking persistent cache first.
+    Only encodes prompts that aren't already cached.
+    """
+    import comfy.model_management
+    
+    results = {}
+    prompts_to_encode = []
+    
+    # Check cache first
+    print(f"[GridTester] 🔍 Checking cache for {len(prompts)} {prompt_type} prompts...")
+    for prompt in prompts:
+        cached = cond_cache.get(prompt, prompt_type)
+        if cached is not None:
+            results[prompt] = cached
+        else:
+            prompts_to_encode.append(prompt)
+    
+    cache_hits = len(results)
+    cache_misses = len(prompts_to_encode)
+    
+    print(f"[GridTester] 📊 Cache: {cache_hits} hits, {cache_misses} misses")
+    
+    # Batch encode uncached prompts
+    if prompts_to_encode:
+        print(f"[GridTester] 🚀 Batch encoding {len(prompts_to_encode)} {prompt_type} prompts (batch_size={batch_size})")
+        
+        # Force model to stay in VRAM
+        comfy.model_management.load_models_gpu([clip_model.patcher])
+        
+        prompts_list = list(prompts_to_encode)
+        total_batches = (len(prompts_list) + batch_size - 1) // batch_size
+        
+        with torch.no_grad():
+            for batch_idx in range(0, len(prompts_list), batch_size):
+                batch_prompts = prompts_list[batch_idx:batch_idx + batch_size]
+                current_batch = (batch_idx // batch_size) + 1
+                
+                # Encode batch
+                for prompt in batch_prompts:
+                    try:
+                        tokens = clip_model.tokenize(prompt)
+                        cond, pooled = clip_model.encode_from_tokens(tokens, return_pooled=True)
+                        conditioning = [[cond, {"pooled_output": pooled}]]
+                        results[prompt] = conditioning
+                        cond_cache.set(prompt, conditioning, prompt_type)
+                    except Exception as e:
+                        print(f"[GridTester] ⚠️ Failed to encode: {e}")
+                        results[prompt] = None
+                
+                # Progress
+                encoded_count = min(batch_idx + batch_size, len(prompts_list))
+                if current_batch % 5 == 0 or current_batch == total_batches:
+                    print(f"[GridTester]   Batch {current_batch}/{total_batches} | Encoded {encoded_count}/{len(prompts_list)}")
+        
+        print(f"[GridTester] ✅ Batch encoding complete!")
+    
+    return results
 
 def merge_manifest_user_changes(manifest_path, existing_data):
     """
@@ -56,31 +160,53 @@ def merge_manifest_user_changes(manifest_path, existing_data):
         with open(manifest_path, "r") as f:
             current_manifest = json.load(f)
         
-        # Create lookup dict of current items by ID
+        # Create lookup dict of current items by ID from DISK
         current_items_dict = {
             item.get("id"): item 
             for item in current_manifest.get("items", []) 
             if "id" in item
         }
         
-        # Update existing_data items with any user modifications
+        # Track merge statistics
+        merged_count = 0
+        favorites_preserved = 0
+        rejected_preserved = 0
+        notes_preserved = 0
+        
+        # Update ALL items in existing_data (both new and old) with user modifications from disk
         for item in existing_data["items"]:
             item_id = item.get("id")
-            if item_id in current_items_dict:
+            if item_id and item_id in current_items_dict:
                 current_item = current_items_dict[item_id]
-                # Preserve user-modified fields
+                merged_count += 1
+                
+                # Preserve user-modified fields from the version on disk
                 if "favorite" in current_item:
                     item["favorite"] = current_item["favorite"]
+                    if current_item["favorite"]:
+                        favorites_preserved += 1
+                        
                 if "rejected" in current_item:
                     item["rejected"] = current_item["rejected"]
+                    if current_item["rejected"]:
+                        rejected_preserved += 1
+                        
                 if "notes" in current_item:
                     item["notes"] = current_item["notes"]
+                    notes_preserved += 1
+            # else: This is a new item, no merge needed
+        
+        # Log merge results if any user changes were preserved
+        if favorites_preserved > 0 or rejected_preserved > 0 or notes_preserved > 0:
+            print(f"[GridTester] 🔄 Merged user changes: {favorites_preserved} favorites, {rejected_preserved} rejected, {notes_preserved} notes (from {merged_count} items)")
                     
     except FileNotFoundError:
         # First save, no existing manifest to merge
         pass
     except Exception as e:
         print(f"[GridTester] ⚠️ Warning: Could not merge manifest changes: {e}")
+        import traceback
+        traceback.print_exc()
 
 
 def run_generation_loop(node_instance, ckpt_name, positive_text, negative_text, seed, denoise, vae_batch_size,
@@ -277,7 +403,7 @@ def run_generation_loop(node_instance, ckpt_name, positive_text, negative_text, 
         
         MATCH_KEYS = [
             "sampler", "scheduler", "steps", "cfg", "lora", 
-            "str_model", "str_clip", "denoise", "seed", 
+            "denoise", "seed", 
             "width", "height", "batch_idx", "model",
             "conditioning_pos_hash", "conditioning_neg_hash"
         ]
@@ -286,7 +412,7 @@ def run_generation_loop(node_instance, ckpt_name, positive_text, negative_text, 
         neg_hash = None
         MATCH_KEYS = [
             "sampler", "scheduler", "steps", "cfg", "lora", 
-            "str_model", "str_clip", "denoise", "seed", 
+            "denoise", "seed", 
             "width", "height", "positive", "negative", "batch_idx", "model"
         ]
 
@@ -407,6 +533,7 @@ def run_generation_loop(node_instance, ckpt_name, positive_text, negative_text, 
         with open(manifest_path, "w") as f:
             json.dump(existing_data, f, indent=4)
         
+        print("Save Manifest at gen logic 432")
         # Send update to dashboard
         if PromptServer:
             PromptServer.instance.send_sync("ultimate_grid.update", {
@@ -415,6 +542,22 @@ def run_generation_loop(node_instance, ckpt_name, positive_text, negative_text, 
                 "new_items": new_items,
                 "meta": existing_data["meta"]
             })
+    if existing_data["items"]:
+        print(f"\n[DEBUG] Sample existing item:")
+        sample = existing_data["items"][0]
+        print(f"  positive: {sample.get('positive', 'N/A')[:80]}")
+        print(f"  negative: {sample.get('negative', 'N/A')[:80]}")
+        print(f"  model: {sample.get('model', 'N/A')}")
+        print(f"  sampler: {sample.get('sampler', 'N/A')}")
+        
+        print(f"\n[DEBUG] Sample config we're checking:")
+        if len(expanded) > 0:
+            sample_conf = expanded[0]
+            print(f"  positive: {sample_conf.get('positive', 'N/A')[:80]}")
+            print(f"  negative: {sample_conf.get('negative', 'N/A')[:80]}")
+            print(f"  model: {sample_conf.get('model', 'N/A')}")
+            print(f"  sampler: {sample_conf.get('sampler', 'N/A')}")
+        print()
 
     # Filter jobs to skip already-completed ones BEFORE pre-encoding
     if not overwrite_existing and existing_data["items"]:
@@ -443,9 +586,7 @@ def run_generation_loop(node_instance, ckpt_name, positive_text, negative_text, 
                 
                 # Calculate prompt with LoRA triggers if enabled
                 if lookup_and_append_lora_triggerwords and conf["lora"] != "None":
-                    active_loras = parse_lora_definition(
-                        conf["lora"], conf["str_model"], conf["str_clip"]
-                    )
+                    active_loras = parse_lora_definition(conf["lora"])
                     trigger_list = []
                     
                     for lora_def in active_loras:
@@ -465,6 +606,18 @@ def run_generation_loop(node_instance, ckpt_name, positive_text, negative_text, 
                             print(f"[GridTester] 🔍 Original prompt: {conf['positive'][:80]}...")
                             print(f"[GridTester] 🔍 With triggers: {check_conf['positive'][:80]}...")
                 
+                            print(f"[GridTester] 🔍 Config positive: '{conf['positive']}'")
+                            print(f"[GridTester] 🔍 Check positive:  '{check_conf['positive']}'")
+                            
+                            # Now check what's in manifest
+                            if existing_data["items"]:
+                                for item in existing_data["items"][:3]:  # Check first 3
+                                    if item.get("positive") == check_conf["positive"]:
+                                        print(f"[GridTester] ✅ FOUND MATCH in manifest!")
+                                        break
+                                else:
+                                    print(f"[GridTester] ❌ NO MATCH found in manifest")
+                                    print(f"[GridTester] 📋 First manifest positive: '{existing_data['items'][0].get('positive', 'N/A')}'")
                 # Check if this specific job already exists
                 match_index = node_instance.find_existing_match(
                     existing_data["items"], check_conf, w, h, current_seed, batch_idx, MATCH_KEYS
@@ -503,7 +656,21 @@ def run_generation_loop(node_instance, ckpt_name, positive_text, negative_text, 
     
     # Pre-encode conditioning if not using optional conditioning
     conditioning_cache = {"positive": {}, "negative": {}}
-    
+        
+    # ===== INITIALIZE PERSISTENT CONDITIONING CACHE =====
+    clip_hash = "unknown"
+    try:
+        if loaded_clip and hasattr(loaded_clip, 'cond_stage_model'):
+            import hashlib
+            clip_type = str(type(loaded_clip.cond_stage_model))
+            clip_hash = hashlib.md5(clip_type.encode()).hexdigest()[:16]
+    except:
+        pass
+
+    cond_cache = ConditioningCache(base_dir, clip_hash)
+    print(f"[GridTester] 🗄️ Conditioning cache initialized (CLIP: {clip_hash})")
+    # ===== END =====
+
     if not (optional_positive and optional_negative):
         print(f"\n{'='*80}")
         print(f"[GridTester] 🧠 PRE-ENCODING CONDITIONING")
@@ -551,9 +718,7 @@ def run_generation_loop(node_instance, ckpt_name, positive_text, negative_text, 
             if first_conf["lora"] != "None":
                 print(f"[GridTester] 🔧 Applying LoRA for pre-encoding: {first_conf['lora']}")
                 curr_m, curr_c = loaded_model, loaded_clip
-                active_loras = parse_lora_definition(
-                    first_conf["lora"], first_conf["str_model"], first_conf["str_clip"]
-                )
+                active_loras = parse_lora_definition(first_conf["lora"])
                 
                 for lora_def in active_loras:
                     lname, lstr_m, lstr_c = lora_def
@@ -577,7 +742,24 @@ def run_generation_loop(node_instance, ckpt_name, positive_text, negative_text, 
             else:
                 patched_model = loaded_model
                 patched_clip = loaded_clip
-            
+                
+
+
+                # ===== INITIALIZE PERSISTENT CONDITIONING CACHE =====
+                # NOW we have loaded_clip, so we can get the real CLIP hash
+                clip_hash = "unknown"
+                try:
+                    if patched_clip and hasattr(patched_clip, 'cond_stage_model'):
+                        import hashlib
+                        clip_type = str(type(patched_clip.cond_stage_model))
+                        clip_hash = hashlib.md5(clip_type.encode()).hexdigest()[:16]
+                except:
+                    pass
+
+                cond_cache = ConditioningCache(base_dir, clip_hash)
+                print(f"[GridTester] 🗄️ Conditioning cache initialized (CLIP: {clip_hash})")
+                # ===== END =====
+
             # Collect all unique prompts
             print(f"[GridTester] 🧠 Collecting unique prompts...")
             unique_positives = set()
@@ -587,24 +769,32 @@ def run_generation_loop(node_instance, ckpt_name, positive_text, negative_text, 
                 full_positive = conf["positive"]
                  
                 if lookup_and_append_lora_triggerwords and conf["lora"] != "None":
-                    active_loras = parse_lora_definition(
-                        conf["lora"], conf["str_model"], conf["str_clip"]
+                    omit_list = conf.get("lora_omit_triggers", [])
+                    trigger_list = get_filtered_lora_triggers(
+                        conf["lora"],
+                        omit_list,
+                        lookup_triggers=True
                     )
-                    trigger_list = []
-                    
-                    for lora_def in active_loras:
-                        lname, lstr_m, lstr_c = lora_def
-                        try:
-                            civitai_tags_list = load_and_save_tags(lname, force_fetch=False)
-                            if len(civitai_tags_list) > 0:
-                                for tags in civitai_tags_list:
-                                    trigger_list.append(tags)
-                        except Exception as e:
-                            pass
                     
                     if trigger_list:
                         lora_triggers = ", ".join(trigger_list)
                         full_positive = f"{conf['positive']}, {lora_triggers}"
+                        
+                        # Show omitted triggers only once during pre-encoding
+                        if omit_list:
+                            all_triggers = []
+                            active_loras = parse_lora_definition(conf["lora"])
+                            for lora_def in active_loras:
+                                lname, _, _ = lora_def
+                                try:
+                                    tags = load_and_save_tags(lname, force_fetch=False)
+                                    all_triggers.extend([t.strip().rstrip(',').strip() for t in tags])
+                                except:
+                                    pass
+                            
+                            omitted = set(all_triggers) - set(trigger_list)
+                            if omitted:
+                                print(f"[GridTester] 🚫 Omitted triggers: {', '.join(omitted)}")
                 
                 unique_positives.add(full_positive)
                 unique_negatives.add(conf["negative"])
@@ -617,50 +807,29 @@ def run_generation_loop(node_instance, ckpt_name, positive_text, negative_text, 
             with torch.no_grad():
                 # Encode all positive prompts
                 print(f"[GridTester] 🧠 Encoding {len(unique_positives)} unique positive prompts...")
-                for i, prompt in enumerate(unique_positives):
-                    try:
-                        tokens = patched_clip.tokenize(prompt)
-                        cond, pooled = patched_clip.encode_from_tokens(tokens, return_pooled=True)
-                        conditioning_cache["positive"][prompt] = [[cond, {"pooled_output": pooled}]]
-                        
-                        # Clean up intermediate variables to prevent memory buildup
-                        del tokens
-                        
-                        # Periodic cleanup to prevent memory buildup during long encoding loops
-                        if (i + 1) % 10 == 0:
-                            gc.collect()
-                            if torch.cuda.is_available():
-                                torch.cuda.empty_cache()
-                        
-                        if (i + 1) % 10 == 0 or (i + 1) == len(unique_positives):
-                            print(f"[GridTester]   Encoded {i+1}/{len(unique_positives)} positive prompts")
-                    except Exception as e:
-                        print(f"[GridTester] ⚠️ Failed to encode positive prompt: {e}")
-                        conditioning_cache["positive"][prompt] = None
-                
-            # Encode all negative prompts
-            print(f"[GridTester] 🧠 Encoding {len(unique_negatives)} unique negative prompts...")
-            for i, prompt in enumerate(unique_negatives):
-                try:
-                    tokens = patched_clip.tokenize(prompt)
-                    cond, pooled = patched_clip.encode_from_tokens(tokens, return_pooled=True)
-                    conditioning_cache["negative"][prompt] = [[cond, {"pooled_output": pooled}]]
-                    
-                    # Clean up intermediate variables to prevent memory buildup
-                    del tokens
-                    
-                    # Periodic cleanup to prevent memory buildup during long encoding loops
-                    if (i + 1) % 10 == 0:
-                        gc.collect()
-                        if torch.cuda.is_available():
-                            torch.cuda.empty_cache()
-                    
-                    if (i + 1) % 10 == 0 or (i + 1) == len(unique_negatives):
-                        print(f"[GridTester]   Encoded {i+1}/{len(unique_negatives)} negative prompts")
-                except Exception as e:
-                    print(f"[GridTester] ⚠️ Failed to encode negative prompt: {e}")
-                    conditioning_cache["negative"][prompt] = None
+                # Batch encode all prompts (with cache checking)
+                conditioning_cache["positive"] = batch_encode_with_cache(
+                    patched_clip, 
+                    unique_positives, 
+                    cond_cache, 
+                    prompt_type="positive",
+                    batch_size=16  # Encode 16 prompts at once
+                )
+
+                conditioning_cache["negative"] = batch_encode_with_cache(
+                    patched_clip, 
+                    unique_negatives, 
+                    cond_cache, 
+                    prompt_type="negative",
+                    batch_size=16
+                )
             
+            # ===== SAVE CONDITIONING CACHE =====
+            if cond_cache is not None:
+                # cond_cache.save() // disable cond cache, its bugged for model swapping
+                cond_cache.print_stats()
+            # ===== END =====
+
             # Final cleanup after all encoding is complete
             gc.collect()
             if torch.cuda.is_available():
@@ -670,7 +839,7 @@ def run_generation_loop(node_instance, ckpt_name, positive_text, negative_text, 
             print(f"[GridTester] 💾 Cache size: {len(conditioning_cache['positive'])} positive, {len(conditioning_cache['negative'])} negative")
             
             cached_model_key = target_model_name
-            cached_lora_key = (first_conf["lora"], first_conf["str_model"], first_conf["str_clip"])
+            cached_lora_key = first_conf["lora"]
             cached_pos_key = None
             cached_neg_key = None
     else:
@@ -706,7 +875,27 @@ def run_generation_loop(node_instance, ckpt_name, positive_text, negative_text, 
                 conf["conditioning_neg_hash"] = neg_hash
             
             # Track actual prompts used
+            # Track actual prompts used (WITH trigger words if applicable)
             actual_positive_prompt = conf["positive"]
+            actual_negative_prompt = conf["negative"]
+
+            # Calculate LoRA triggers ONCE at the top - used for BOTH encoding AND saving
+            # NOTE: Same filtering logic as pre-encoding to ensure consistency
+            lora_triggers = ""
+            if conf["lora"] != "None" and lookup_and_append_lora_triggerwords:
+                omit_list = conf.get("lora_omit_triggers", [])
+                trigger_list = get_filtered_lora_triggers(
+                    conf["lora"],
+                    omit_list,
+                    lookup_triggers=True
+                )
+                
+                if trigger_list:
+                    lora_triggers = ", " + ", ".join(trigger_list)
+
+
+            # This is what gets saved to manifest (WITH triggers)
+            actual_positive_prompt = conf["positive"] + lora_triggers
             actual_negative_prompt = conf["negative"]
             
             # Overwrite check - delete old item if it exists and we're in overwrite mode
@@ -832,20 +1021,36 @@ def run_generation_loop(node_instance, ckpt_name, positive_text, negative_text, 
                 print(f"[GridTester] 📏 Latent channels: {latent_channels}")
 
             # --- LORA ---
-            current_lora_key = (conf["lora"], conf["str_model"], conf["str_clip"])
+            # The lora string now contains the strengths (e.g., "lora.safetensors:0.8:0.6")
+            current_lora_key = conf["lora"]
             
             if current_lora_key != cached_lora_key or patched_model is None:
                 patched_model, patched_clip = loaded_model, loaded_clip
                 
                 if conf["lora"] != "None":
-                    active_loras = parse_lora_definition(
-                        conf["lora"], conf["str_model"], conf["str_clip"]
-                    )
+                    active_loras = parse_lora_definition(conf["lora"])
                     
                     skip_config = False
                     for lora_def in active_loras:
                         lname, lstr_m, lstr_c = lora_def
                         lora_path = folder_paths.get_full_path("loras", lname)
+                        
+                        # CRITICAL: Check if lora_path is valid - if not, STOP EVERYTHING
+                        if lora_path is None:
+                            error_msg = (
+                                f"LoRA file not found: {lname}\n\n"
+                                f"❌ CRITICAL ERROR - All jobs stopped!\n\n"
+                                f"Please check:\n"
+                                f"  1. The LoRA file exists in your ComfyUI/models/loras folder\n"
+                                f"  2. The filename is correct (case-sensitive): {lname}\n"
+                                f"  3. Path separators are correct (/ vs \\)\n\n"
+                                f"Searched for: {lname}\n"
+                                f"Result: File not found in loras directory"
+                            )
+                            print(f"\n{'='*80}")
+                            print(f"[GridTester] 🚨 {error_msg}")
+                            print(f"{'='*80}\n")
+                            raise LoRAFileNotFoundError(lname, error_msg)
                         
                         lora_key = f"{target_model_name}:{lname}"
                         if lora_key in incompatible_loras:
@@ -868,65 +1073,49 @@ def run_generation_loop(node_instance, ckpt_name, positive_text, negative_text, 
                         continue
                 
                 cached_lora_key = current_lora_key
-            
-            # Calculate trigger words OUTSIDE the cache check so they're always available
-            lora_triggers = ""
-            if conf["lora"] != "None" and lookup_and_append_lora_triggerwords:
-                active_loras = parse_lora_definition(
-                    conf["lora"], conf["str_model"], conf["str_clip"]
-                )
-                trigger_list = []
-                for lora_def in active_loras:
-                    lname, lstr_m, lstr_c = lora_def
-                    try:
-                        civitai_tags_list = load_and_save_tags(lname, force_fetch=False)
-                        if len(civitai_tags_list) > 0:
-                            for tags in civitai_tags_list:
-                                trigger_list.append(tags)
-                    except Exception as e:
-                        print(f"[GridTester] Warning: Could not fetch trigger words for {lname}: {e}")
                 
-                lora_triggers = ", ".join(trigger_list)
+                # CRITICAL: Update the conditioning cache's LoRA config
+                # This ensures that cached conditioning is only reused when the CLIP model
+                # is in the same state (same LoRAs with same strengths)
+                # The lora string already contains strengths (e.g., "lora.safetensors:0.8:0.6")
+                cond_cache.set_lora_config(conf['lora'])
+            
+
                 
                 if lora_triggers:
-                    print(f"[GridTester] Trigger words: {lora_triggers}")
+                    print(f"[GridTester] Trigger words found")
+                    # print(f"[GridTester] Trigger words: {lora_triggers}")
 
             # --- CONDITIONING ---
-            if optional_positive: 
+            if optional_positive:
                 final_positive = optional_positive
                 actual_positive_prompt = conf["positive"]
             else:
-                full_positive = conf["positive"]
-                if lora_triggers:
-                    full_positive = f"{conf['positive']}, {lora_triggers}"
+                # actual_positive_prompt = conf["positive"]
+                full_positive = actual_positive_prompt
                 
-                actual_positive_prompt = full_positive
-                
-                if full_positive in conditioning_cache["positive"]:
-                    cached_cond = conditioning_cache["positive"][full_positive]
-                    
-                    if cached_cond is not None:
-                        final_positive = cached_cond
-                    else:
-                        print(f"[GridTester] ⚠️ Cache had None, encoding now...")
-                        tokens = patched_clip.tokenize(full_positive)
-                        cond, pooled = patched_clip.encode_from_tokens(tokens, return_pooled=True)
-                        final_positive = [[cond, {"pooled_output": pooled}]]
-                        conditioning_cache["positive"][full_positive] = final_positive
+                # Try persistent cache first
+                cached_cond = cond_cache.get(full_positive, "positive")
+                if cached_cond is not None:
+                    final_positive = cached_cond
+                elif full_positive in conditioning_cache["positive"]:
+                    # Found in session cache
+                    final_positive = conditioning_cache["positive"][full_positive]
+                    if final_positive is not None:
+                        cond_cache.set(full_positive, final_positive, "positive")
                 else:
-                    print(f"[GridTester] ⚠️ Cache miss for positive: '{full_positive[:50]}...', encoding now...")
+                    # Encode from scratch
+                    print(f"[GridTester] 🔄 Encoding: '{full_positive[:50]}...'")
                     tokens = patched_clip.tokenize(full_positive)
                     cond, pooled = patched_clip.encode_from_tokens(tokens, return_pooled=True)
                     final_positive = [[cond, {"pooled_output": pooled}]]
                     conditioning_cache["positive"][full_positive] = final_positive
-                    if lora_triggers:
-                        print(f"[GridTester] 📝 Prompt with triggers: {full_positive[:100]}...")
-
+                    cond_cache.set(full_positive, final_positive, "positive")
             if optional_negative:
                 final_negative = optional_negative
                 actual_negative_prompt = conf["negative"]
             else:
-                actual_negative_prompt = conf["negative"]
+                # actual_negative_prompt = conf["negative"]
                 
                 if conf["negative"] in conditioning_cache["negative"]:
                     cached_cond = conditioning_cache["negative"][conf["negative"]]
@@ -946,6 +1135,7 @@ def run_generation_loop(node_instance, ckpt_name, positive_text, negative_text, 
                     final_negative = [[cond, {"pooled_output": pooled}]]
                     conditioning_cache["negative"][conf["negative"]] = final_negative
 
+            
             # --- GENERATE ---
             if job["latent"] is not None: 
                 latent_in = {"samples": job["latent"]["samples"].clone()}
@@ -1066,7 +1256,7 @@ def run_generation_loop(node_instance, ckpt_name, positive_text, negative_text, 
     # Now save with merged data
     with open(manifest_path, "w") as f:
         json.dump(existing_data, f, indent=4)
-    
+    print("Save Manifest at gen logic 1091")
     # Clean up model references to prevent memory leaks
     # This is critical for ComfyUI's model management system
     print(f"[GridTester] 🧹 Cleaning up model references...")

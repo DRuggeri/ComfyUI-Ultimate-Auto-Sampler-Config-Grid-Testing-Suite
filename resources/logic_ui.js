@@ -11,7 +11,7 @@ let filterButtonCache = {};
 function toggleFiltersPopup() {
     const popup = document.getElementById('filters-popup');
     const overlay = document.getElementById('filters-overlay');
-    
+
     if (popup.style.display === 'none' || !popup.style.display) {
         popup.style.display = 'block';
         overlay.style.display = 'block';
@@ -27,7 +27,7 @@ function toggleFiltersPopup() {
 function toggleSessionPopup() {
     const popup = document.getElementById('session-popup');
     const overlay = document.getElementById('session-overlay');
-    
+
     if (popup.style.display === 'none' || !popup.style.display) {
         popup.style.display = 'block';
         overlay.style.display = 'block';
@@ -44,7 +44,7 @@ document.addEventListener('keydown', (e) => {
     if (e.key === 'Escape') {
         const filtersPopup = document.getElementById('filters-popup');
         const sessionPopup = document.getElementById('session-popup');
-        
+
         if (filtersPopup && filtersPopup.style.display !== 'none') {
             toggleFiltersPopup();
         } else if (sessionPopup && sessionPopup.style.display !== 'none') {
@@ -83,26 +83,26 @@ function initFilters() {
 
         const container = document.getElementById('filter-' + key);
         if (!container) return;
-        
+
         const cacheKey = unique.join(',');
         if (filterButtonCache[key] === cacheKey) {
             return;
         }
-        
+
         filterButtonCache[key] = cacheKey;
         container.innerHTML = '';
 
         unique.forEach(val => {
             const safeVal = String(val).replace(/[^a-zA-Z0-9]/g, '');
             const btnId = `btn-${key}-${safeVal}`;
-            
+
             let b = document.createElement('button');
             b.id = btnId;
             b.className = `filter-btn active ${key}`;
 
             let label = val;
             let fullText = val;
-            
+
             // Handle special formatting for different filter types
             if (key === 'lora') {
                 if (val === "None") {
@@ -136,10 +136,10 @@ function initFilters() {
                 // Shift-click: Isolate this filter (deselect all others of this type)
                 if (e.shiftKey) {
                     e.preventDefault();
-                    
+
                     // Check if this is the only active filter
                     const isOnlyActive = filters[key].size === 1 && filters[key].has(val);
-                    
+
                     if (isOnlyActive) {
                         // If it's the only one active, select all instead
                         unique.forEach(v => filters[key].add(v));
@@ -151,7 +151,7 @@ function initFilters() {
                         filters[key].clear();
                         // Add only this one
                         filters[key].add(val);
-                        
+
                         // Update all buttons visually
                         const allButtons = container.querySelectorAll('.filter-btn');
                         allButtons.forEach(btn => btn.classList.remove('active'));
@@ -167,7 +167,7 @@ function initFilters() {
                         b.classList.add('active');
                     }
                 }
-                
+
                 updateDataPipeline();
             };
 
@@ -177,126 +177,103 @@ function initFilters() {
     });
 }
 
+
+let pendingSaveItems = new Map();  // CHANGED: Set -> Map
+let saveTimer = null;
+const SAVE_BATCH_DELAY = 2000;
+
+/**
+ * OPTIMIZED: Schedule a save that only sends changed items
+ */
+function scheduleBatchedSave() {
+    if (saveTimer) {
+        clearTimeout(saveTimer);
+    }
+
+    saveTimer = setTimeout(async () => {
+        if (pendingSaveItems.size === 0) return;
+
+        console.log(`[Save] 💾 Sending ${pendingSaveItems.size} changed items to server`);
+
+        try {
+            const sessionName = document.getElementById('session-input')?.value || "default";
+
+            // Convert Map to array of items
+            const changedItems = Array.from(pendingSaveItems.values());
+
+            // CHANGED: Use new endpoint that only accepts changed items
+            const response = await fetch('/config_tester/save_changes', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    session_name: sessionName,
+                    changed_items: changedItems  // Only changed items!
+                })
+            });
+
+            if (!response.ok) {
+                throw new Error(`Save failed: ${response.status}`);
+            }
+
+            console.log(`[Save] ✅ Successfully saved ${pendingSaveItems.size} changes`);
+            pendingSaveItems.clear();
+
+        } catch (error) {
+            console.error('[Save] ❌ Batch save failed:', error);
+            // Don't clear pendingSaveItems - will retry on next change
+        }
+    }, SAVE_BATCH_DELAY);
+}
+function markItemChanged(item) {
+    if (!item || !item.id) return;
+
+    // Store the full item object, not just the ID
+    pendingSaveItems.set(item.id, item);
+    scheduleBatchedSave();
+}
+// Lightweight JSON update (separate debounce from save)
+let jsonUpdateTimer = null;
+const JSON_UPDATE_DELAY = 500; // 500ms debounce
+
+function scheduleJSONUpdate() {
+    if (jsonUpdateTimer) {
+        clearTimeout(jsonUpdateTimer);
+    }
+
+    jsonUpdateTimer = setTimeout(() => {
+        updateJSONs(processedData);
+    }, JSON_UPDATE_DELAY);
+}
+
 // Toggle Favorite
 
-async function toggleFavorite(id) {
-    const item = activeData.find(d => d.id === id);
-    if (!item) {
-        console.warn(`toggleFavorite: Item with id ${id} not found`);
-        return;
-    }
-    
-    // Store previous state for rollback
-    const previousState = item.favorited;
-    
-    // Optimistically update the data
+async function toggleFavorite(element) {
+    // [OPTIMIZATION] Find parent card and grab data directly (O(1) access)
+    // No getElementById, no array.find, no iteration.
+    const card = element.closest('.card');
+    if (!card || !card._dataItem) return;
+
+    const item = card._dataItem;
+
+    // Update Data
     item.favorited = !item.favorited;
-    
-    // Get UI elements
-    const card = document.getElementById(`card-${id}`);
-    const favBtn = card ? card.querySelector('.favorite-btn') : null;
-    
-    // Show loading state
+ 
+    // Update UI - Scope querySelector to just this card for extra speed
+    const favBtn = card.querySelector('.favorite-btn');
+
     if (favBtn) {
-        favBtn.disabled = true;
-        favBtn.style.opacity = '0.6';
-        favBtn.style.cursor = 'wait';
-        
-        if (item.favorited) {
-            favBtn.classList.add('favorited');
-            favBtn.innerText = '★';
-        } else {
-            favBtn.classList.remove('favorited');
-            favBtn.innerText = '☆';
-        }
+        favBtn.classList.toggle('favorited', item.favorited);
+        favBtn.innerText = item.favorited ? '★' : '☆';
+
+        // Simple animation
+        favBtn.style.transform = 'scale(1.2)';
+        setTimeout(() => favBtn.style.transform = 'scale(1)', 120);
     }
-    
-    try {
-        // Call the existing saveState function
-        const response = await fetch('/config_tester/save_manifest', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ 
-                session_name: document.getElementById('session-input')?.value || "default", 
-                manifest: fullManifest 
-            })
-        });
-        
-        // Check if the request was successful
-        if (!response.ok) {
-            const errorText = await response.text().catch(() => 'Unknown error');
-            throw new Error(`Server error (${response.status}): ${errorText}`);
-        }
-        
-        // Try to parse response to check for any error messages
-        const contentType = response.headers.get('content-type');
-        if (contentType && contentType.includes('application/json')) {
-            const data = await response.json();
-            if (data.error || data.success === false) {
-                throw new Error(data.message || data.error || 'Save failed');
-            }
-        }
-        
-        // Success! Update JSON bars
-        updateJSONs(processedData);
-        
-        // Show success feedback animation
-        if (favBtn) {
-            favBtn.style.transition = 'transform 0.15s cubic-bezier(0.34, 1.56, 0.64, 1)';
-            favBtn.style.transform = 'scale(1.25)';
-            
-            setTimeout(() => {
-                favBtn.style.transform = 'scale(1)';
-                setTimeout(() => {
-                    favBtn.style.transition = '';
-                }, 150);
-            }, 150);
-        }
-        
-    } catch (error) {
-        // Save failed - rollback the change
-        console.error('Failed to save favorite state:', error);
-        
-        item.favorited = previousState;
-        
-        // Restore UI to previous state
-        if (favBtn) {
-            if (previousState) {
-                favBtn.classList.add('favorited');
-                favBtn.innerText = '★';
-            } else {
-                favBtn.classList.remove('favorited');
-                favBtn.innerText = '☆';
-            }
-        }
-        
-        // Determine error type for better user message
-        let errorTitle = 'Failed to Save Favorite';
-        let errorMessage = 'Unable to save changes to the server. Your favorite status has not been saved.';
-        
-        if (error.message.includes('Failed to fetch') || error.message.includes('NetworkError')) {
-            errorTitle = 'Network Error';
-            errorMessage = 'Could not connect to the server. Please check your connection and try again.';
-        } else if (error.message.includes('500')) {
-            errorTitle = 'Server Error';
-            errorMessage = 'The server encountered an error. Please try again or contact support.';
-        } else if (error.message.includes('404')) {
-            errorTitle = 'Endpoint Not Found';
-            errorMessage = 'The save endpoint could not be found. Please contact support.';
-        }
-        
-        // Show error alert to user
-        showSaveErrorAlert(errorTitle, errorMessage, error.message);
-        
-    } finally {
-        // Always re-enable the button
-        if (favBtn) {
-            favBtn.disabled = false;
-            favBtn.style.opacity = '1';
-            favBtn.style.cursor = 'pointer';
-        }
-    }
+
+    markItemChanged(item);
+    scheduleJSONUpdate();
 }
+
 
 /**
  * Show error alert popup with details
@@ -307,16 +284,16 @@ function showSaveErrorAlert(title, message, technicalDetails = '') {
     if (existingAlert) {
         existingAlert.remove();
     }
-    
+
     // Create overlay
     const overlay = document.createElement('div');
     overlay.id = 'save-error-alert';
     overlay.className = 'error-alert-overlay';
-    
+
     // Create popup
     const popup = document.createElement('div');
     popup.className = 'error-alert-popup';
-    
+
     // Build details section if we have technical info
     const detailsHtml = technicalDetails ? `
         <details class="error-alert-details">
@@ -324,7 +301,7 @@ function showSaveErrorAlert(title, message, technicalDetails = '') {
             <pre>${technicalDetails}</pre>
         </details>
     ` : '';
-    
+
     popup.innerHTML = `
         <div class="error-alert-header">
             <span class="error-alert-icon">⚠️</span>
@@ -338,17 +315,17 @@ function showSaveErrorAlert(title, message, technicalDetails = '') {
             </button>
         </div>
     `;
-    
+
     overlay.appendChild(popup);
     document.body.appendChild(overlay);
-    
+
     // Close on overlay click
     overlay.addEventListener('click', (e) => {
         if (e.target === overlay) {
             overlay.remove();
         }
     });
-    
+
     // Close on Escape key
     const escHandler = (e) => {
         if (e.key === 'Escape') {
@@ -357,7 +334,7 @@ function showSaveErrorAlert(title, message, technicalDetails = '') {
         }
     };
     document.addEventListener('keydown', escHandler);
-    
+
     // Auto-close after 12 seconds
     setTimeout(() => {
         if (overlay.parentNode) {
@@ -376,7 +353,7 @@ function createCard(d) {
     card.className = 'card';
     card.id = `card-${d.id}`;
     card.dataset.id = d.id;
-
+    card._dataItem = d;
     // Check if favorited
     const isFavorited = d.favorited || false;
     const favClass = isFavorited ? 'favorited' : '';
@@ -388,7 +365,7 @@ function createCard(d) {
         loraLine = `<div class="stat"><b>LoRA:</b> <span style="opacity:0.3">-</span></div>`;
     } else if (d.lora.includes(" + ")) {
         const count = d.lora.split(" + ").length;
-        loraLine = `<div class="stat" title="${d.lora.replace(/ \+ /g, '\n')}"><b>LoRA:</b> <span style="color:var(--accent-lora)">Stack (${count})</span></div>`;
+        loraLine = `<div class="stat" title="${d.lora.replace(/ \+ /g, '\n')}"><b>LoRA:</b><br /> <span style="color:var(--accent-lora)">(${d.lora.replace(/ \+ /g, '\n')})</span></div>`;
     } else {
         const rawName = String(d.lora);
         let fileName = rawName.replace(/\\/g, '/').split('/').pop().split(':')[0];
@@ -415,20 +392,22 @@ function createCard(d) {
     // FIXED LAYOUT: Star top-right, Revise below it, time bottom-right, index bottom-left
     card.innerHTML = `
         <div class="img-wrapper" style="padding-bottom: ${paddingBottom}%;">
-            <img ondblclick="toggleFavorite(${d.id})" data-src="${d.file}" alt="Image ${d.id}" draggable="false">
-            <button class="reject-btn" onclick="rejectItem(${d.id})">✕</button>
-            <button class="favorite-btn ${favClass}" onclick="toggleFavorite(${d.id})">${favIcon}</button>
+            <img ondblclick="toggleFavorite(this)" data-src="${d.file}" alt="Image ${d.id}" draggable="false">
+            <button class="reject-btn" onclick="rejectItem(this)">✕</button>
+            <button class="favorite-btn ${favClass}" onclick="toggleFavorite(this)">${favIcon}</button>
             <button class="revise-btn" onclick="openM(${d.id})">REVISE</button>
             <div class="time-tag">${d.duration}s</div>
             <div class="index-tag">#${totalIndex}</div>
         </div>
         <div class="info">
+            <div class="stat" title="${modelName}"><b>Model:</b> <span>${finalModel}</span></div>
+
+            ${loraLine}
             <div class="stat"><b>Smp:</b> <span>${d.sampler} / ${d.scheduler}</span></div>
             <div class="stat">
                 <b>Cfg:</b> ${d.cfg} &nbsp; <b>Stp:</b> ${d.steps} &nbsp; <b>Dn:</b> <span style="color:var(--accent-denoise)">${d.denoise}</span>
             </div>
-            <div class="stat" title="${modelName}"><b>Model:</b> <span>${finalModel}</span></div>
-            ${loraLine}
+            
             ${promptInfo}
             <div class="stat"><b>Size:</b> ${d.width}x${d.height} &nbsp; <b>Seed:</b> ${d.seed}</div>
         </div>`;
@@ -447,47 +426,47 @@ function openM(id) {
     const seedEl = document.getElementById('f-seed');
     const posEl = document.getElementById('f-pos');
     const negEl = document.getElementById('f-neg');
-    
+
     if (modelEl) modelEl.value = d.model || meta.model || "Default";
     if (seedEl) seedEl.value = d.seed || 0;
     if (posEl) posEl.value = d.positive || meta.positive || "";
     if (negEl) negEl.value = d.negative || meta.negative || "";
 
     // Populate editable parameter fields
-    const map = { 
-        'smp': d.sampler, 
-        'sch': d.scheduler, 
-        'stp': d.steps, 
-        'cfg': d.cfg, 
-        'den': d.denoise, 
-        'lor': d.lora 
+    const map = {
+        'smp': d.sampler,
+        'sch': d.scheduler,
+        'stp': d.steps,
+        'cfg': d.cfg,
+        'den': d.denoise,
+        'lor': d.lora
     };
-    
+
     for (let k in map) {
         const el = document.getElementById('f-' + k);
         if (el) el.value = map[k];
     }
 
     // Populate related variants reel
-    const r = document.getElementById('reel'); 
+    const r = document.getElementById('reel');
     r.innerHTML = '';
-    
+
     activeData.forEach(x => {
         if (x.rejected) return;
         if (x.seed === d.seed) {
-            const i = document.createElement('img'); 
-            i.src = x.file; 
+            const i = document.createElement('img');
+            i.src = x.file;
             i.onclick = () => openM(x.id);
             if (x.id === id) i.style.borderColor = "var(--accent)";
             r.appendChild(i);
         }
     });
-    
+
     document.getElementById('modal').style.display = 'flex';
 }
 
-function closeM() { 
-    document.getElementById('modal').style.display = 'none'; 
+function closeM() {
+    document.getElementById('modal').style.display = 'none';
 }
 
 // THROTTLED JSON Updates
@@ -497,29 +476,53 @@ function updateJSONs(visible) {
     if (jsonUpdateTimeout) {
         clearTimeout(jsonUpdateTimeout);
     }
-    
+
     jsonUpdateTimeout = setTimeout(() => {
-        generateSmartJSON(visible, 'json-bar-good');
-        const favorited = activeData.filter(d => d.favorited && !d.rejected);
-        generateSmartJSON(favorited, 'json-bar-favorite');
-        const rejected = activeData.filter(d => d.rejected);
-        generateSmartJSON(rejected, 'json-bar-bad');
-    }, 300);
+        // 🚀 OPTIMIZED: Single pass through data instead of 3 separate filters
+        const good = [];
+        const favorited = [];
+        const rejected = [];
+
+        for (const item of activeData) {
+            if (item.rejected) {
+                rejected.push(item);
+            } else {
+                good.push(item);
+                if (item.favorited) {
+                    favorited.push(item);
+                }
+            }
+        }
+
+        // Disabled automatic JSON generation - now on-demand via buttons
+        // Store the datasets for on-demand generation
+        window.cachedJSONData = { good, favorited, rejected };
+        
+        // Update button labels with counts
+        updateJSONButtonLabels(good.length, favorited.length, rejected.length);
+    }, 100); // Reduced from 300ms since we have separate debounce above
 }
 
 // OPTIMIZED JSON generation
+const jsonElCache = new Map();
+
+// Fallback for browsers that don't support requestIdleCallback
+const runIdle = window.requestIdleCallback || (cb => setTimeout(cb, 1));
+const cancelIdle = window.cancelIdleCallback || clearTimeout;
+
 function generateSmartJSON(dataset, targetId) {
     const el = document.getElementById(targetId);
     if (!el) return;
-    
-    if (dataset.length === 0) { 
-        el.innerText = "[]"; 
-        return; 
+
+    if (dataset.length === 0) {
+        el.innerText = "[]";
+        return;
     }
 
+    // Processing Logic
     const limit = Math.min(dataset.length, 100);
     const limited = dataset.slice(0, limit);
-    
+
     const finalOutput = limited.map(d => ({
         sampler: d.sampler,
         scheduler: d.scheduler,
@@ -531,10 +534,234 @@ function generateSmartJSON(dataset, targetId) {
     }));
 
     let jsonText = JSON.stringify(finalOutput, null, 2);
-    
+
     if (dataset.length > 100) {
         jsonText += `\n\n// ... and ${dataset.length - 100} more items`;
     }
 
     el.innerText = jsonText;
+}
+
+// Add button label update function
+function updateJSONButtonLabels(goodCount, favCount, rejCount) {
+    const goodBtn = document.getElementById('json-btn-good');
+    const favBtn = document.getElementById('json-btn-favorite');
+    const rejBtn = document.getElementById('json-btn-bad');
+    
+    if (goodBtn) goodBtn.innerText = `View Configs (${goodCount})`;
+    if (favBtn) favBtn.innerText = `View Favorited (${favCount})`;
+    if (rejBtn) rejBtn.innerText = `View Rejected (${rejCount})`;
+}
+
+// On-demand JSON generation functions
+function viewGoodJSON() {
+    if (!window.cachedJSONData) return;
+    const bar = document.getElementById('json-bar-good');
+    if (!bar) return;
+    
+    // Toggle visibility
+    if (bar.style.display === 'block') {
+        bar.style.display = 'none';
+        return;
+    }
+    
+    const { good } = window.cachedJSONData;
+    generateSmartJSON(good, 'json-bar-good');
+    
+    bar.style.display = 'block';
+    bar.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+}
+
+function viewFavoritedJSON() {
+    if (!window.cachedJSONData) return;
+    const bar = document.getElementById('json-bar-favorite');
+    if (!bar) return;
+    
+    // Toggle visibility
+    if (bar.style.display === 'block') {
+        bar.style.display = 'none';
+        return;
+    }
+    
+    const { favorited } = window.cachedJSONData;
+    generateSmartJSON(favorited, 'json-bar-favorite');
+    
+    bar.style.display = 'block';
+    bar.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+}
+
+function viewRejectedJSON() {
+    if (!window.cachedJSONData) return;
+    const bar = document.getElementById('json-bar-bad');
+    if (!bar) return;
+    
+    // Toggle visibility
+    if (bar.style.display === 'block') {
+        bar.style.display = 'none';
+        return;
+    }
+    
+    const { rejected } = window.cachedJSONData;
+    generateSmartJSON(rejected, 'json-bar-bad');
+    
+    bar.style.display = 'block';
+    bar.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+}
+/**
+ * SEARCH FILTER FUNCTIONS
+ */
+
+// Add a search filter
+function addSearchFilter() {
+    const typeSelect = document.getElementById('search-filter-type');
+    const inputField = document.getElementById('search-filter-input');
+
+    if (!typeSelect || !inputField) return;
+
+    const filterType = typeSelect.value;
+    const searchTerm = inputField.value.trim();
+
+    // Validation
+    if (!filterType) {
+        alert('Please select a filter type');
+        return;
+    }
+
+    if (!searchTerm) {
+        alert('Please enter a search term');
+        return;
+    }
+
+    // Check if this exact filter already exists
+    const exists = searchFilters.some(f => f.type === filterType && f.term === searchTerm);
+    if (exists) {
+        alert('This search filter already exists');
+        return;
+    }
+
+    // Add to search filters array
+    searchFilters.push({
+        type: filterType,
+        term: searchTerm
+    });
+
+    // Clear inputs
+    typeSelect.value = '';
+    inputField.value = '';
+
+    // Update UI
+    renderSearchFilters();
+
+    // Trigger data pipeline update
+    updateDataPipeline();
+
+    console.log(`[Search Filter] Added: ${filterType} contains "${searchTerm}"`);
+}
+
+// Remove a search filter
+function removeSearchFilter(index) {
+    if (index >= 0 && index < searchFilters.length) {
+        const removed = searchFilters.splice(index, 1)[0];
+        console.log(`[Search Filter] Removed: ${removed.type} contains "${removed.term}"`);
+
+        // Update UI
+        renderSearchFilters();
+
+        // Trigger data pipeline update
+        updateDataPipeline();
+    }
+}
+
+// Clear all search filters
+function clearAllSearchFilters() {
+    if (searchFilters.length === 0) return;
+
+    searchFilters = [];
+    renderSearchFilters();
+    updateDataPipeline();
+
+    console.log('[Search Filter] All search filters cleared');
+}
+
+// Render search filter tags
+function renderSearchFilters() {
+    const container = document.getElementById('active-search-filters');
+    if (!container) return;
+
+    container.innerHTML = '';
+
+    if (searchFilters.length === 0) {
+        container.innerHTML = '<div style="color: #555; font-size: 10px; padding: 4px 0;">No active search filters</div>';
+        return;
+    }
+
+    searchFilters.forEach((filter, index) => {
+        const tag = document.createElement('div');
+        tag.className = 'search-filter-tag';
+
+        // Format display name for filter type
+        const typeNames = {
+            'model': 'Model',
+            'positive': 'Positive',
+            'negative': 'Negative',
+            'sampler': 'Sampler',
+            'scheduler': 'Scheduler',
+            'lora': 'LoRA'
+        };
+
+        tag.innerHTML = `
+            <span class="filter-type ${filter.type}">${typeNames[filter.type] || filter.type}</span>
+            <span class="filter-term" title="${filter.term}">${filter.term}</span>
+            <button class="remove-btn" onclick="removeSearchFilter(${index})" title="Remove filter">✕</button>
+        `;
+
+        container.appendChild(tag);
+    });
+
+    // Add clear all button if there are multiple filters
+    if (searchFilters.length > 1) {
+        const clearBtn = document.createElement('button');
+        clearBtn.className = 'search-filter-add-btn';
+        clearBtn.style.background = '#ff3860';
+        clearBtn.style.padding = '4px 10px';
+        clearBtn.innerText = 'CLEAR ALL';
+        clearBtn.onclick = clearAllSearchFilters;
+        container.appendChild(clearBtn);
+    }
+}
+
+// Check if an item matches search filters
+function matchesSearchFilters(item) {
+    if (searchFilters.length === 0) return true;
+
+    // Item must match ALL search filters (AND logic)
+    return searchFilters.every(filter => {
+        let value = '';
+
+        switch (filter.type) {
+            case 'model':
+                value = item.model || meta.model || "Default";
+                break;
+            case 'positive':
+                value = item.positive || meta.positive || "";
+                break;
+            case 'negative':
+                value = item.negative || meta.negative || "";
+                break;
+            case 'sampler':
+                value = item.sampler || "";
+                break;
+            case 'scheduler':
+                value = item.scheduler || "";
+                break;
+            case 'lora':
+                value = item.lora || "";
+                break;
+            default:
+                return false;
+        }
+
+        // Case-insensitive search
+        return value.toLowerCase().includes(filter.term.toLowerCase());
+    });
 }

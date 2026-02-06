@@ -1,6 +1,7 @@
 <!DOCTYPE html>
 <html>
 
+
 <head>
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <style>
@@ -29,7 +30,8 @@
 
         <div class="meta-box">
             <span class="meta-label">Cols</span>
-            <input  type="text" inputmode="numeric" id="col-count" min="0" placeholder="Auto" title="Set grid columns (0 = Auto)">
+            <input type="text" inputmode="numeric" id="col-count" min="0" placeholder="Auto"
+                title="Set grid columns (0 = Auto)">
         </div>
 
         <div class="meta-box">
@@ -61,6 +63,28 @@
         </div>
 
         <div class="filters-popup-content">
+            <!-- SEARCH FILTER SECTION -->
+            <div class="popup-section">
+                <div class="popup-section-title">SEARCH FILTER</div>
+                <div class="search-filter-container">
+                    <div class="search-filter-row">
+                        <select id="search-filter-type" class="search-filter-select">
+                            <option value="">Select filter type...</option>
+                            <option value="model">Model</option>
+                            <option value="positive">Positive Prompt</option>
+                            <option value="negative">Negative Prompt</option>
+                            <option value="sampler">Sampler</option>
+                            <option value="scheduler">Scheduler</option>
+                            <option value="lora">LoRA</option>
+                        </select>
+                        <input type="text" id="search-filter-input" class="search-filter-input"
+                            placeholder="Enter search term..." onkeypress="if(event.key==='Enter') addSearchFilter()">
+                        <button class="search-filter-add-btn" onclick="addSearchFilter()">ADD</button>
+                    </div>
+                    <div id="active-search-filters" class="active-search-filters"></div>
+                </div>
+            </div>
+
             <!-- Meta Info Section -->
 
 
@@ -68,7 +92,7 @@
             <div class="popup-section">
                 <div class="popup-section-title">FILTERS <span
                         style="font-size: 9px; color: #555; font-weight: normal;">(Shift+Click to isolate)</span></div>
-                    <br />
+                <br />
                 <div class="filter-row">
                     <span class="filter-label">Model</span>
                     <div id="filter-model" class="filter-buttons-container"></div>
@@ -130,6 +154,35 @@
                 <button class="session-action-btn save-btn" onclick="saveState()">SAVE</button>
                 <button class="session-action-btn load-btn" onclick="loadSession()">LOAD</button>
             </div>
+
+            <!-- NEW: Export Favorites Section -->
+            <div style="border-top: 1px solid #333; margin-top: 12px; padding-top: 12px;">
+                <button class="session-action-btn"
+                    style="background: #ff6b35; width: 100%; font-size: 11px; padding: 10px;"
+                    onclick="exportFavorites()" title="Export favorited images to benchmark_favorites folder">
+                    📦 COPY FAVORITES TO BENCHMARK FAVORITES FOLDER
+                </button>
+
+                <div style="margin-top: 8px; display: flex; align-items: center; gap: 6px;">
+                    <input type="checkbox" checked id="pack-metadata-checkbox"
+                        style="width: 14px; height: 14px; cursor: pointer;">
+                    <label for="pack-metadata-checkbox"
+                        style="font-size: 10px; color: #999; cursor: pointer; user-select: none;">
+                        Pack metadata into copied favorites (for CivitAI)
+                    </label>
+                </div>
+
+                <div style="margin-top: 8px; display: flex; align-items: center; gap: 6px;">
+                    <input type="checkbox" id="organize-by-prompt-checkbox"
+                        style="width: 14px; height: 14px; cursor: pointer;">
+                    <label for="organize-by-prompt-checkbox"
+                        style="font-size: 10px; color: #999; cursor: pointer; user-select: none;">
+                        Organize into separate folders by prompt (Prompt1, Prompt2, etc.)
+                    </label>
+                </div>
+
+                <div id="export-status" style="margin-top: 8px; font-size: 10px; color: #666; min-height: 16px;"></div>
+            </div>
         </div>
     </div>
 
@@ -143,16 +196,31 @@
     <button id="mobile-nav-up" class="mobile-nav-btn mobile-nav-up" onclick="scrollUpOneRow()" title="Scroll Up">
         ▲
     </button>
-    <button id="mobile-nav-down" class="mobile-nav-btn mobile-nav-down" onclick="scrollDownOneRow()" title="Scroll Down">
+    <button id="mobile-nav-down" class="mobile-nav-btn mobile-nav-down" onclick="scrollDownOneRow()"
+        title="Scroll Down">
         ▼
     </button>
 
     <div class="json-container">
-        <div id="json-bar-good" class="json-bar" title="ACCEPTED CONFIGS (Click to select)"
+        <!-- Button row -->
+        <div style="display: flex; gap: 0;">
+            <button id="json-btn-good" class="json-view-btn" onclick="viewGoodJSON()" title="Click to view accepted configs JSON">
+                View Configs (0)
+            </button>
+            <button id="json-btn-favorite" class="json-view-btn" onclick="viewFavoritedJSON()" title="Click to view favorited configs JSON">
+                View Favorited (0)
+            </button>
+            <button id="json-btn-bad" class="json-view-btn" onclick="viewRejectedJSON()" title="Click to view rejected configs JSON">
+                View Rejected (0)
+            </button>
+        </div>
+        
+        <!-- Hidden JSON display areas (shown when button is clicked) -->
+        <div id="json-bar-good" class="json-bar" style="display: none;" title="ACCEPTED CONFIGS (Click to select)"
             onclick="selectJSON('json-bar-good')">[]</div>
-        <div id="json-bar-favorite" class="json-bar" title="FAVORITED CONFIGS (Click to select)"
+        <div id="json-bar-favorite" class="json-bar" style="display: none;" title="FAVORITED CONFIGS (Click to select)"
             onclick="selectJSON('json-bar-favorite')">[]</div>
-        <div id="json-bar-bad" class="json-bar" title="REJECTED CONFIGS (Click to select)"
+        <div id="json-bar-bad" class="json-bar" style="display: none;" title="REJECTED CONFIGS (Click to select)"
             onclick="selectJSON('json-bar-bad')">[]</div>
     </div>
 

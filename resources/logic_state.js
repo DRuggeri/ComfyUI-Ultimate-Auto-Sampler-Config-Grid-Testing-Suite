@@ -13,8 +13,16 @@ const filters = {
     scheduler: new Set(), 
     lora: new Set(), 
     denoise: new Set(), 
-    model: new Set() 
+    model: new Set(),
+    positive: new Set(),
+    negative: new Set(),
+    size: new Set(),
+    seed: new Set()
 };
+
+// --- SEARCH FILTER STATE ---
+// Array of search filter objects: { type: 'model', term: 'mountain' }
+let searchFilters = [];
 
 let currentSort = 'oldest';
 

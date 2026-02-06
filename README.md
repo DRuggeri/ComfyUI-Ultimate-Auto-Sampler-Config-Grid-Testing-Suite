@@ -24,15 +24,23 @@ Stop guessing which Sampler, Scheduler, Prompt, Denoise, Model, Lora or CFG valu
 * **Cartesian Product Engine:** Automatically generates every permutation of your input settings. Test unlimited Samplers, Schedulers, CFG scales, Sizes, Prompts, LoRA combinations all in one go.
 * **Non-Standard Model Support:** Full support for SD3, Flux, Z-Image, and other non-standard architectures with automatic latent channel detection.
 * **Multi-Model Support:** Test multiple checkpoints in a single run by passing an array of model names or folder paths.
+* **Model Folder Expansion:** Use `"model": "FolderName/"` to test all checkpoints in a folder automatically - perfect for comparing different versions or architectures.
+* **CLIP Skip Support:** Control which CLIP layer to use for text encoding with the `clip_skip` parameter - essential for anime models (typically -2) vs realistic models (typically 0).
+* **Intelligent CLIP Encoding:** Automatically detects when multiple models are used and handles CLIP encoding correctly per-model to ensure accurate results.
+* **Batch Encoding on Model Switch:** When switching between models, all prompts are batch-encoded at once rather than per-generation, resulting in 3-6x faster encoding for multi-model workflows.
 * **Multi-LoRA Stacking:** Layer multiple LoRAs with custom strengths using the `+` separator. Supports folder expansion for testing entire LoRA directories.
+* **LoRA Trigger Word Filtering:** Use `lora_omit_triggers` to exclude specific trigger words from auto-appended LoRA triggers, giving you fine control over prompts.
+* **Random LoRA Selection:** Randomly select LoRAs from folders with `[count,strength]` or `[count,strength,random]` syntax. Supports both reproducible (seed-based) and truly random selection modes.
 * **Auto LoRA Trigger Words:** Automatically fetches and appends LoRA trigger words from CivitAI API using SHA256 hash lookup. Results are cached locally for offline use.
 * **Multi-Seed Generation:** Add extra random variations per config with the `add_random_seeds_to_gens` parameter - perfect for evaluating consistency.
 * **Smart Caching:** Intelligently skips model and LoRA reloading when consecutive runs share the same resources, making generation instant for parameter tweaks.
 * **Stop & Resume:** Intelligent skip detection - if you stop a generation mid-run, resuming will skip already-generated images and continue where you left off.
 * **Advanced Skip Logic:** Uses conditioning tensor hashing to detect prompt changes even when using pre-encoded conditioning from CLIP nodes.
 * **LoRA Compatibility Detection:** Automatically detects and skips incompatible LoRAs with detailed error reporting, preventing log spam.
+* **Graceful Interruption:** Cancel button now stops ALL remaining jobs (not just current generation) and saves all completed work including pending remote VAE decodes.
 * **VAE Batching:** Includes a `vae_batch_size` input to batch decode images, significantly speeding up large grid runs.
 * **Live Dashboard Updates:** Configure `flush_batch_every` to update the dashboard incrementally (e.g., every 4 images) instead of waiting for the entire batch to complete.
+* **Remote VAE Support:** Offload VAE decoding to remote servers (HuggingFace endpoints or local) for 20-30% faster generation and lower VRAM usage.
 
 ### 🎨 Interactive Dashboard (The "IDE")
 * **Infinite Canvas with Pan/Zoom:** Google Maps-style navigation with mouse drag, mousewheel zoom, and keyboard shortcuts.
@@ -426,6 +434,52 @@ Set `add_random_seeds_to_gens: 2` to get 3 variations per model (27 total images
 ```
 Test multiple LoRA strengths and combinations in one run.
 
+### Random LoRA Selection
+Randomly select LoRAs from a folder for variety and experimentation:
+
+**Basic Syntax:**
+```json
+[
+  {
+    "sampler": "euler",
+    "scheduler": "normal",
+    "steps": 25,
+    "cfg": 7.0,
+    "lora": "XL/Styles/[3,0.85]"
+  }
+]
+```
+- Randomly selects **3 LoRAs** from `XL/Styles/` folder at strength **0.85**
+- Selection is **reproducible** (uses the config's seed) - same seed = same LoRAs
+
+**Truly Random (Non-Reproducible):**
+```json
+"lora": "XL/Styles/[3,0.85,random]"
+```
+- Add `random` keyword to disable seed-based selection
+- Different LoRAs selected on each run for maximum variety
+
+**Dual Strength (Model + CLIP):**
+```json
+"lora": "XL/Characters/[2,0.8,0.6]"
+```
+- Model strength: **0.8**
+- CLIP strength: **0.6**
+- Still seed-based (reproducible)
+
+**Combining with Regular LoRAs:**
+```json
+"lora": "XL/base.safetensors:1.0 + XL/Styles/[2,0.7] + XL/Details/[1,0.5,random]"
+```
+- Loads `base.safetensors` at strength 1.0 (always)
+- Picks 2 random style LoRAs at 0.7 (same ones with same seed)
+- Picks 1 truly random detail LoRA at 0.5 (different each run)
+
+**Notes:**
+- Random selection works with all subfolders
+- Trigger words are automatically fetched for all selected LoRAs
+- Path separators work on both Windows (`\`) and Linux (`/`)
+
 ### Full Model Folder Test
 ```json
 [
@@ -439,6 +493,106 @@ Test multiple LoRA strengths and combinations in one run.
 ]
 ```
 Tests ALL checkpoints in the `realistic_models` folder.
+
+### CLIP Skip for Anime Models
+Control which CLIP layer to use for text encoding - crucial for anime models:
+
+```json
+[
+  {
+    "sampler": "euler",
+    "scheduler": "normal",
+    "steps": 28,
+    "cfg": 7.0,
+    "model": "anime_model.safetensors",
+    "clip_skip": -2
+  }
+]
+```
+- `clip_skip: 0` (default) - Use last layer (best for realistic models)
+- `clip_skip: -1` - Skip 1 layer (transition)
+- `clip_skip: -2` - Skip 2 layers (best for anime/illustration models)
+- `clip_skip: -3` - Skip 3 layers (experimental)
+
+**Testing Multiple CLIP Skip Values:**
+```json
+[
+  {
+    "sampler": "euler",
+    "steps": 28,
+    "cfg": 7.0,
+    "model": "anime_model.safetensors",
+    "clip_skip": [0, -1, -2, -3]
+  }
+]
+```
+Generates 4 images testing different CLIP skip values with the same seed.
+
+### LoRA Trigger Word Filtering
+Exclude specific trigger words from auto-appended LoRA triggers:
+
+```json
+[
+  {
+    "sampler": "euler",
+    "steps": 28,
+    "cfg": 7.0,
+    "lora": "bimbo_style.safetensors:0.8:0.6",
+    "lora_omit_triggers": ["bimbo", "makeup", "jewelry"]
+  }
+]
+```
+- Automatically fetches trigger words from CivitAI
+- Filters out unwanted triggers (e.g., "bimbo, makeup, jewelry")
+- Only keeps relevant triggers
+- Handles comma normalization (CivitAI stores triggers with trailing commas)
+
+**Multiple LoRAs with Filtering:**
+```json
+[
+  {
+    "lora": "XL/Quality/*:0.6:0.6 + XL/Style/anime.safetensors:1.0:0.8",
+    "lora_omit_triggers": ["masterpiece", "best quality", "highres"]
+  }
+]
+```
+Filters apply to ALL LoRAs in the stack.
+
+### Model Folder Expansion
+Test all models in a folder automatically:
+
+```json
+[
+  {
+    "sampler": "euler",
+    "scheduler": "normal",
+    "steps": 28,
+    "cfg": 7.0,
+    "model": "SDXL/"
+  }
+]
+```
+- Trailing `/` triggers folder expansion
+- Tests every `.safetensors` file in the folder
+- Can combine with other parameters for comprehensive testing
+
+**Multi-Architecture Comparison:**
+```json
+[
+  {
+    "model": ["SD1.5/", "SDXL/", "Flux/"],
+    "sampler": "euler",
+    "steps": 28
+  }
+]
+```
+Tests all models from all three folders with the same settings.
+
+**Note:** When using model folder expansion with multiple models, the system automatically disables pre-encoding and batch-encodes prompts per-model for correct CLIP handling. You'll see:
+```
+[GridTester] ⚠️ Multiple models detected (3 different models) - pre-encoding DISABLED
+[GridTester] ℹ️  Each model has a different CLIP - encoding will happen per-generation
+```
 
 ---
 
@@ -592,6 +746,61 @@ Tests ALL checkpoints in the `realistic_models` folder.
   - This is normal - the node automatically skips incompatible LoRAs
   - Check the summary at the end of generation for list of incompatible LoRAs
   - Ensure your LoRAs match your model architecture (SD1.5 LoRAs won't work on SDXL, etc.)
+* **Random LoRA selection not working:**
+  - Ensure folder path is correct (e.g., `"XL/Styles/[3,0.85]"` not `"XL/Styles[3,0.85]"`)
+  - Check console for debug messages showing available LoRAs
+  - Verify LoRAs exist in the specified folder and subfolders
+  - Path separators: Use forward slashes `/` in the syntax (auto-converts backslashes internally)
+* **Random LoRAs different from expected:**
+  - Seed-based selection is intentional - change base seed for different selection
+  - Use `[count,strength,random]` for truly random (non-reproducible) selection
+  - Random selection happens once at start - all generations in batch use same selected LoRAs
+* **Trigger words not being filtered with `lora_omit_triggers`:**
+  - Ensure `lookup_and_append_lora_triggerwords` is enabled
+  - Check that trigger words are actually being fetched (see console output)
+  - Trigger filtering is case-insensitive and handles trailing commas automatically
+  - Filters apply to all LoRAs in the stack
+
+### Model & CLIP Issues
+* **Images look wrong with multiple models:**
+  - System automatically handles multi-model CLIP encoding
+  - You should see: `[GridTester] ⚠️ Multiple models detected - pre-encoding DISABLED`
+  - Each model uses its own CLIP - this is correct behavior
+  - If you don't see this message with multiple models, check configs are properly formatted
+* **CLIP skip not affecting results:**
+  - Verify the model supports CLIP skip (anime models typically do)
+  - Use appropriate values: 0 for realistic, -2 for anime
+  - Test with same seed and only change clip_skip to see differences
+  - SDXL models may not be as sensitive to CLIP skip as SD1.5
+* **"No files found in folder" for model expansion:**
+  - Ensure trailing `/` in path: `"SDXL/"` not `"SDXL"`
+  - Check folder exists in `ComfyUI/models/checkpoints/`
+  - Folder names are case-sensitive on Linux/Mac
+  - Verify there are actually `.safetensors` files in the folder
+
+### Remote VAE Issues
+* **Remote VAE not working:**
+  - Check endpoint is set correctly in node parameters
+  - Verify server is running and accessible
+  - Look for `[GridTester] 🌐 Remote VAE worker started` in console
+  - Should see `[GridTester] 🌐 Queued X images for remote VAE decoding`
+  - If no queue messages appear, remote VAE isn't being used
+* **Remote VAE hangs on "Waiting for remote VAE":**
+  - Server may have crashed - check server logs
+  - Network connectivity issues - try local endpoint first
+  - Restart remote VAE server and try again
+
+### Interrupt/Cancel Issues
+* **Cancel doesn't stop generation:**
+  - Ensure you're using the latest version with interrupt handling
+  - Cancel now stops ALL remaining jobs (not just current image)
+  - Should see `🛑 INTERRUPTED - Stopping all jobs` in console
+  - Completed work is automatically saved
+* **Work lost after canceling:**
+  - This shouldn't happen - manifest is saved on interrupt
+  - Check `ComfyUI/output/benchmarks/{session_name}/manifest.json`
+  - Dashboard should show all completed images
+  - If manifest is empty, check console for save errors
 
 ### Browser Compatibility
 * **Chrome/Edge:** Full support ✅
@@ -602,6 +811,66 @@ Tests ALL checkpoints in the `realistic_models` folder.
 ---
 
 ## 📝 Changelog
+
+### Update 2/5/26 - Code Refactoring & Performance Improvements
+* 🏗️ **Major Code Refactoring:** Reorganized codebase into 6 modular files for better maintainability
+  - `trigger_words.py` - LoRA trigger word handling
+  - `batch_encoding.py` - CLIP batch encoding with caching
+  - `manifest_utils.py` - Manifest file management
+  - `model_loader.py` - Model/LoRA loading and patching
+  - `image_generation.py` - Image generation and sampling
+  - `generation_orchestrator.py` - Main orchestration layer
+* 🎯 **CLIP Skip Support:** Control CLIP layer usage with `clip_skip` parameter
+  - Essential for anime models (typically -2) vs realistic models (0)
+  - Supports arrays for testing multiple values
+  - Integrated with batch encoding system
+* 🧠 **Intelligent CLIP Encoding:** Multi-model workflows now handle CLIP correctly
+  - Automatically detects when multiple models are used
+  - Disables pre-encoding when needed to prevent CLIP mismatches
+  - Each model uses its own CLIP for accurate results
+* ⚡ **Batch Encoding on Model Switch:** 3-6x faster encoding for multi-model workflows
+  - When switching models, all prompts are batch-encoded at once
+  - Reduces CLIP load/unload cycles dramatically
+  - Intelligent look-ahead collects all prompts for each model
+* 🗑️ **LoRA Trigger Word Filtering:** New `lora_omit_triggers` parameter
+  - Exclude specific trigger words from auto-appended LoRA triggers
+  - Supports arrays: `["trigger1", "trigger2"]`
+  - Handles comma normalization from CivitAI API
+* 📁 **Model Folder Expansion:** Use `"model": "FolderName/"` to test all checkpoints in a folder
+  - Works just like LoRA folder expansion
+  - Perfect for comparing model versions or architectures
+  - Automatically detects and tests all `.safetensors` files
+* 🛑 **Graceful Interruption:** Cancel now stops ALL jobs, not just current generation
+  - Flushes pending batches before stopping
+  - Waits for remote VAE to complete current jobs
+  - Saves manifest with all completed work
+  - Generates HTML dashboard with progress so far
+* 🌐 **Remote VAE Fixes:** Remote VAE decoding now works correctly
+  - Fixed initialization to work with all configurations
+  - Fixed job queuing with correct method signature
+  - Works with single or multiple models
+  - Properly integrated with interrupt handling
+* 🔧 **str_model/str_clip Removal:** Deprecated config fields removed
+  - Strengths now properly specified in LoRA string: `"lora.safetensors:0.8:0.6"`
+  - Each LoRA in stack can have different strengths
+  - Cleaner, more intuitive syntax
+* 📚 **Comprehensive Documentation:** Added detailed guides for all new features
+  - CLIP skip usage and best practices
+  - Model folder expansion examples
+  - Batch encoding optimization explanation
+  - LoRA trigger filtering guide
+  - Remote VAE configuration
+
+### Update 2/5/26 - Random LoRA Selection
+* 🎲 **Random LoRA Selection:** Randomly select LoRAs from folders with powerful new syntax
+  - `[count,strength]` - Select N random LoRAs at specified strength (seed-based, reproducible)
+  - `[count,strength,random]` - Truly random selection that changes each run
+  - `[count,model_str,clip_str]` - Support for dual strength (model and CLIP)
+  - Combine with regular LoRAs: `"base.safetensors:1.0 + XL/Folder/[3,0.8]"`
+  - Cross-platform path handling (Windows `\` and Linux `/` both work)
+  - Full integration with trigger word lookup system
+  - Automatic expansion before generation for consistent results
+
 
 ### Update 1/14/26 - Major Feature Update
 * 🎯 **Non-Standard Model Support:** Full compatibility with SD3, Flux, Z-Image, and other architectures

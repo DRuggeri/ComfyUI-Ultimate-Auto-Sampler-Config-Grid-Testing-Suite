@@ -1,7 +1,7 @@
 /**
  * OPTIMIZED DATA PIPELINE
  * Fixed: New items appear immediately when prepended to top
- * Added: Prompt, Size, and Seed filters
+ * Added: Prompt, Size, Seed filters, and Search Filters
  */
 
 let isPipelinePending = false;
@@ -14,9 +14,9 @@ function refreshIndices() {
     const sorted = activeData.slice().sort((a, b) => a.id - b.id);
     idToIndexMap = new Map(sorted.map((item, index) => [item.id, index + 1]));
 }
-
-// Generate cache key from current filters
-function getFilterKey() {
+ 
+// Generate cache key from current filters (including search filters)
+function getFilterKey() { 
     const parts = [
         currentSort,
         [...filters.sampler].sort().join(','),
@@ -27,48 +27,54 @@ function getFilterKey() {
         [...filters.positive].sort().join(','),
         [...filters.negative].sort().join(','),
         [...filters.size].sort().join(','),
-        [...filters.seed].sort().join(',')
+        [...filters.seed].sort().join(','),
+        // Include search filters in cache key
+        searchFilters.map(f => `${f.type}:${f.term}`).join('|')
     ];
     return parts.join('|');
 }
 
 // INCREMENTAL FILTERING: Only filter new items
 function incrementalFilter(newItems) {
-    const hasFilters = filters.sampler.size > 0 || 
-                       filters.scheduler.size > 0 || 
-                       filters.denoise.size > 0 ||
-                       filters.lora.size > 0 ||
-                       filters.model.size > 0 ||
-                       filters.positive.size > 0 ||
-                       filters.negative.size > 0 ||
-                       filters.size.size > 0 ||
-                       filters.seed.size > 0;
+    const hasButtonFilters = filters.sampler.size > 0 || 
+                              filters.scheduler.size > 0 || 
+                              filters.denoise.size > 0 ||
+                              filters.lora.size > 0 ||
+                              filters.model.size > 0 ||
+                              filters.positive.size > 0 ||
+                              filters.negative.size > 0 ||
+                              filters.size.size > 0 ||
+                              filters.seed.size > 0;
     
-    if (!hasFilters) {
-        return newItems.filter(d => !d.rejected);
-    }
-
     return newItems.filter(d => {
         if (d.rejected) return false;
         
-        if (filters.sampler.size > 0 && !filters.sampler.has(d.sampler)) return false;
-        if (filters.scheduler.size > 0 && !filters.scheduler.has(d.scheduler)) return false;
-        if (filters.denoise.size > 0 && !filters.denoise.has(d.denoise)) return false;
-        if (filters.lora.size > 0 && !filters.lora.has(d.lora)) return false;
-        if (filters.model.size > 0 && !filters.model.has(d.model || meta.model || "Default")) return false;
-        
-        // Prompt filters
-        if (filters.positive.size > 0 && !filters.positive.has(d.positive || meta.positive || "")) return false;
-        if (filters.negative.size > 0 && !filters.negative.has(d.negative || meta.negative || "")) return false;
-        
-        // Size filter
-        if (filters.size.size > 0) {
-            const sizeStr = `${d.width}x${d.height}`;
-            if (!filters.size.has(sizeStr)) return false;
+        // Apply button filters
+        if (hasButtonFilters) {
+            if (filters.sampler.size > 0 && !filters.sampler.has(d.sampler)) return false;
+            if (filters.scheduler.size > 0 && !filters.scheduler.has(d.scheduler)) return false;
+            if (filters.denoise.size > 0 && !filters.denoise.has(d.denoise)) return false;
+            if (filters.lora.size > 0 && !filters.lora.has(d.lora)) return false;
+            if (filters.model.size > 0 && !filters.model.has(d.model || meta.model || "Default")) return false;
+            
+            // Prompt filters
+            if (filters.positive.size > 0 && !filters.positive.has(d.positive || meta.positive || "")) return false;
+            if (filters.negative.size > 0 && !filters.negative.has(d.negative || meta.negative || "")) return false;
+            
+            // Size filter
+            if (filters.size.size > 0) {
+                const sizeStr = `${d.width}x${d.height}`;
+                if (!filters.size.has(sizeStr)) return false;
+            }
+            
+            // Seed filter
+            if (filters.seed.size > 0 && !filters.seed.has(d.seed)) return false;
         }
         
-        // Seed filter
-        if (filters.seed.size > 0 && !filters.seed.has(d.seed)) return false;
+        // Apply search filters (if function is available)
+        if (typeof matchesSearchFilters === 'function') {
+            if (!matchesSearchFilters(d)) return false;
+        }
         
         return true;
     });
@@ -98,6 +104,7 @@ function executePipeline() {
         processedData = activeData.filter(d => {
             if (d.rejected) return false;
             
+            // Button filters
             if (filters.sampler.size > 0 && !filters.sampler.has(d.sampler)) return false;
             if (filters.scheduler.size > 0 && !filters.scheduler.has(d.scheduler)) return false;
             if (filters.denoise.size > 0 && !filters.denoise.has(d.denoise)) return false;
@@ -116,6 +123,11 @@ function executePipeline() {
             
             // Seed filter
             if (filters.seed.size > 0 && !filters.seed.has(d.seed)) return false;
+            
+            // Search filters
+            if (typeof matchesSearchFilters === 'function') {
+                if (!matchesSearchFilters(d)) return false;
+            }
             
             return true;
         });

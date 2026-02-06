@@ -50,15 +50,26 @@ function init() {
         refreshIndices();
 
         if (typeof initFilters === 'function') initFilters();
+        
+        // Initialize search filter UI
+        if (typeof renderSearchFilters === 'function') renderSearchFilters();
 
         updateDataPipeline();
 
-        // Auto-fit zoom after initial render
-        setTimeout(() => {
-            if (typeof autoFitZoom === 'function') {
-                autoFitZoom();
-            }
-        }, 100);
+        // Try to restore saved viewport position BEFORE auto-fit
+        let restoredPosition = false;
+        if (typeof restoreViewportPosition === 'function') {
+            restoredPosition = restoreViewportPosition();
+        }
+
+        // Only auto-fit if we didn't restore a saved position
+        if (!restoredPosition) {
+            setTimeout(() => {
+                if (typeof autoFitZoom === 'function') {
+                    autoFitZoom();
+                }
+            }, 100);
+        }
 
     } catch (e) {
         console.error("Init Error", e);

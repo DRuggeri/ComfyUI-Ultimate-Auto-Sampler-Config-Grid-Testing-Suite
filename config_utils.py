@@ -149,16 +149,16 @@ def get_files_from_folder(input_string, type_key):
     return found
 
 
-def parse_lora_definition(lora_string, global_model_strength, global_clip_strength):
+def parse_lora_definition(lora_string):
     """
     Parse LoRA definition string into list of (name, model_str, clip_str) tuples.
     
-    Format: "lora1.safetensors:1.0:0.8 + lora2.safetensors"
+    Format: "lora1.safetensors:1.0:0.8 + lora2.safetensors:0.5:0.5"
+    
+    If no strength is specified, defaults to 1.0 for both model and CLIP.
     
     Args:
-        lora_string: String defining LoRAs
-        global_model_strength: Default model strength if not specified
-        global_clip_strength: Default CLIP strength if not specified
+        lora_string: String defining LoRAs with optional strengths
         
     Returns:
         List of (name, model_strength, clip_strength) tuples
@@ -173,27 +173,29 @@ def parse_lora_definition(lora_string, global_model_strength, global_clip_streng
             segments = part.split(":")
             name = segments[0].strip()
             m_str = float(segments[1]) if len(segments) > 1 else 1.0
-            c_str = float(segments[2]) if len(segments) > 2 else 1.0
+            c_str = float(segments[2]) if len(segments) > 2 else m_str  # Default CLIP to same as model
             definitions.append((name, m_str, c_str))
         else:
-            definitions.append((part, global_model_strength, global_clip_strength))
+            # No strength specified, default to 1.0 for both
+            definitions.append((part, 1.0, 1.0))
     return definitions
 
 
-def expand_lora_stack(lora_input, str_model, str_clip):
+def expand_lora_stack(lora_input):
     """
     Expand LoRA stacks with folder support.
     
     Handles formats like:
     - "lora.safetensors"
-    - "lora1 + lora2"
-    - "folder/ + lora.safetensors"
-    - "folder/:1.0:0.8 + lora.safetensors"
+    - "lora.safetensors:0.8:0.6"
+    - "lora1:0.8:0.6 + lora2:1.0:1.0"
+    - "folder/ + lora.safetensors" (expands each LoRA individually)
+    - "folder/* + lora.safetensors" (stacks ALL LoRAs in folder together)
+    - "folder/:0.8:0.6 + lora.safetensors"
+    - "folder/*:0.8:0.6" (stacks ALL LoRAs with same strength)
     
     Args:
         lora_input: LoRA specification string or list
-        str_model: Default model strength
-        str_clip: Default CLIP strength
         
     Returns:
         List of expanded LoRA stack strings
@@ -222,12 +224,33 @@ def expand_lora_stack(lora_input, str_model, str_clip):
                 args = ""
             
             norm_path = base_path.replace("\\", "/")
-            if norm_path.endswith("/"):
+            
+            # Check for folder/* syntax (stack all together)
+            if norm_path.endswith("/*") or (norm_path.endswith("*") and "/" in norm_path):
+                # Remove the /* or * suffix
+                folder_path = norm_path.rstrip("/*").rstrip("*").rstrip("/")
+                found_files = get_files_from_folder(folder_path + "/", "loras")
+                
+                if found_files:
+                    # Stack ALL files together as a single entry (not separate combinations)
+                    stacked = " + ".join([f"{f}{args}" for f in found_files])
+                    expanded_parts.append([stacked])
+                    print(f"[GridTester] 📚 Folder/* syntax: Stacking {len(found_files)} LoRAs from '{folder_path}' together")
+                else:
+                    print(f"[GridTester] ⚠️ No LoRAs found in folder: {folder_path}")
+                    expanded_parts.append([])
+                    
+            # Check for regular folder/ syntax (expand individually)
+            elif norm_path.endswith("/"):
                 found_files = get_files_from_folder(base_path, "loras")
                 expanded_parts.append([f"{f}{args}" for f in found_files])
             else:
                 expanded_parts.append([part])
         
+        # Skip if any part expanded to empty
+        if not all(expanded_parts):
+            continue
+            
         for combo in itertools.product(*expanded_parts):
             expanded_loras.append(" + ".join(combo))
     
@@ -270,8 +293,7 @@ def expand_configs(raw_configs, pos_prompts, neg_prompts, denoise_values, seed, 
         schedulers = ALL_SCHEDULERS if entry.get("scheduler") == "*" else to_list(entry.get("scheduler", "normal"))
         steps_l = to_list(entry.get("steps", 20))
         cfgs = to_list(entry.get("cfg", 7.0))
-        str_m = to_list(entry.get("str_model", 1.0))
-        str_c = to_list(entry.get("str_clip", 1.0))
+        clip_skips = to_list(entry.get("clip_skip", 0))
         
         # Expand model folders
         raw_models = to_list(entry.get("model", "Default"))
@@ -286,26 +308,31 @@ def expand_configs(raw_configs, pos_prompts, neg_prompts, denoise_values, seed, 
             else:
                 expanded_models.extend(get_files_from_folder(m, "checkpoints"))
         
-        # Expand LoRA stacks
-        expanded_loras = expand_lora_stack(entry.get("lora", "None"), str_m[0], str_c[0])
+        # Expand LoRA stacks (strengths are now in the lora string itself)
+        expanded_loras = expand_lora_stack(entry.get("lora", "None"))
+        
+        # Get LoRA trigger word omissions (if specified)
+        lora_omit_triggers = entry.get("lora_omit_triggers", [])
+        if not isinstance(lora_omit_triggers, list):
+            lora_omit_triggers = [lora_omit_triggers]
         
         # Build all combinations
         base_combos = []
-        for combo in itertools.product(samplers, schedulers, steps_l, cfgs, expanded_loras, 
-                                      str_m, str_c, denoise_values, prompt_pairs, expanded_models):
+        for combo in itertools.product(samplers, schedulers, steps_l, cfgs, clip_skips, expanded_loras, 
+                                      denoise_values, prompt_pairs, expanded_models):
             base_combos.append({
                 "sampler": combo[0],
                 "scheduler": combo[1],
                 "steps": combo[2],
                 "cfg": combo[3],
-                "lora": combo[4],
-                "str_model": combo[5],
-                "str_clip": combo[6],
-                "denoise": combo[7],
-                "positive": combo[8][0],
-                "negative": combo[8][1],
-                "model": combo[9],
-                "seed": seed
+                "clip_skip": combo[4],
+                "lora": combo[5],
+                "denoise": combo[6],
+                "positive": combo[7][0],
+                "negative": combo[7][1],
+                "model": combo[8],
+                "seed": seed,
+                "lora_omit_triggers": lora_omit_triggers
             })
         
         # Apply base seed and extra seeds

@@ -11,46 +11,6 @@ from PIL import Image
 from diffusers.image_processor import VaeImageProcessor
 
 
-def merge_manifest_user_changes(manifest_path, existing_data):
-    """
-    Reload manifest and merge user changes (favorites, rejected, notes) to preserve them.
-    This prevents losing user modifications when the manifest is saved during generation.
-    
-    Args:
-        manifest_path: Path to the manifest.json file
-        existing_data: The current manifest data dictionary to update
-    """
-    import json
-    try:
-        with open(manifest_path, "r") as f:
-            current_manifest = json.load(f)
-        
-        # Create lookup dict of current items by ID
-        current_items_dict = {
-            item.get("id"): item 
-            for item in current_manifest.get("items", []) 
-            if "id" in item
-        }
-        
-        # Update existing_data items with any user modifications
-        for item in existing_data["items"]:
-            item_id = item.get("id")
-            if item_id in current_items_dict:
-                current_item = current_items_dict[item_id]
-                # Preserve user-modified fields
-                if "favorite" in current_item:
-                    item["favorite"] = current_item["favorite"]
-                if "rejected" in current_item:
-                    item["rejected"] = current_item["rejected"]
-                if "notes" in current_item:
-                    item["notes"] = current_item["notes"]
-                    
-    except FileNotFoundError:
-        # First save, no existing manifest to merge
-        pass
-    except Exception as e:
-        print(f"[GridTester] ⚠️ Warning: Could not merge manifest changes: {e}")
-
 
 # HF Remote VAE endpoints
 HF_ENDPOINTS = {
@@ -272,19 +232,19 @@ class RemoteVAEDecodeWorker:
             try:
                 latent_tensor, meta, height, width = item
                 
-                #print(f"[GridTester] 🌐 Processing remote decode for image #{meta['id']}")
-                #print(f"[GridTester] 🌐 Input latent shape: {latent_tensor.shape}")
+                print(f"[GridTester] 🌐 Processing remote decode for image #{meta['id']}")
+                print(f"[GridTester] 🌐 Input latent shape: {latent_tensor.shape}")
                 
                 # Ensure batch dimension exists
                 if latent_tensor.ndim == 3:
                     latent_tensor = latent_tensor.unsqueeze(0)
-                    #print(f"[GridTester] 🌐 Added batch dim: {latent_tensor.shape}")
+                    print(f"[GridTester] 🌐 Added batch dim: {latent_tensor.shape}")
                 
                 # Remote decode - returns [B, C, H, W] tensor
                 decoded = remote_decode_hf(self.endpoint, latent_tensor, height, width)
                 
-                #print(f"[GridTester] 🌐 Decoded shape: {decoded.shape}")
-                #print(f"[GridTester] 🌐 Decoded dtype: {decoded.dtype}")
+                print(f"[GridTester] 🌐 Decoded shape: {decoded.shape}")
+                print(f"[GridTester] 🌐 Decoded dtype: {decoded.dtype}")
                 
                 # Use VaeImageProcessor to properly postprocess the VAE output
                 # This handles denormalization from [-1, 1] to [0, 1] and format conversion
@@ -310,6 +270,9 @@ class RemoteVAEDecodeWorker:
                 
                 # Save image
                 filename = f"img_{meta['id']}.webp"
+                print("Saving")
+                print(filename)
+                print(self.img_dir)
                 img.save(os.path.join(self.img_dir, filename), quality=80)
                 
                 meta.update({
@@ -320,31 +283,61 @@ class RemoteVAEDecodeWorker:
                 # Update manifest
                 import json
                 self.existing_data["items"].insert(0, meta)
-                
-                # CRITICAL: Merge user changes before saving to preserve favorites/rejections
-                merge_manifest_user_changes(self.manifest_path, self.existing_data)
-                
+                if os.path.exists(self.manifest_path):
+                    try:
+                        with open(self.manifest_path, "r") as f:
+                            disk_manifest = json.load(f)
+                        
+                        # Create a lookup map for items currently in memory
+                        # This allows us to update self.existing_data in-place
+                        memory_items_map = {
+                            i.get("id"): i 
+                            for i in self.existing_data.get("items", []) 
+                            if "id" in i
+                        }
+
+                        # Check every item on disk. If it exists in memory, copy the tags over.
+                        for disk_item in disk_manifest.get("items", []):
+                            d_id = disk_item.get("id")
+                            if d_id and d_id in memory_items_map:
+                                local_item = memory_items_map[d_id]
+                                
+                                # PRESERVE TAGS: Copy these keys from disk to memory
+                                if "favorited" in disk_item:
+                                    local_item["favorited"] = disk_item["favorited"]
+                                if "rejected" in disk_item:
+                                    local_item["rejected"] = disk_item["rejected"]
+
+                    except Exception as e:
+                        print(f"[GridTester] ⚠️ Error syncing with disk manifest: {e}")
+
+                # 3. Now it is safe to save (Memory is now 'fresh' with disk changes)
                 with open(self.manifest_path, "w") as f:
                     json.dump(self.existing_data, f, indent=4)
                 
+                # print("Save Manifest at remote vae")
                 # Send update to dashboard
                 try:
                     from server import PromptServer
                     if PromptServer:
+                        # Get meta, use empty dict if not present
+                        manifest_meta = self.existing_data.get("meta", {})
+                        
                         PromptServer.instance.send_sync("ultimate_grid.update", {
                             "node": self.unique_id,
                             "session_name": self.session_name,
                             "new_items": [meta],
-                            "meta": self.existing_data["meta"]
+                            "meta": manifest_meta
                         })
-                except ImportError:
+                except (ImportError, KeyError):
+                    # Silently ignore dashboard update errors
                     pass
                 
                 self.total_decoded += 1
-                #print(f"[GridTester] ✅ Remote VAE decoded #{meta['id']} ({self.total_decoded} total)")
+                print(f"[GridTester] ✅ Remote VAE decoded #{meta['id']} ({self.total_decoded} total)")
                 
             except Exception as e:
-                #print(f"[GridTester] ❌ Remote VAE worker error: {e}")
+                print(f"[GridTester] ❌ Remote VAE worker error: {e}")
                 import traceback
                 traceback.print_exc()
             finally:

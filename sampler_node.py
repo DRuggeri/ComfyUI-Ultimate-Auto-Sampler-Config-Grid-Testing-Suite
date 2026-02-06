@@ -203,7 +203,7 @@ class SamplerGridTester:
                 optional_positive=None, optional_negative=None, optional_latent=None):
 
         # Import the generation logic from the separate module
-        from .generation_logic import run_generation_loop
+        from .generation_orchestrator import run_generation_loop
         
         return run_generation_loop(
             self,

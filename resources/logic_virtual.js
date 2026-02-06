@@ -244,7 +244,78 @@ const viewport = document.getElementById('viewport');
 function updateTransform() {
     if (!canvas) return;
     canvas.style.transform = `translate(${panOffsetX}px, ${panOffsetY}px) scale(${currentScale})`;
+    
+    // Save viewport position to localStorage
+    saveViewportPosition();
+    
     scheduleVisibleUpdate();
+}
+
+// Save current viewport position to localStorage
+function saveViewportPosition() {
+    try {
+        const viewportState = {
+            panOffsetX: panOffsetX,
+            panOffsetY: panOffsetY,
+            currentScale: currentScale,
+            timestamp: Date.now()
+        };
+        
+        // Use session name if available for session-specific positions
+        const storageKey = (typeof fullManifest !== 'undefined' && fullManifest?.meta?.session_name)
+            ? `viewport_${fullManifest.meta.session_name}`
+            : 'viewport_global';
+        
+        localStorage.setItem(storageKey, JSON.stringify(viewportState));
+    } catch (e) {
+        // Silent fail if localStorage is full
+        console.warn('[Grid] Could not save viewport position:', e);
+    }
+}
+
+// Restore viewport position from localStorage
+function restoreViewportPosition() {
+    try {
+        // Try session-specific position first
+        let storageKey = 'viewport_global';
+        if (typeof fullManifest !== 'undefined' && fullManifest?.meta?.session_name) {
+            storageKey = `viewport_${fullManifest.meta.session_name}`;
+        }
+        
+        const saved = localStorage.getItem(storageKey);
+        if (!saved) {
+            console.log('[Grid] No saved viewport position found');
+            return false;
+        }
+        
+        const viewportState = JSON.parse(saved);
+        
+        // Check if saved state is not too old (optional - 30 days)
+        const age = Date.now() - (viewportState.timestamp || 0);
+        const maxAge = 30 * 24 * 60 * 60 * 1000; // 30 days
+        
+        if (age > maxAge) {
+            console.log('[Grid] Saved viewport position too old, ignoring');
+            return false;
+        }
+        
+        // Restore position
+        panOffsetX = viewportState.panOffsetX || 0;
+        panOffsetY = viewportState.panOffsetY || 0;
+        currentScale = viewportState.currentScale || 1;
+        
+        // Clamp values to valid ranges
+        currentScale = Math.max(MIN_SCALE, Math.min(MAX_SCALE, currentScale));
+        
+        console.log(`[Grid] ✅ Restored viewport position: X=${panOffsetX.toFixed(0)}, Y=${panOffsetY.toFixed(0)}, Scale=${currentScale.toFixed(2)}`);
+        
+        updateTransform();
+        return true;
+        
+    } catch (e) {
+        console.warn('[Grid] Could not restore viewport position:', e);
+        return false;
+    }
 }
 
 function getZoomDelta() {
@@ -360,7 +431,7 @@ function goToImage(imageNumber) {
     const viewportHeight = viewport.clientHeight;
 
     // Calculate pan offsets to center this card
-    panOffsetX = (viewportWidth / 2) - (x * currentScale) - ((itemWidth * currentScale) / 2);
+    // panOffsetX = (viewportWidth / 2) - (x * currentScale) - ((itemWidth * currentScale) / 2);
     panOffsetY = (viewportHeight / 2) - (y * currentScale) - ((rowHeight * currentScale) / 2);
 
     updateTransform();
@@ -556,11 +627,6 @@ function setupKeyboardShortcuts() {
             case '0':
                 e.preventDefault();
                 // resetZoom();
-                autoFitZoom();
-                break;
-            case 'f':
-            case 'F':
-                e.preventDefault();
                 autoFitZoom();
                 break;
             case ' ': // Spacebar - scroll by one row
