@@ -78,10 +78,18 @@ def decode_latent_with_vae(vae, latent_samples):
     
     # Convert to PIL Image
     img_np = decoded.cpu().numpy()
-    img_np = np.clip(img_np[0] * 255, 0, 255).astype(np.uint8)
+    
+    # Remove extra dimensions (handle shapes like (1, 1, H, W, C) or (1, H, W, C))
+    while img_np.ndim > 3:
+        img_np = img_np[0]
+    
+    # Now should be (H, W, C) or (C, H, W)
+    img_np = np.clip(img_np * 255, 0, 255).astype(np.uint8)
     
     # Handle different channel orders
-    if img_np.shape[0] == 3:  # CHW format
+    if img_np.shape[0] == 3 and img_np.ndim == 3:  # CHW format
+        img_np = np.transpose(img_np, (1, 2, 0))
+    elif img_np.shape[-1] != 3 and img_np.ndim == 3:  # Not HWC format
         img_np = np.transpose(img_np, (1, 2, 0))
     
     return Image.fromarray(img_np)
@@ -293,24 +301,15 @@ def flush_batch_with_vae(pending_batch, vae, img_dir, existing_data, session_nam
                     # Get meta, use empty dict if not present
                     manifest_meta = existing_data.get("meta", {})
                     
-                    # Debug: print what we're sending
-                    print(f"[GridTester] 📡 Sending dashboard update for node: {unique_id}")
-                    
                     PromptServer.instance.send_sync("ultimate_grid.update", {
                         "node": unique_id,
                         "session_name": session_name,
                         "new_items": [meta],
                         "meta": manifest_meta
                     })
-                    print(f"[GridTester] ✅ Dashboard update sent successfully")
-            except (ImportError, KeyError) as e:
+            except (ImportError, KeyError):
                 # Silently ignore dashboard update errors
-                print(f"[GridTester] ⚠️ Dashboard update error (silently ignored): {e}")
                 pass
-            except Exception as e:
-                print(f"[GridTester] ⚠️ Unexpected dashboard error: {e}")
-                import traceback
-                traceback.print_exc()
         
         saved_count += 1
     
