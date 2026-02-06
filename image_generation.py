@@ -234,7 +234,7 @@ def flush_batch_with_vae(pending_batch, vae, img_dir, existing_data, session_nam
         # Create manifest entry
         manifest_entry = {
             "id": f"{session_name}_{timestamp}_{meta['seed']}",
-            "file": f"./images/{filename}",
+            "file": f"/view?filename={filename}&type=output&subfolder=benchmarks/{session_name}/images",
             "width": meta["width"],
             "height": meta["height"],
             "sampler": meta["sampler"],

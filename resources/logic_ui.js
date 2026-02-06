@@ -498,8 +498,13 @@ function updateJSONs(visible) {
         // Store the datasets for on-demand generation
         window.cachedJSONData = { good, favorited, rejected };
         
-        // Update button labels with counts
-        updateJSONButtonLabels(good.length, favorited.length, rejected.length);
+        // Calculate unique config counts for button labels
+        const goodUniqueCount = countUniqueConfigs(good);
+        const favUniqueCount = countUniqueConfigs(favorited);
+        const rejUniqueCount = countUniqueConfigs(rejected);
+        
+        // Update button labels with unique counts
+        updateJSONButtonLabels(goodUniqueCount, favUniqueCount, rejUniqueCount);
     }, 100); // Reduced from 300ms since we have separate debounce above
 }
 
@@ -519,27 +524,63 @@ function generateSmartJSON(dataset, targetId) {
         return;
     }
 
-    // Processing Logic
-    const limit = Math.min(dataset.length, 100);
-    const limited = dataset.slice(0, limit);
+    // Extract unique configurations
+    const configMap = new Map();
+    
+    for (const d of dataset) {
+        const config = {
+            sampler: d.sampler,
+            scheduler: d.scheduler,
+            steps: d.steps,
+            cfg: d.cfg,
+            denoise: d.denoise,
+            lora: d.lora,
+            model: d.model || "Default"
+        };
+        
+        // Create a unique key for this configuration
+        const key = JSON.stringify(config);
+        
+        // Only add if we haven't seen this exact config before
+        if (!configMap.has(key)) {
+            configMap.set(key, config);
+        }
+    }
+    
+    // Convert map to array
+    const uniqueConfigs = Array.from(configMap.values());
+    
+    // Limit output
+    const limit = Math.min(uniqueConfigs.length, 100);
+    const limited = uniqueConfigs.slice(0, limit);
 
-    const finalOutput = limited.map(d => ({
-        sampler: d.sampler,
-        scheduler: d.scheduler,
-        steps: d.steps,
-        cfg: d.cfg,
-        denoise: d.denoise,
-        lora: d.lora,
-        model: d.model || "Default"
-    }));
+    let jsonText = JSON.stringify(limited, null, 2);
 
-    let jsonText = JSON.stringify(finalOutput, null, 2);
-
-    if (dataset.length > 100) {
-        jsonText += `\n\n// ... and ${dataset.length - 100} more items`;
+    if (uniqueConfigs.length > 100) {
+        jsonText += `\n\n// ... and ${uniqueConfigs.length - 100} more unique configs`;
     }
 
     el.innerText = jsonText;
+}
+
+// Helper function to count unique configs in a dataset
+function countUniqueConfigs(dataset) {
+    const configSet = new Set();
+    
+    for (const d of dataset) {
+        const key = JSON.stringify({
+            sampler: d.sampler,
+            scheduler: d.scheduler,
+            steps: d.steps,
+            cfg: d.cfg,
+            denoise: d.denoise,
+            lora: d.lora,
+            model: d.model || "Default"
+        });
+        configSet.add(key);
+    }
+    
+    return configSet.size;
 }
 
 // Add button label update function

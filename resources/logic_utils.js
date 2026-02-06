@@ -42,9 +42,9 @@ async function loadSession() {
     const sessInput = document.getElementById('session-input');
     if (!sessInput) return;
     const sess = sessInput.value;
-    
+
     console.log(`[Load] 🔄 Loading session: ${sess}`);
-    
+
     // UI Feedback
     const grid = document.getElementById('grid');
     if (grid) grid.style.opacity = '0.5';
@@ -59,7 +59,7 @@ async function loadSession() {
         // 1. CRITICAL FIX: Reset viewport position
         const viewport = document.getElementById('viewport');
         const canvas = document.getElementById('canvas');
-        
+
         // Reset pan/zoom to defaults
         if (typeof resetZoom === 'function') {
             // This resets currentScale, panOffsetX, panOffsetY
@@ -80,12 +80,16 @@ async function loadSession() {
 
         // 3. Clear all caches
         nodeMap.clear();
-        
+
         // Clear filter sets
         ['sampler', 'scheduler', 'lora', 'denoise', 'model', 'positive', 'negative', 'size', 'seed'].forEach(k => {
             if (filters[k]) filters[k].clear();
         });
 
+        if (typeof filterButtonCache !== 'undefined') {
+            filterButtonCache = {};
+            Object.keys(filterButtonCache).forEach(k => delete filterButtonCache[k]);
+        }
         // 4. Swap data (CRITICAL: Do this before pipeline)
         fullManifest = data;
         activeData = fullManifest.items || [];
@@ -95,17 +99,20 @@ async function loadSession() {
 
         // 5. Reset indices
         refreshIndices();
-        
+
         // 6. CRITICAL FIX: Reset visible range
         // if (typeof visibleRange !== 'undefined') {
         //     visibleRange = { start: 0, end: 0 };
         // }
+        console.log(`[Load] 📊 activeData.length = ${activeData.length}`);
+        console.log(`[Load] 📊 meta.positive = ${meta.positive}`);
+        console.log(`[Load] 📊 Sample items:`, activeData.slice(0, 3));
 
         // 7. Re-initialize filters (don't skip this!)
         if (typeof initFilters === 'function') {
             initFilters();
         }
-        
+
         // Initialize search filter UI
         if (typeof renderSearchFilters === 'function') {
             renderSearchFilters();
@@ -114,20 +121,20 @@ async function loadSession() {
         // 8. CRITICAL FIX: Force pipeline and render
         // Wait a tick for the DOM to update, then process
         await new Promise(resolve => setTimeout(resolve, 10));
-        
+
         console.log(`[Load] 🔧 Running pipeline...`);
         updateDataPipeline();
-        
+
         // 9. Wait for pipeline to complete, then render
         await new Promise(resolve => setTimeout(resolve, 50));
-        
+
         console.log(`[Load] 🎨 Rendering ${processedData?.length || 0} processed items...`);
-        
+
         // Force a full render
         if (typeof renderDOM === 'function') {
             renderDOM();
         }
-        
+
         // 10. Auto-fit after render completes
         // setTimeout(() => {
         //     if (typeof autoFitZoom === 'function') {
@@ -144,11 +151,11 @@ async function loadSession() {
         if (popup) popup.style.display = 'none';
         if (overlay) overlay.style.display = 'none';
         document.body.style.overflow = '';
-        
+
         console.log('[Load] ✅ Session loaded successfully');
 
-    } catch (e) { 
-        console.error('[Load] ❌ Load failed:', e); 
+    } catch (e) {
+        console.error('[Load] ❌ Load failed:', e);
         if (grid) grid.style.opacity = '1';
         alert("Load Error: " + e.message);
     }
@@ -251,13 +258,13 @@ function rejectItem(element) {
     }
 
     card.style.opacity = '0';
-    card.style.transform = 'scale(0.9)'; 
-    card.style.pointerEvents = 'none';   
+    card.style.transform = 'scale(0.9)';
+    card.style.pointerEvents = 'none';
 
     setTimeout(() => {
-        updateDataPipeline(); 
+        updateDataPipeline();
         scheduleJSONUpdate();
-    }, 100); 
+    }, 100);
 }
 
 // Helper to select text in JSON bars

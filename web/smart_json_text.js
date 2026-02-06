@@ -47,6 +47,32 @@ app.registerExtension({
                                     column = parseInt(columnMatch[1]);
                                 }
                             }
+                            
+                            // Last resort: extract the snippet and find it in the text
+                            if (!line) {
+                                const snippetMatch = errorMsg.match(/"([^"]*?)"/);
+                                if (snippetMatch) {
+                                    let snippet = snippetMatch[1];
+                                    // The snippet shows the start of the text, error is usually right after
+                                    // e.g., "[f\n[\n"" means error is at 'f'
+                                    
+                                    // Find first non-whitespace, non-bracket character as likely error
+                                    const errorCharMatch = snippet.match(/[^\[\]\s\n]/);
+                                    if (errorCharMatch) {
+                                        const errorChar = errorCharMatch[0];
+                                        const errorOffset = snippet.indexOf(errorChar);
+                                        
+                                        // Count newlines up to this point in snippet
+                                        const upToErrorChar = snippet.substring(0, errorOffset + 1);
+                                        const newlines = (upToErrorChar.match(/\n/g) || []).length;
+                                        line = newlines + 1;
+                                    } else {
+                                        // Just count newlines in snippet
+                                        const newlines = (snippet.match(/\n/g) || []).length;
+                                        line = newlines + 1;
+                                    }
+                                }
+                            }
 
                             console.log(`JSON Error - Line: ${line}, Col: ${column}, Msg: ${errorMsg}`);
 
