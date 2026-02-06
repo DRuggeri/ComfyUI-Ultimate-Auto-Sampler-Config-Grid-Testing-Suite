@@ -43,57 +43,80 @@ def load_checkpoint(
     Returns:
         tuple: (loaded_model, loaded_clip, loaded_vae)
     """
+    # ==== CRITICAL FIX: Check for optional inputs FIRST ====
+    # Priority 1: All optional inputs provided - skip checkpoint loading entirely
+    if optional_model is not None and optional_clip is not None and optional_vae is not None:
+        print(f"[GridTester] 🔌 Using optional MODEL, CLIP, and VAE (skipping checkpoint load)")
+        return optional_model, optional_clip, optional_vae
+    
+    # Priority 2: Some optional inputs provided - load checkpoint for missing pieces
+    if optional_model is not None or optional_clip is not None or (optional_vae is not None and not use_remote_vae):
+        print(f"[GridTester] 🔌 Using optional inputs (Model: {optional_model is not None}, "
+              f"CLIP: {optional_clip is not None}, VAE: {optional_vae is not None})")
+        
+        # Determine which checkpoint to use
+        actual_ckpt = ckpt_name if target_model_name == "Default" else target_model_name
+        ckpt_path = folder_paths.get_full_path("checkpoints", actual_ckpt)
+        
+        # Determine what we need to load from checkpoint
+        need_model = optional_model is None
+        need_clip = optional_clip is None and not (optional_positive and optional_negative)
+        need_vae = optional_vae is None and not use_remote_vae
+        
+        # Load from checkpoint only what we need
+        loaded_model = optional_model
+        loaded_clip_temp = optional_clip
+        loaded_vae_temp = optional_vae
+        
+        if need_model or need_clip or need_vae:
+            print(f"[GridTester] 📦 Loading from {actual_ckpt} (need - Model: {need_model}, CLIP: {need_clip}, VAE: {need_vae})")
+            
+            # Load checkpoint with appropriate outputs
+            output_vae = need_vae
+            output_clip = need_clip or need_model  # We need clip if we need model
+            
+            out = comfy.sd.load_checkpoint_guess_config(
+                ckpt_path, 
+                output_vae=output_vae, 
+                output_clip=output_clip,
+                embedding_directory=folder_paths.get_folder_paths("embeddings")
+            )
+            
+            # Extract what we need
+            if need_model:
+                loaded_model = out[0]
+            if need_clip:
+                loaded_clip_temp = out[1]
+            if need_vae and output_vae:
+                loaded_vae_temp = out[2]
+        
+        # Handle special cases
+        if loaded_clip_temp is None and (optional_positive and optional_negative):
+            loaded_clip_temp = None  # Using optional conditioning, don't need CLIP
+        
+        if use_remote_vae:
+            loaded_vae_temp = None  # Remote VAE mode
+        
+        print(f"[GridTester] ✅ Loaded {actual_ckpt} with optional overrides")
+        return loaded_model, loaded_clip_temp, loaded_vae_temp
+    
+    # ==== Priority 3: No optional inputs - standard checkpoint loading ====
     if target_model_name == "Default":
-        if optional_model:
-            print(f"[GridTester] ✅ Using optional_model")
-            loaded_model = optional_model
-            
-            if optional_clip:
-                print(f"[GridTester] ✅ Using optional_clip")
-                loaded_clip = optional_clip
-            else:
-                if not (optional_positive and optional_negative):
-                    if loaded_clip is None:
-                        print(f"[GridTester] ⚠️ Loading CLIP from ckpt_name: {ckpt_name}")
-                        ckpt_path = folder_paths.get_full_path("checkpoints", ckpt_name)
-                        out = comfy.sd.load_checkpoint_guess_config(
-                            ckpt_path, output_vae=False, output_clip=True,
-                            embedding_directory=folder_paths.get_folder_paths("embeddings")
-                        )
-                        loaded_clip = out[1]
-                else:
-                    loaded_clip = None
-            
-            if optional_vae:
-                print(f"[GridTester] ✅ Using optional_vae")
-                loaded_vae = optional_vae
-            else:
-                if loaded_vae is None and not use_remote_vae:
-                    print(f"[GridTester] ⚠️ Loading VAE from ckpt_name: {ckpt_name}")
-                    ckpt_path = folder_paths.get_full_path("checkpoints", ckpt_name)
-                    out = comfy.sd.load_checkpoint_guess_config(
-                        ckpt_path, output_vae=True, output_clip=False,
-                        embedding_directory=folder_paths.get_folder_paths("embeddings")
-                    )
-                    loaded_vae = out[2]
-                elif use_remote_vae:
-                    loaded_vae = None
+        print(f"[GridTester] 📦 Loading from ckpt_name: {ckpt_name}")
+        ckpt_path = folder_paths.get_full_path("checkpoints", ckpt_name)
+        if use_remote_vae:
+            out = comfy.sd.load_checkpoint_guess_config(
+                ckpt_path, output_vae=False, output_clip=True,
+                embedding_directory=folder_paths.get_folder_paths("embeddings")
+            )
+            loaded_model, loaded_clip = out[0], out[1]
+            loaded_vae = None
         else:
-            print(f"[GridTester] 📦 Loading from ckpt_name: {ckpt_name}")
-            ckpt_path = folder_paths.get_full_path("checkpoints", ckpt_name)
-            if use_remote_vae:
-                out = comfy.sd.load_checkpoint_guess_config(
-                    ckpt_path, output_vae=False, output_clip=True,
-                    embedding_directory=folder_paths.get_folder_paths("embeddings")
-                )
-                loaded_model, loaded_clip = out[0], out[1]
-                loaded_vae = None
-            else:
-                out = comfy.sd.load_checkpoint_guess_config(
-                    ckpt_path, output_vae=True, output_clip=True,
-                    embedding_directory=folder_paths.get_folder_paths("embeddings")
-                )
-                loaded_model, loaded_clip, loaded_vae = out[:3]
+            out = comfy.sd.load_checkpoint_guess_config(
+                ckpt_path, output_vae=True, output_clip=True,
+                embedding_directory=folder_paths.get_folder_paths("embeddings")
+            )
+            loaded_model, loaded_clip, loaded_vae = out[:3]
     else:
         print(f"[GridTester] 🔄 Switching to checkpoint: {target_model_name}")
         ckpt_path = folder_paths.get_full_path("checkpoints", target_model_name)
