@@ -1,6 +1,7 @@
 """
-Ultimate Config Builder with Dynamic LoRA Arrays
-Enhanced with session loading that populates all fields
+Ultimate Config Builder - Complete HTML UI Version
+ALL data stored in single widget (lora_config)
+Python reads everything from that widget
 """
 
 import os
@@ -10,7 +11,8 @@ from typing import List, Dict, Any
 
 class UltimateConfigBuilder:
     """
-    Config builder with dynamic LoRA array management and session loading.
+    Config builder with complete HTML UI.
+    All data is stored in the lora_config widget as a single JSON object.
     """
     
     @classmethod
@@ -19,7 +21,7 @@ class UltimateConfigBuilder:
         
         return {
             "required": {
-                # Session Management
+                # Session Management (hidden, controlled by HTML)
                 "session_name": ("STRING", {
                     "default": "my_test_session",
                     "multiline": False
@@ -28,72 +30,69 @@ class UltimateConfigBuilder:
                     "default": sessions[0] if sessions else "None"
                 }),
                 
-                # Sampler Settings
+                # Sampler Settings (hidden, controlled by HTML)
                 "samplers": ("STRING", {
                     "default": "euler, dpmpp_2m",
-                    "multiline": False,
-                    "tooltip": "Comma-separated samplers"
+                    "multiline": False
                 }),
                 "schedulers": ("STRING", {
                     "default": "normal, karras",
-                    "multiline": False,
-                    "tooltip": "Comma-separated schedulers"
+                    "multiline": False
                 }),
                 "steps": ("STRING", {
                     "default": "20, 30",
-                    "multiline": False,
-                    "tooltip": "Comma-separated step counts"
+                    "multiline": False
                 }),
                 "cfg": ("STRING", {
                     "default": "7.0",
-                    "multiline": False,
-                    "tooltip": "Comma-separated CFG values"
+                    "multiline": False
                 }),
                 
-                # Dynamic LoRA Configuration
+                # LoRA Configuration (ACTUAL DATA STORAGE - contains EVERYTHING)
                 "lora_config": ("STRING", {
                     "default": cls.get_default_config(),
-                    "multiline": True,
-                    "tooltip": "LoRA arrays configuration (managed by UI)"
+                    "multiline": True
                 }),
                 
-                # Options
+                # Options (hidden, controlled by HTML)
                 "include_none": ("BOOLEAN", {
-                    "default": True,
-                    "label_on": "Include 'None'",
-                    "label_off": "Skip 'None'"
+                    "default": True
                 }),
             },
             "optional": {
                 "model": ("STRING", {
                     "default": "",
-                    "multiline": False,
-                    "tooltip": "Optional model override"
+                    "multiline": False
                 }),
             }
         }
     
-    RETURN_TYPES = ("STRING", "STRING", "STRING", "STRING", "STRING", "STRING", "STRING")
-    RETURN_NAMES = ("configs_json", "session_name", "loaded_samplers", "loaded_schedulers", "loaded_steps", "loaded_cfg", "loaded_lora_config")
+    RETURN_TYPES = ("STRING", "STRING")
+    RETURN_NAMES = ("configs_json", "session_name")
     FUNCTION = "generate_config"
     CATEGORY = "sampling/testing"
     OUTPUT_NODE = True
     
     @staticmethod
     def get_default_config():
-        """Return default LoRA configuration"""
+        """Return default complete configuration"""
         config = {
-            "arrays": [
+            "session_name": "my_test_session",
+            "include_none": True,
+            "config_arrays": [
                 {
-                    "name": "Array 1",
-                    "combine": False,
-                    "loras": [
-                        {"type": "lora", "name": "None", "str_model": 1.0, "str_clip": 1.0}
-                    ]
+                    "name": "Config 1",
+                    "samplers": "euler, dpmpp_2m",
+                    "schedulers": "normal, karras",
+                    "steps": "20, 30",
+                    "cfg": "7.0",
+                    "model": "",
+                    "loras": ["None"],
+                    "combine": False
                 }
             ]
         }
-        return json.dumps(config, indent=2)
+        return json.dumps(config, indent=2, ensure_ascii=False)
     
     @staticmethod
     def get_available_sessions() -> List[str]:
@@ -132,194 +131,47 @@ class UltimateConfigBuilder:
                 print(f"[ConfigBuilder] Warning: Could not parse '{item}'")
         return result
     
-    def build_lora_string(self, lora_type: str, name: str, str_model: float, str_clip: float) -> str:
-        """Build LoRA string"""
-        if name == "None" or not name:
-            return "None"
+    def process_lora_array(self, config_array: Dict, include_none: bool) -> List[str]:
+        """
+        Process a SINGLE config array and return its lora strings.
         
-        if lora_type == "folder":
-            return name if name.endswith("/") else name + "/"
+        Args:
+            config_array: Single config array dict from config_arrays
+            include_none: Whether to include "None" in results
+            
+        Returns:
+            List of lora strings for this config array
+        """
+        array_name = config_array.get("name", "Unnamed Config")
+        combine = config_array.get("combine", False)
+        loras = config_array.get("loras", [])
         
-        return f"{name}:{str_model}:{str_clip}"
-    
-    def load_session_data(self, session_name: str) -> Dict[str, Any]:
-        """Load configuration from an existing session"""
-        print("loading session data")
-        try:
-            output_dir = folder_paths.get_output_directory()
-            manifest_path = os.path.join(
-                output_dir, 
-                "benchmarks", 
-                session_name, 
-                "manifest.json"
-            )
-            
-            if not os.path.exists(manifest_path):
-                print(f"[ConfigBuilder] Session '{session_name}' not found")
-                return None
-            
-            with open(manifest_path, "r") as f:
-                manifest = json.load(f)
-            
-            meta = manifest.get("meta", {})
-            
-            # Extract raw config data
-            raw_configs = meta.get("raw_configs", [])
-            configs_json = meta.get("configs_json", "")
-            print(raw_configs)
-            print(configs_json)
-            # Try to parse configs_json first, fall back to raw_configs
-            try:
-                if configs_json:
-                    parsed_configs = json.loads(configs_json)
-                    if isinstance(parsed_configs, list) and len(parsed_configs) > 0:
-                        raw_configs = parsed_configs
-            except:
-                pass
-            
-            # Extract sampler settings - handle both single and list formats
-            def extract_value(key, default):
-                value = meta.get(key, default)
-                if isinstance(value, list):
-                    return ", ".join(str(v) for v in value)
-                return str(value)
-            
-            # Extract settings
-            loaded_data = {
-                "samplers": extract_value("samplers", "euler"),
-                "schedulers": extract_value("schedulers", "normal"),
-                "steps": extract_value("steps", "20"),
-                "cfg": extract_value("cfg", "7.0"),
-                "model": meta.get("model", ""),
-                "raw_configs": raw_configs
-            }
-            
-            return loaded_data
-            
-        except Exception as e:
-            print(f"[ConfigBuilder] Error loading session: {e}")
-            import traceback
-            traceback.print_exc()
-            return None
-    
-    def convert_raw_configs_to_lora_config(self, raw_configs: List[Dict]) -> str:
-        """Convert raw configs from manifest into lora_config format"""
-        if not raw_configs:
-            return self.get_default_config()
+        # Loras are already strings
+        lora_strings = [str(lora) for lora in loras if lora and lora != "None"]
         
-        arrays = []
+        # Add combined version if requested
+        if combine and len(lora_strings) > 1:
+            stackable = [s for s in lora_strings if not s.endswith("/")]
+            if len(stackable) > 1:
+                # When combine is true, ONLY return the combined version
+                combined = " + ".join(stackable)
+                lora_strings = [combined]
+                print(f"[ConfigBuilder] {array_name}: Using combined version only")
         
-        # Process each raw config
-        for idx, raw_config in enumerate(raw_configs):
-            lora_value = raw_config.get("lora", "None")
-            
-            # Parse the lora field
-            loras_list = []
-            
-            if isinstance(lora_value, str):
-                lora_items = [lora_value]
-            elif isinstance(lora_value, list):
-                lora_items = lora_value
-            else:
-                lora_items = ["None"]
-            
-            # Convert each lora item
-            for lora_item in lora_items:
-                if lora_item == "None":
-                    loras_list.append({
-                        "type": "lora",
-                        "name": "None",
-                        "str_model": 1.0,
-                        "str_clip": 1.0
-                    })
-                elif lora_item.endswith("/"):
-                    # Folder
-                    loras_list.append({
-                        "type": "folder",
-                        "name": lora_item,
-                        "str_model": 1.0,
-                        "str_clip": 1.0
-                    })
-                elif " + " in lora_item:
-                    # Stacked LoRAs - split and parse each
-                    stacked = lora_item.split(" + ")
-                    for stacked_lora in stacked:
-                        if ":" in stacked_lora:
-                            parts = stacked_lora.split(":")
-                            loras_list.append({
-                                "type": "lora",
-                                "name": parts[0],
-                                "str_model": float(parts[1]) if len(parts) > 1 else 1.0,
-                                "str_clip": float(parts[2]) if len(parts) > 2 else 1.0
-                            })
-                        else:
-                            loras_list.append({
-                                "type": "lora",
-                                "name": stacked_lora,
-                                "str_model": 1.0,
-                                "str_clip": 1.0
-                            })
-                elif ":" in lora_item:
-                    # Parse lora:str_model:str_clip format
-                    parts = lora_item.split(":")
-                    loras_list.append({
-                        "type": "lora",
-                        "name": parts[0],
-                        "str_model": float(parts[1]) if len(parts) > 1 else 1.0,
-                        "str_clip": float(parts[2]) if len(parts) > 2 else 1.0
-                    })
-                else:
-                    # Just a lora name
-                    loras_list.append({
-                        "type": "lora",
-                        "name": lora_item,
-                        "str_model": 1.0,
-                        "str_clip": 1.0
-                    })
-            
-            if loras_list:
-                arrays.append({
-                    "name": f"Loaded Config {idx + 1}",
-                    "combine": False,
-                    "loras": loras_list
-                })
+        # Handle None option
+        if include_none:
+            lora_strings.insert(0, "None")
         
-        config = {"arrays": arrays}
-        return json.dumps(config, indent=2)
-    
-    def process_lora_config(self, config_data: Dict) -> List[str]:
-        """Process the LoRA configuration and return list of LoRA strings"""
-        arrays = config_data.get("arrays", [])
-        all_configs = []
+        # Remove duplicates while preserving order
+        seen = set()
+        unique_strings = []
+        for item in lora_strings:
+            if item not in seen:
+                seen.add(item)
+                unique_strings.append(item)
         
-        for i, array in enumerate(arrays):
-            array_name = array.get("name", f"Array {i+1}")
-            combine = array.get("combine", False)
-            loras = array.get("loras", [])
-            
-            lora_strings = []
-            
-            for lora in loras:
-                lora_type = lora.get("type", "lora")
-                name = lora.get("name", "None")
-                str_model = lora.get("str_model", 1.0)
-                str_clip = lora.get("str_clip", 1.0)
-                
-                lora_str = self.build_lora_string(lora_type, name, str_model, str_clip)
-                lora_strings.append(lora_str)
-                all_configs.append(lora_str)
-            
-            # Add combined version if requested
-            if combine and len(lora_strings) > 1:
-                stackable = [s for s in lora_strings if s != "None" and not s.endswith("/")]
-                if len(stackable) > 1:
-                    combined = " + ".join(stackable)
-                    all_configs.append(combined)
-                    print(f"[ConfigBuilder] {array_name}: Added stacked combo")
-            
-            print(f"[ConfigBuilder] {array_name}: Processed {len(lora_strings)} LoRAs")
-        
-        return all_configs
+        print(f"[ConfigBuilder] {array_name}: Processed {len(unique_strings)} LoRA configs")
+        return unique_strings
     
     def generate_config(
         self,
@@ -333,119 +185,93 @@ class UltimateConfigBuilder:
         include_none,
         model=""
     ):
-        """Generate configuration"""
+        """
+        Generate configuration.
         
-        # Store original values for output
-        output_samplers = samplers
-        output_schedulers = schedulers
-        output_steps = steps
-        output_cfg = cfg
-        output_lora_config = lora_config
-        
-        # Check if we should load a session
-        if load_session and load_session != "None":
-            print(f"\n[ConfigBuilder] 🔄 Loading session '{load_session}'...")
-            loaded = self.load_session_data(load_session)
-            
-            if loaded:
-                print(f"[ConfigBuilder] ✅ Successfully loaded session '{load_session}'")
-                
-                # Override parameters with loaded values
-                output_samplers = loaded.get("samplers", samplers)
-                output_schedulers = loaded.get("schedulers", schedulers)
-                output_steps = str(loaded.get("steps", steps))
-                output_cfg = str(loaded.get("cfg", cfg))
-                model = loaded.get("model", model)
-                
-                # Convert raw configs to lora_config format
-                if loaded.get("raw_configs"):
-                    output_lora_config = self.convert_raw_configs_to_lora_config(loaded["raw_configs"])
-                    print(f"[ConfigBuilder] 📋 Converted {len(loaded['raw_configs'])} config(s) to LoRA format")
-                
-                # Update session name to loaded session
-                session_name = load_session
-                
-                print(f"[ConfigBuilder] 📊 Loaded settings:")
-                print(f"  Samplers: {output_samplers}")
-                print(f"  Schedulers: {output_schedulers}")
-                print(f"  Steps: {output_steps}")
-                print(f"  CFG: {output_cfg}")
-                if model:
-                    print(f"  Model: {model}")
-            else:
-                print(f"[ConfigBuilder] ⚠️ Could not load session '{load_session}', using current values")
-        
-        # Use the (potentially loaded) values for processing
-        sampler_list = self.parse_comma_list(output_samplers)
-        scheduler_list = self.parse_comma_list(output_schedulers)
-        steps_list = self.parse_number_list(output_steps)
-        cfg_list = self.parse_number_list(output_cfg)
-        
-        # Parse LoRA configuration
-        try:
-            config_data = json.loads(output_lora_config)
-        except json.JSONDecodeError as e:
-            print(f"[ConfigBuilder] ⚠️ Error parsing LoRA config: {e}")
-            print(f"[ConfigBuilder] Using default configuration")
-            config_data = json.loads(self.get_default_config())
-        
-        # Process LoRA arrays
-        all_lora_configs = self.process_lora_config(config_data)
-        
-        # Add None if requested
-        if include_none and "None" not in all_lora_configs:
-            all_lora_configs.insert(0, "None")
-        
-        # Remove duplicates
-        seen = set()
-        unique_configs = []
-        for item in all_lora_configs:
-            if item not in seen:
-                seen.add(item)
-                unique_configs.append(item)
-        
-        # Build final config
-        config = {
-            "sampler": sampler_list if len(sampler_list) > 1 else sampler_list[0] if sampler_list else "euler",
-            "scheduler": scheduler_list if len(scheduler_list) > 1 else scheduler_list[0] if scheduler_list else "normal",
-            "steps": steps_list if len(steps_list) > 1 else steps_list[0] if steps_list else 20,
-            "cfg": cfg_list if len(cfg_list) > 1 else cfg_list[0] if cfg_list else 7.0,
-            "lora": unique_configs if len(unique_configs) > 1 else unique_configs[0] if unique_configs else "None"
-        }
-        
-        if model and model.strip():
-            config["model"] = model.strip()
-        
-        configs_array = [config]
-        json_output = json.dumps(configs_array, indent=2)
-        
-        # Calculate totals
-        total = (
-            len(sampler_list or [1]) * 
-            len(scheduler_list or [1]) * 
-            len(steps_list or [1]) * 
-            len(cfg_list or [1]) * 
-            len(unique_configs or [1])
-        )
+        NOTE: All widget parameters are IGNORED!
+        The actual data comes from the lora_config widget which contains everything.
+        """
         
         print(f"\n{'='*80}")
-        print(f"[ConfigBuilder] 📋 Final Config for '{session_name}'")
+        print(f"[ConfigBuilder] 🎯 Generating Configuration")
         print(f"{'='*80}")
-        print(f"LoRA Arrays: {len(config_data.get('arrays', []))}")
-        print(f"Unique LoRA Configs: {len(unique_configs)}")
-        print(f"Total Combinations: {total}")
+        
+        # Parse the COMPLETE state from lora_config widget
+        try:
+            state = json.loads(lora_config)
+        except json.JSONDecodeError as e:
+            print(f"[ConfigBuilder] ⚠️ Error parsing lora_config: {e}")
+            print(f"[ConfigBuilder] Using default config")
+            state = json.loads(self.get_default_config())
+        
+        # Extract values from state
+        actual_session_name = state.get("session_name", session_name)
+        actual_include_none = state.get("include_none", include_none)
+        config_arrays = state.get("config_arrays", [])
+        
+        if not config_arrays:
+            config_arrays = [{
+                "name": "Config 1",
+                "samplers": "euler",
+                "schedulers": "normal",
+                "steps": "20",
+                "cfg": "7.0",
+                "model": "",
+                "loras": ["None"],
+                "combine": False
+            }]
+        
+        configs_output = []
+        total_lora_configs = 0
+        
+        for config_array in config_arrays:
+            # Parse values from this config array
+            sampler_list = self.parse_comma_list(config_array.get("samplers", "euler"))
+            scheduler_list = self.parse_comma_list(config_array.get("schedulers", "normal"))
+            steps_list = self.parse_number_list(config_array.get("steps", "20"))
+            cfg_list = self.parse_number_list(config_array.get("cfg", "7.0"))
+            config_model = config_array.get("model", "")
+            
+            # Process loras for this config
+            lora_strings = self.process_lora_array(config_array, actual_include_none)
+            total_lora_configs += len(lora_strings)
+            
+            # Create ONE config for this array
+            config = {
+                "sampler": sampler_list if len(sampler_list) > 1 else sampler_list[0] if sampler_list else "euler",
+                "scheduler": scheduler_list if len(scheduler_list) > 1 else scheduler_list[0] if scheduler_list else "normal",
+                "steps": steps_list if len(steps_list) > 1 else steps_list[0] if steps_list else 20,
+                "cfg": cfg_list if len(cfg_list) > 1 else cfg_list[0] if cfg_list else 7.0,
+                "lora": lora_strings if len(lora_strings) > 1 else lora_strings[0] if lora_strings else "None"
+            }
+            
+            if config_model and config_model.strip():
+                config["model"] = config_model.strip()
+            
+            configs_output.append(config)
+        
+        json_output = json.dumps(configs_output, indent=2, ensure_ascii=False)
+        
+        # Calculate totals
+        total_combinations = 0
+        for config in configs_output:
+            lora_count = len(config["lora"]) if isinstance(config["lora"], list) else 1
+            sampler_count = len(config["sampler"]) if isinstance(config["sampler"], list) else 1
+            scheduler_count = len(config["scheduler"]) if isinstance(config["scheduler"], list) else 1
+            steps_count = len(config["steps"]) if isinstance(config["steps"], list) else 1
+            cfg_count = len(config["cfg"]) if isinstance(config["cfg"], list) else 1
+            
+            total_combinations += (sampler_count * scheduler_count * steps_count * cfg_count * lora_count)
+        
+        print(f"[ConfigBuilder] 📊 Configuration Summary:")
+        print(f"  Session: {actual_session_name}")
+        print(f"  Config Arrays: {len(config_arrays)}")
+        print(f"  Total LoRA Configs: {total_lora_configs}")
+        print(f"  Total Combinations: {total_combinations}")
         print(f"{'='*80}\n")
         
-        # Return loaded values so they can update the UI
-        return (
-            json_output, 
-            session_name,
-            output_samplers,
-            output_schedulers,
-            output_steps,
-            output_cfg,
-            output_lora_config
-        )
+        # Return just the essentials
+        return (json_output, actual_session_name)
 
 
 NODE_CLASS_MAPPINGS = {
