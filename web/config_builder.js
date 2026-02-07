@@ -5,6 +5,7 @@
  * - Live JSON preview
  * - FLEX WRAP LAYOUT
  * - DYNAMIC MODEL SELECTION (Multiple Models & Folders)
+ * - TRIGGER WORD LOOKUP FEATURE
  */
 
 import { app } from "../../scripts/app.js";
@@ -118,9 +119,106 @@ function parseLoraString(loraStr) {
 
 function buildLoraString(name, modelStr, clipStr) {
     if (!name || name === "None") return "None";
-    // if (name.endsWith("/")) return name;
-    // if (modelStr === 1.0 && clipStr === 1.0) return name;
     return `${name}:${modelStr.toFixed(2)}:${clipStr.toFixed(2)}`;
+}
+
+// Create a searchable/filterable select element
+function createSearchableSelect(options, currentValue, onChange, placeholder = "Search...") {
+    const container = document.createElement("div");
+    container.style.position = "relative";
+    container.style.width = "100%";
+
+    const input = document.createElement("input");
+    input.className = "cb-input";
+    input.type = "text";
+    input.placeholder = placeholder;
+    input.value = currentValue || "";
+    input.autocomplete = "off";
+    
+    const dropdown = document.createElement("div");
+    dropdown.style.cssText = `
+        position: absolute;
+        top: 100%;
+        left: 0;
+        right: 0;
+        max-height: 300px;
+        overflow-y: auto;
+        background: #1a1a1a;
+        border: 1px solid #0066cc;
+        border-top: none;
+        border-radius: 0 0 4px 4px;
+        z-index: 1000;
+        display: none;
+    `;
+
+    let filteredOptions = options;
+    
+    const renderOptions = () => {
+        dropdown.innerHTML = "";
+        filteredOptions.forEach(opt => {
+            const optDiv = document.createElement("div");
+            optDiv.textContent = opt;
+            optDiv.style.cssText = `
+                padding: 8px 10px;
+                cursor: pointer;
+                color: white;
+                font-size: 13px;
+                font-family: monospace;
+            `;
+            optDiv.onmouseover = () => optDiv.style.background = "#2a2a2a";
+            optDiv.onmouseout = () => optDiv.style.background = "transparent";
+            optDiv.onclick = () => {
+                input.value = opt;
+                dropdown.style.display = "none";
+                onChange(opt);
+            };
+            dropdown.appendChild(optDiv);
+        });
+
+        if (filteredOptions.length === 0) {
+            const noResults = document.createElement("div");
+            noResults.textContent = "No matches found";
+            noResults.style.cssText = "padding: 8px 10px; color: #666; font-style: italic;";
+            dropdown.appendChild(noResults);
+        }
+    };
+
+    input.onfocus = () => {
+        filteredOptions = options;
+        renderOptions();
+        dropdown.style.display = "block";
+    };
+
+    input.oninput = () => {
+        const searchTerm = input.value.toLowerCase();
+        filteredOptions = options.filter(opt => 
+            opt.toLowerCase().includes(searchTerm)
+        );
+        renderOptions();
+        dropdown.style.display = "block";
+    };
+
+    input.onkeydown = (e) => {
+        if (e.key === "Enter" && filteredOptions.length > 0) {
+            input.value = filteredOptions[0];
+            dropdown.style.display = "none";
+            onChange(filteredOptions[0]);
+        } else if (e.key === "Escape") {
+            dropdown.style.display = "none";
+        }
+    };
+
+    // Close dropdown when clicking outside
+    document.addEventListener("click", (e) => {
+        if (!container.contains(e.target)) {
+            dropdown.style.display = "none";
+        }
+    });
+
+    container.appendChild(input);
+    container.appendChild(dropdown);
+    
+    return container;
 }
 
 app.registerExtension({
@@ -150,15 +248,16 @@ app.registerExtension({
                 this.configWidget = configWidget;
                 this.state = {
                     session_name: "my_test_session",
-                    include_none: true,
+                    include_none: false,
                     config_arrays: [{
                         name: "Config 1",
                         samplers: "euler, dpmpp_2m",
                         schedulers: "normal, karras",
                         steps: "20, 30",
                         cfg: "7.0",
-                        models: ["None"], // Changed to array
+                        models: ["None"],
                         loras: ["None"],
+                        lora_omit_triggers: [],
                         combine: false
                     }]
                 };
@@ -175,6 +274,7 @@ app.registerExtension({
                                 delete arr.model;
                             }
                             if (!arr.models) arr.models = ["None"];
+                            if (!arr.lora_omit_triggers) arr.lora_omit_triggers = [];
                         });
                     } else if (existing.lora_config) {
                         this.state = this.migrateOldFormat(existing);
@@ -185,15 +285,16 @@ app.registerExtension({
                     const arrays = oldState.lora_config?.arrays || [];
                     return {
                         session_name: oldState.session_name || "my_test_session",
-                        include_none: oldState.include_none !== undefined ? oldState.include_none : true,
+                        include_none: oldState.include_none !== undefined ? oldState.include_none : false,
                         config_arrays: arrays.map(arr => ({
                             name: arr.name,
                             samplers: oldState.samplers || "euler",
                             schedulers: oldState.schedulers || "normal",
                             steps: oldState.steps || "20",
                             cfg: oldState.cfg || "7.0",
-                            models: oldState.model ? [oldState.model] : ["None"], // Handle legacy model string
+                            models: oldState.model ? [oldState.model] : ["None"],
                             loras: arr.loras || ["None"],
+                            lora_omit_triggers: [],
                             combine: arr.combine || false
                         }))
                     };
@@ -208,7 +309,166 @@ app.registerExtension({
                 this.htmlContainer.style.cssText = `width: 100%; height: 100%; background: #1a1a1a; display: flex; flex-direction: column;`;
                 this.addDOMWidget("config_ui", "div", this.htmlContainer, { serialize: false, hideOnZoom: false });
 
-                // --- UI RENDER ---
+                // --- TRIGGER LOOKUP MODAL ---
+                this.showTriggerLookupModal = async function(arrayIdx) {
+                    const configArray = this.state.config_arrays[arrayIdx];
+                    
+                    // Create modal overlay
+                    const overlay = document.createElement("div");
+                    overlay.style.cssText = `
+                        position: fixed;
+                        top: 0;
+                        left: 0;
+                        width: 100%;
+                        height: 100%;
+                        background: rgba(0, 0, 0, 0.8);
+                        display: flex;
+                        align-items: center;
+                        justify-content: center;
+                        z-index: 10000;
+                    `;
+
+                    const modal = document.createElement("div");
+                    modal.style.cssText = `
+                        background: #2a2a2a;
+                        border: 2px solid #0066cc;
+                        border-radius: 8px;
+                        padding: 20px;
+                        max-width: 600px;
+                        max-height: 80vh;
+                        overflow-y: auto;
+                        color: white;
+                    `;
+
+                    const title = document.createElement("h3");
+                    title.textContent = "🔎 LoRA Trigger Words Lookup";
+                    title.style.cssText = "margin: 0 0 15px 0; color: #0066cc;";
+                    modal.appendChild(title);
+
+                    const status = document.createElement("div");
+                    status.textContent = "🔄 Fetching trigger words from CivitAI...";
+                    status.style.cssText = "margin-bottom: 15px; color: #aaa;";
+                    modal.appendChild(status);
+
+                    const content = document.createElement("div");
+                    modal.appendChild(content);
+
+                    const buttonBar = document.createElement("div");
+                    buttonBar.style.cssText = "display: flex; gap: 10px; margin-top: 15px; justify-content: flex-end;";
+
+                    const addAllBtn = document.createElement("button");
+                    addAllBtn.className = "cb-button primary";
+                    addAllBtn.textContent = "➕ Add All Selected to Omit List";
+                    addAllBtn.disabled = true;
+
+                    const closeBtn = document.createElement("button");
+                    closeBtn.className = "cb-button";
+                    closeBtn.textContent = "Close";
+                    closeBtn.onclick = () => document.body.removeChild(overlay);
+
+                    buttonBar.appendChild(addAllBtn);
+                    buttonBar.appendChild(closeBtn);
+                    modal.appendChild(buttonBar);
+
+                    overlay.appendChild(modal);
+                    document.body.appendChild(overlay);
+
+                    // Fetch triggers
+                    try {
+                        const loras = configArray.loras.filter(l => l && l !== "None");
+                        const response = await fetch("/configbuilder/lookup_triggers", {
+                            method: "POST",
+                            headers: { "Content-Type": "application/json" },
+                            body: JSON.stringify({ loras })
+                        });
+
+                        if (!response.ok) {
+                            throw new Error(`HTTP ${response.status}`);
+                        }
+
+                        const data = await response.json();
+                        const triggers = data.triggers || {};
+
+                        status.textContent = `✅ Found triggers for ${Object.keys(triggers).length} LoRAs`;
+
+                        // Display results
+                        const selectedTriggers = new Set();
+
+                        Object.entries(triggers).forEach(([loraName, triggerList]) => {
+                            const loraSection = document.createElement("div");
+                            loraSection.style.cssText = `
+                                background: #333;
+                                border-left: 3px solid #0066cc;
+                                padding: 10px;
+                                margin-bottom: 10px;
+                                border-radius: 4px;
+                            `;
+
+                            const loraTitle = document.createElement("div");
+                            loraTitle.textContent = loraName.split('/').pop().replace('.safetensors', '');
+                            loraTitle.style.cssText = "font-weight: bold; margin-bottom: 8px; color: #0066cc;";
+                            loraSection.appendChild(loraTitle);
+
+                            if (!triggerList || triggerList.length === 0) {
+                                const noTriggers = document.createElement("div");
+                                noTriggers.textContent = "No triggers found";
+                                noTriggers.style.cssText = "color: #888; font-style: italic;";
+                                loraSection.appendChild(noTriggers);
+                            } else {
+                                triggerList.forEach(trigger => {
+                                    const triggerRow = document.createElement("label");
+                                    triggerRow.style.cssText = `
+                                        display: flex;
+                                        align-items: center;
+                                        gap: 8px;
+                                        padding: 4px;
+                                        cursor: pointer;
+                                        border-radius: 3px;
+                                    `;
+                                    triggerRow.onmouseover = () => triggerRow.style.background = "#444";
+                                    triggerRow.onmouseout = () => triggerRow.style.background = "transparent";
+
+                                    const checkbox = document.createElement("input");
+                                    checkbox.type = "checkbox";
+                                    checkbox.checked = false;
+                                    checkbox.onchange = () => {
+                                        if (checkbox.checked) {
+                                            selectedTriggers.add(trigger);
+                                        } else {
+                                            selectedTriggers.delete(trigger);
+                                        }
+                                        addAllBtn.disabled = selectedTriggers.size === 0;
+                                    };
+
+                                    const triggerText = document.createElement("span");
+                                    triggerText.textContent = trigger;
+                                    triggerText.style.cssText = "color: #ddd;";
+
+                                    triggerRow.appendChild(checkbox);
+                                    triggerRow.appendChild(triggerText);
+                                    loraSection.appendChild(triggerRow);
+                                });
+                            }
+
+                            content.appendChild(loraSection);
+                        });
+
+                        // Add All button handler
+                        addAllBtn.onclick = () => {
+                            const existing = new Set(configArray.lora_omit_triggers);
+                            selectedTriggers.forEach(t => existing.add(t));
+                            this.state.config_arrays[arrayIdx].lora_omit_triggers = Array.from(existing);
+                            this.saveState();
+                            this.renderUI();
+                            document.body.removeChild(overlay);
+                        };
+
+                    } catch (error) {
+                        status.textContent = `❌ Error: ${error.message}`;
+                        console.error("[ConfigBuilder] Trigger lookup error:", error);
+                    }
+                };
+
                 // --- UI RENDERING ---
                 this.renderUI = function () {
                     // 1. SAVE SCROLL POSITION
@@ -223,7 +483,6 @@ app.registerExtension({
                                 overflow-y: auto;
                                 box-sizing: border-box;
                             }
-                            /* ... (All your existing CSS styles remain exactly the same) ... */
                             .cb-sections-row { display: flex; flex-wrap: wrap; gap: 12px; margin-bottom: 12px; }
                             .cb-section { background: #2a2a2a; border-radius: 4px; padding: 12px; border: 1px solid #3a3a3a; box-sizing: border-box; flex: 1 1 300px; }
                             .cb-section.full-width { flex: 1 1 100%; width: 100%; }
@@ -281,6 +540,7 @@ app.registerExtension({
                             cfg: "7.0",
                             models: ["None"],
                             loras: ["None"],
+                            lora_omit_triggers: [],
                             combine: false
                         });
                         this.saveState();
@@ -305,17 +565,6 @@ app.registerExtension({
                     if (newScrollContainer) {
                         newScrollContainer.scrollTop = savedScrollTop;
                     }
-                };;
-
-                this.createInputGroup = function (labelText, inputElement) {
-                    const group = document.createElement("div");
-                    group.className = "cb-input-group";
-                    const label = document.createElement("label");
-                    label.className = "cb-label";
-                    label.textContent = labelText;
-                    group.appendChild(label);
-                    group.appendChild(inputElement);
-                    return group;
                 };
 
                 this.renderSessionSection = function (container) {
@@ -331,17 +580,22 @@ app.registerExtension({
                     nameInput.onchange = () => { this.state.session_name = nameInput.value; this.saveState(); };
                     grid.appendChild(this.createInputGroup("Session Name", nameInput));
 
-                    const loadSelect = document.createElement("select");
-                    loadSelect.className = "cb-select";
-                    loadSelect.innerHTML = availableSessions.map(s => `<option value="${s}">${s}</option>`).join('');
-                    loadSelect.onchange = async () => { if (loadSelect.value && loadSelect.value !== "None") await this.loadSession(loadSelect.value); };
-                    grid.appendChild(this.createInputGroup("Load Session", loadSelect));
+                    const loadSearchable = createSearchableSelect(
+                        availableSessions,
+                        "",
+                        async (value) => {
+                            if (value && value !== "None") {
+                                await this.loadSession(value);
+                            }
+                        },
+                        "Search sessions..."
+                    );
+                    grid.appendChild(this.createInputGroup("Load Session", loadSearchable));
 
                     section.appendChild(grid);
                     container.appendChild(section);
                 };
 
-                
                 this.createConfigArrayElement = function (configArray, arrayIdx) {
                     const div = document.createElement("div");
                     div.className = "cb-array";
@@ -402,7 +656,7 @@ app.registerExtension({
 
                     const addModelBtn = document.createElement("button");
                     addModelBtn.className = "cb-button";
-                    addModelBtn.style.borderLeft = "4px solid #cc6600"; // Orange accent
+                    addModelBtn.style.borderLeft = "4px solid #cc6600";
                     addModelBtn.textContent = `➕ Add Model`;
                     addModelBtn.onclick = () => {
                         if (!this.state.config_arrays[arrayIdx].models) this.state.config_arrays[arrayIdx].models = [];
@@ -414,7 +668,7 @@ app.registerExtension({
 
                     const addLoraBtn = document.createElement("button");
                     addLoraBtn.className = "cb-button";
-                    addLoraBtn.style.borderLeft = "4px solid #0066cc"; // Blue accent
+                    addLoraBtn.style.borderLeft = "4px solid #0066cc";
                     addLoraBtn.textContent = `➕ Add LoRA`;
                     addLoraBtn.onclick = () => {
                         this.state.config_arrays[arrayIdx].loras.push("None");
@@ -465,10 +719,134 @@ app.registerExtension({
                         loraTitle.textContent = "LoRAs";
                         loraGrid.appendChild(loraTitle);
 
+                        // --- OMIT TRIGGERS SECTION (NEW) ---
+                        const omitSection = document.createElement("div");
+                        omitSection.style.cssText = `
+                            width: 100%;
+                            background: #252525;
+                            border-radius: 4px;
+                            padding: 10px;
+                            margin-top: 10px;
+                            border-left: 3px solid #cc6600;
+                        `;
+
+                        const omitTitle = document.createElement("div");
+                        omitTitle.textContent = "🚫 Omit Trigger Words";
+                        omitTitle.style.cssText = "font-weight: bold; margin-bottom: 8px; color: #cc6600; font-size: 12px;";
+                        omitSection.appendChild(omitTitle);
+
+                        // Ensure lora_omit_triggers exists
+                        if (!configArray.lora_omit_triggers) {
+                            configArray.lora_omit_triggers = [];
+                        }
+
+                        // Chips display
+                        const chipsContainer = document.createElement("div");
+                        chipsContainer.style.cssText = `
+                            display: flex;
+                            flex-wrap: wrap;
+                            gap: 6px;
+                            margin-bottom: 8px;
+                            min-height: 30px;
+                        `;
+
+                        const renderChips = () => {
+                            chipsContainer.innerHTML = "";
+                            if (configArray.lora_omit_triggers.length === 0) {
+                                const placeholder = document.createElement("div");
+                                placeholder.textContent = "No triggers omitted";
+                                placeholder.style.cssText = "color: #666; font-style: italic; padding: 4px;";
+                                chipsContainer.appendChild(placeholder);
+                                return;
+                            }
+
+                            configArray.lora_omit_triggers.forEach((trigger, tIdx) => {
+                                const chip = document.createElement("div");
+                                chip.style.cssText = `
+                                    display: flex;
+                                    align-items: center;
+                                    background: #444;
+                                    color: #fff;
+                                    border-radius: 12px;
+                                    padding: 2px 8px;
+                                    font-size: 11px;
+                                `;
+
+                                const text = document.createElement("span");
+                                text.textContent = trigger;
+                                chip.appendChild(text);
+
+                                const closeBtn = document.createElement("span");
+                                closeBtn.textContent = "×";
+                                closeBtn.style.cssText = "margin-left: 6px; cursor: pointer; color: #ff8888; font-weight: bold;";
+                                closeBtn.onclick = () => {
+                                    this.state.config_arrays[arrayIdx].lora_omit_triggers.splice(tIdx, 1);
+                                    this.saveState();
+                                    renderChips();
+                                };
+                                chip.appendChild(closeBtn);
+                                chipsContainer.appendChild(chip);
+                            });
+                        };
+                        renderChips();
+                        omitSection.appendChild(chipsContainer);
+
+                        // Input & Buttons Row
+                        const inputRow = document.createElement("div");
+                        inputRow.style.cssText = "display: flex; gap: 8px; margin-bottom: 8px;";
+
+                        const triggerInput = document.createElement("input");
+                        triggerInput.className = "cb-input";
+                        triggerInput.placeholder = "Enter trigger to omit...";
+                        triggerInput.style.flex = "1";
+
+                        // Add on Enter key
+                        triggerInput.onkeydown = (e) => {
+                            if (e.key === "Enter" && triggerInput.value.trim()) {
+                                addTrigger();
+                            }
+                        };
+
+                        const addTriggerBtn = document.createElement("button");
+                        addTriggerBtn.className = "cb-button primary";
+                        addTriggerBtn.textContent = "Add";
+                        addTriggerBtn.style.padding = "4px 12px";
+
+                        const addTrigger = () => {
+                            const val = triggerInput.value.trim();
+                            if (val && !configArray.lora_omit_triggers.includes(val)) {
+                                this.state.config_arrays[arrayIdx].lora_omit_triggers.push(val);
+                                this.saveState();
+                                renderChips();
+                                triggerInput.value = "";
+                            }
+                        };
+                        addTriggerBtn.onclick = addTrigger;
+
+                        inputRow.appendChild(triggerInput);
+                        inputRow.appendChild(addTriggerBtn);
+                        omitSection.appendChild(inputRow);
+
+                        // --- NEW: LOOKUP BUTTON ---
+                        const lookupBtn = document.createElement("button");
+                        lookupBtn.className = "cb-button";
+                        lookupBtn.style.cssText = `
+                            width: 100%;
+                            background: linear-gradient(135deg, #0066cc, #0088ff);
+                            border-left: 4px solid #00aaff;
+                            margin-top: 4px;
+                        `;
+                        lookupBtn.textContent = "🔎 Lookup Current LoRA Triggerwords For Review";
+                        lookupBtn.onclick = async () => {
+                            await this.showTriggerLookupModal(arrayIdx);
+                        };
+                        omitSection.appendChild(lookupBtn);
+
                         configArray.loras.forEach((lora, loraIdx) => {
                             loraGrid.appendChild(this.createLoraElement(lora, arrayIdx, loraIdx));
                         });
                         div.appendChild(loraGrid);
+                        div.appendChild(omitSection);
                     }
 
                     return div;
@@ -515,21 +893,22 @@ app.registerExtension({
                     };
                     div.appendChild(typeSelect);
 
-                    // Name Select
-                    const nameSelect = document.createElement("select");
-                    nameSelect.className = "cb-select";
+                    // Name Select (Searchable)
                     const options = isFolder ? modelFolders : availableModels;
-
                     const currentVal = modelStr;
                     const optionsList = (options.includes(currentVal) || currentVal === "None" || currentVal === "/") ? options : [currentVal, ...options];
 
-                    nameSelect.innerHTML = optionsList.map(opt => `<option value="${opt}" ${opt === currentVal ? 'selected' : ''}>${opt}</option>`).join('');
-                    nameSelect.onchange = () => {
-                        this.state.config_arrays[arrayIdx].models[modelIdx] = nameSelect.value;
-                        this.saveState();
-                        this.renderUI();
-                    };
-                    div.appendChild(nameSelect);
+                    const nameSearchable = createSearchableSelect(
+                        optionsList,
+                        currentVal,
+                        (value) => {
+                            this.state.config_arrays[arrayIdx].models[modelIdx] = value;
+                            this.saveState();
+                            this.renderUI();
+                        },
+                        isFolder ? "Search folders..." : "Search models..."
+                    );
+                    div.appendChild(nameSearchable);
 
                     // --- EXPAND BUTTON (Fixed for Windows Slashes) ---
                     if (isFolder && modelStr !== "None" && modelStr !== "/") {
@@ -542,13 +921,8 @@ app.registerExtension({
                         expandBtn.textContent = "📂 Add all individually";
 
                         expandBtn.onclick = () => {
-                            // Helper to convert backslashes to forward slashes
                             const normalize = (str) => str.replace(/\\/g, "/");
-
-                            // 1. Normalize the folder prefix we are looking for
                             const folderPrefix = normalize(modelStr);
-
-                            // 2. Filter models by normalizing them on the fly for comparison
                             const matchingModels = availableModels.filter(m => normalize(m).startsWith(folderPrefix));
 
                             if (matchingModels.length > 0) {
@@ -571,11 +945,8 @@ app.registerExtension({
                     div.className = "cb-item-card";
                     const parsed = parseLoraString(loraStr);
 
-                    // CHECK: It is a folder if it ends in "/" OR "/*"
                     const isFolder = parsed.name.endsWith("/") || parsed.name.endsWith("/*");
                     const isCombined = parsed.name.endsWith("/*");
-
-                    // The "clean" name (without *) for matching the dropdown list
                     const cleanName = isCombined ? parsed.name.slice(0, -1) : parsed.name;
 
                     // --- Header ---
@@ -599,171 +970,185 @@ app.registerExtension({
                     header.appendChild(deleteBtn);
                     div.appendChild(header);
 
-                    // --- Type Select ---
+                    // --- Type Selector ---
                     const typeSelect = document.createElement("select");
                     typeSelect.className = "cb-select";
                     typeSelect.innerHTML = `
-                        <option value="lora" ${!isFolder ? 'selected' : ''}>LoRA File</option>
-                        <option value="folder" ${isFolder ? 'selected' : ''}>Folder</option>
+                        <option value="file" ${!isFolder ? 'selected' : ''}>LoRA File</option>
+                        <option value="folder" ${isFolder && !isCombined ? 'selected' : ''}>Folder (Separate)</option>
+                        <option value="combined" ${isCombined ? 'selected' : ''}>Folder (Combined /*)</option>
                     `;
                     typeSelect.onchange = () => {
-                        this.state.config_arrays[arrayIdx].loras[loraIdx] = typeSelect.value === "folder" ? "/" : "None";
+                        let newName = "None";
+                        if (typeSelect.value === "file") newName = "None";
+                        else if (typeSelect.value === "folder") newName = "/";
+                        else if (typeSelect.value === "combined") newName = "/*";
+
+                        this.state.config_arrays[arrayIdx].loras[loraIdx] = buildLoraString(newName, 1.0, 1.0);
                         this.saveState();
                         this.renderUI();
                     };
                     div.appendChild(typeSelect);
 
-                    // --- Name Select ---
-                    const nameSelect = document.createElement("select");
-                    nameSelect.className = "cb-select";
+                    // --- Name Selector (Searchable) ---
                     const options = isFolder ? loraFolders : availableLoras;
+                    const currentVal = cleanName;
+                    const optionsList = (options.includes(currentVal) || currentVal === "None" || currentVal === "/" || currentVal === "/*")
+                        ? options
+                        : [currentVal, ...options];
 
-                    const optionsList = (options.includes(cleanName) || cleanName === "None") ? options : [cleanName, ...options];
+                    const nameSearchable = createSearchableSelect(
+                        optionsList,
+                        currentVal,
+                        (selectedName) => {
+                            const finalName = isCombined && !selectedName.endsWith("*") && selectedName !== "None"
+                                ? selectedName + "*"
+                                : selectedName;
 
-                    nameSelect.innerHTML = optionsList.map(opt => `<option value="${opt}" ${opt === cleanName ? 'selected' : ''}>${opt}</option>`).join('');
-
-                    nameSelect.onchange = () => {
-                        const newName = nameSelect.value;
-                        // Preserve combined state if currently combined
-                        const finalName = (isFolder && isCombined && newName.endsWith("/")) ? newName + "*" : newName;
-
-                        this.state.config_arrays[arrayIdx].loras[loraIdx] = buildLoraString(finalName, parsed.model_str, parsed.clip_str);
-                        this.saveState();
-                        this.renderUI();
-                    };
-                    div.appendChild(nameSelect);
-
-                    // --- FOLDER MODE SELECT ---
-                    if (isFolder && cleanName !== "None" && cleanName !== "/") {
-                        const modeSelect = document.createElement("select");
-                        modeSelect.className = "cb-select";
-                        modeSelect.style.marginTop = "4px";
-                        modeSelect.style.borderLeft = "3px solid #0066cc";
-                        modeSelect.innerHTML = `
-                            <option value="separate" ${!isCombined ? 'selected' : ''}>Load Separately (One At A Time)</option>
-                            <option value="combined" ${isCombined ? 'selected' : ''}>Load Combined (All Together *)</option>
-                        `;
-                        modeSelect.onchange = () => {
-                            const wantCombined = modeSelect.value === "combined";
-                            let newName = cleanName;
-
-                            if (wantCombined && !newName.endsWith("*")) {
-                                newName += "*";
-                            } else if (!wantCombined && newName.endsWith("*")) {
-                                newName = newName.slice(0, -1);
-                            }
-
-                            this.state.config_arrays[arrayIdx].loras[loraIdx] = buildLoraString(newName, parsed.model_str, parsed.clip_str);
+                            this.state.config_arrays[arrayIdx].loras[loraIdx] = buildLoraString(finalName, parsed.model_str, parsed.clip_str);
                             this.saveState();
                             this.renderUI();
-                        };
-                        div.appendChild(modeSelect);
-                    }
+                        },
+                        isFolder ? "Search folders..." : "Search LoRAs..."
+                    );
+                    div.appendChild(nameSearchable);
 
-                    // --- EXPAND BUTTON (Always show for folders, even if combined) ---
-                    // FIXED: Removed the `!isCombined` check so you can always expand.
-                    if (isFolder && cleanName !== "None" && cleanName !== "/") {
+                    // --- Sliders (Show for all types including folders) ---
+                    const modelSlider = this.createSlider("Model Strength", parsed.model_str, 0, 2, 0.05, (val) => {
+                        const currentName = isCombined ? cleanName + "*" : parsed.name;
+                        this.state.config_arrays[arrayIdx].loras[loraIdx] = buildLoraString(currentName, val, parsed.clip_str);
+                        this.saveState();
+                    });
+                    div.appendChild(modelSlider);
+
+                    const clipSlider = this.createSlider("CLIP Strength", parsed.clip_str, 0, 2, 0.05, (val) => {
+                        const currentName = isCombined ? cleanName + "*" : parsed.name;
+                        this.state.config_arrays[arrayIdx].loras[loraIdx] = buildLoraString(currentName, parsed.model_str, val);
+                        this.saveState();
+                    });
+                    div.appendChild(clipSlider);
+
+                    // --- Expand Button (Show for all folders including combined and root /) ---
+                    if (isFolder && parsed.name !== "None") {
                         const expandBtn = document.createElement("button");
-                        expandBtn.className = "cb-button primary";
+                        expandBtn.className = "cb-button";
+                        expandBtn.style.borderLeft = "3px solid #0066cc";
                         expandBtn.style.width = "100%";
                         expandBtn.style.fontSize = "11px";
                         expandBtn.style.marginTop = "4px";
-                        expandBtn.textContent = "📂 Expand into individual files";
-                        expandBtn.onclick = () => {
-                            // Normalize slashes to handle Windows paths correctly
-                            const normalize = (str) => str.replace(/\\/g, "/");
-                            const folderPrefix = normalize(cleanName);
+                        expandBtn.textContent = "📂 Add all individually";
 
-                            const matchingLoras = availableLoras.filter(l => normalize(l).startsWith(folderPrefix));
+                        expandBtn.onclick = () => {
+                            const normalize = (str) => str.replace(/\\/g, "/");
+                            
+                            let matchingLoras;
+                            if (cleanName === "/" || cleanName === "") {
+                                // Root folder - get all LoRAs
+                                matchingLoras = availableLoras;
+                            } else {
+                                // Specific folder
+                                const folderPrefix = normalize(cleanName);
+                                matchingLoras = availableLoras.filter(l => normalize(l).startsWith(folderPrefix));
+                            }
 
                             if (matchingLoras.length > 0) {
-                                const newEntries = matchingLoras.map(name =>
-                                    buildLoraString(name, parsed.model_str, parsed.clip_str)
-                                );
-                                // Replaces the single "Combined" entry with multiple "Individual" entries
-                                this.state.config_arrays[arrayIdx].loras.splice(loraIdx, 1, ...newEntries);
+                                const withStrengths = matchingLoras.map(l => buildLoraString(l, parsed.model_str, parsed.clip_str));
+                                this.state.config_arrays[arrayIdx].loras.splice(loraIdx, 1, ...withStrengths);
                                 this.saveState();
                                 this.renderUI();
                             } else {
-                                alert(`No LoRAs found in this folder: ${folderPrefix}`);
+                                alert(`No LoRAs found in folder: ${cleanName || "root"}\n(Checked against ${availableLoras.length} available LoRAs)`);
                             }
                         };
                         div.appendChild(expandBtn);
                     }
 
-                    // --- SLIDERS ---
-                    const makeSlider = (label, val, onChange) => {
-                        const c = document.createElement("div");
-                        c.className = "cb-slider-container";
-                        const l = document.createElement("span");
-                        l.style.fontSize = "10px"; l.style.color = "#aaa"; l.textContent = label;
-                        c.appendChild(l);
-                        const s = document.createElement("input");
-                        s.type = "range"; s.className = "cb-slider"; s.min = "-10"; s.max = "10"; s.step = "0.01"; s.value = val;
-
-                        if (parsed.name === "None") s.disabled = true;
-
-                        const v = document.createElement("span");
-                        v.className = "cb-slider-value"; v.textContent = val.toFixed(2);
-                        s.oninput = () => v.textContent = parseFloat(s.value).toFixed(2);
-                        s.onchange = () => onChange(parseFloat(s.value));
-                        c.appendChild(s); c.appendChild(v);
-                        return c;
-                    };
-
-                    div.appendChild(makeSlider("M", parsed.model_str, (v) => {
-                        this.state.config_arrays[arrayIdx].loras[loraIdx] = buildLoraString(parsed.name, v, parsed.clip_str);
-                        this.saveState();
-                    }));
-                    div.appendChild(makeSlider("C", parsed.clip_str, (v) => {
-                        this.state.config_arrays[arrayIdx].loras[loraIdx] = buildLoraString(parsed.name, parsed.model_str, v);
-                        this.saveState();
-                    }));
-
                     return div;
                 };
 
-                this.renderPreviewSection = function (root) {
+                this.createSlider = function (label, value, min, max, step, onChange) {
+                    const container = document.createElement("div");
+                    container.className = "cb-slider-container";
+
+                    const labelElem = document.createElement("span");
+                    labelElem.className = "cb-label";
+                    labelElem.textContent = label;
+                    labelElem.style.flex = "1";
+                    container.appendChild(labelElem);
+
+                    const slider = document.createElement("input");
+                    slider.type = "range";
+                    slider.className = "cb-slider";
+                    slider.min = min;
+                    slider.max = max;
+                    slider.step = step;
+                    slider.value = value;
+                    container.appendChild(slider);
+
+                    const valueDisplay = document.createElement("span");
+                    valueDisplay.className = "cb-slider-value";
+                    valueDisplay.textContent = value.toFixed(2);
+                    container.appendChild(valueDisplay);
+
+                    slider.oninput = () => {
+                        const val = parseFloat(slider.value);
+                        valueDisplay.textContent = val.toFixed(2);
+                        onChange(val);
+                    };
+
+                    return container;
+                };
+
+                this.createInputGroup = function (label, element) {
+                    const group = document.createElement("div");
+                    group.className = "cb-input-group";
+
+                    const labelElem = document.createElement("label");
+                    labelElem.className = "cb-label";
+                    labelElem.textContent = label;
+                    group.appendChild(labelElem);
+
+                    group.appendChild(element);
+                    return group;
+                };
+
+                this.renderPreviewSection = function (container) {
                     const section = document.createElement("div");
                     section.className = "cb-section full-width";
-                    section.innerHTML = '<div class="cb-section-title">👁️ Config Preview (Final Output)</div>';
+                    section.innerHTML = '<div class="cb-section-title">📄 JSON Preview</div>';
+
                     const preview = document.createElement("pre");
                     preview.className = "cb-preview";
-                    preview.id = "cb-preview";
+                    preview.id = "json-preview";
                     section.appendChild(preview);
-                    root.appendChild(section);
+
+                    container.appendChild(section);
                 };
 
                 this.updatePreview = function () {
-                    const preview = this.htmlContainer.querySelector("#cb-preview");
+                    const preview = this.htmlContainer.querySelector("#json-preview");
                     if (!preview) return;
-                    try { preview.textContent = JSON.stringify(this.generateOutput(), null, 2); }
-                    catch (e) { preview.textContent = `Error: ${e.message}`; }
+
+                    const configs = this.convertStateToConfigs();
+                    preview.textContent = JSON.stringify(configs, null, 2);
                 };
 
-                this.generateOutput = function () {
+                this.convertStateToConfigs = function () {
                     const configs = [];
-                    this.state.config_arrays.forEach(configArray => {
-                        const split = (str) => str.split(",").map(s => s.trim()).filter(s => s);
+                    const split = (str) => str.split(",").map(s => s.trim()).filter(s => s);
 
+                    this.state.config_arrays.forEach(configArray => {
                         // Process LoRAs
-                        let loras = [...configArray.loras];
-                        const nonNoneLoras = loras.filter(l => l !== "None");
-                        if (configArray.combine && nonNoneLoras.length > 1) {
-                            const stackable = nonNoneLoras.filter(l => !l.endsWith("/"));
-                            loras = stackable.length > 1 ? [stackable.join(" + ")] : nonNoneLoras;
-                        } else {
-                            loras = nonNoneLoras;
+                        let loras = configArray.loras.filter(l => l && l !== "None");
+                        if (this.state.include_none || loras.length === 0) {
+                            loras = ["None", ...loras];
                         }
-                        if (this.state.include_none) loras.unshift("None");
 
                         // Process Models
-                        let models = configArray.models || ["None"];
-                        let finalModels = models.filter(m => m !== "None");
-                        if (this.state.include_none) finalModels.unshift("None");
-                        // If no models selected/valid, ensure at least one entry if desired, or let it be empty?
-                        // Usually "None" implies pass-through.
-                        if (finalModels.length === 0 && this.state.include_none) finalModels = ["None"];
+                        let finalModels = configArray.models?.filter(m => m && m !== "None") || [];
+                        if (this.state.include_none || finalModels.length === 0) {
+                            finalModels = ["None", ...finalModels];
+                        }
 
                         const config = {
                             sampler: split(configArray.samplers),
@@ -771,14 +1156,14 @@ app.registerExtension({
                             steps: configArray.steps.split(",").map(s => parseFloat(s)),
                             cfg: configArray.cfg.split(",").map(s => parseFloat(s)),
                             lora: loras.length > 1 ? loras : loras[0] || "None",
-                            model: finalModels.length > 1 ? finalModels : finalModels[0] || "None"
+                            model: finalModels.length > 1 ? finalModels : finalModels[0] || "None",
+                            lora_omit_triggers: configArray.lora_omit_triggers || []
                         };
                         configs.push(config);
                     });
                     return configs;
                 };
 
-                // --- NEW HELPER FUNCTION ---
                 this.convertConfigsToConfigArrays = function (configs) {
                     if (!configs || !Array.isArray(configs)) {
                         return [{
@@ -789,20 +1174,19 @@ app.registerExtension({
                             cfg: "7.0",
                             models: ["None"],
                             loras: ["None"],
+                            lora_omit_triggers: [],
                             combine: false
                         }];
                     }
 
                     const configArrays = [];
 
-                    // Helper to force everything into a comma-separated string
                     const toString = (val) => {
                         if (Array.isArray(val)) return val.join(", ");
                         return String(val !== undefined && val !== null ? val : "");
                     };
 
                     configs.forEach((config, idx) => {
-                        // 1. Handle LoRAs
                         const loraValue = config.lora;
                         const loras = [];
                         let hasCombined = false;
@@ -824,19 +1208,21 @@ app.registerExtension({
                             }
                         });
 
-                        // 2. Handle Models
                         let models = config.model;
                         if (!Array.isArray(models)) models = models ? [models] : ["None"];
 
+                        let omitTriggers = config.lora_omit_triggers;
+                        if (!Array.isArray(omitTriggers)) omitTriggers = [];
+
                         configArrays.push({
                             name: `Loaded Config ${idx + 1}`,
-                            // FORCE CONVERSION TO STRING HERE to prevent .split errors later
                             samplers: toString(config.sampler || "euler"),
                             schedulers: toString(config.scheduler || "normal"),
                             steps: toString(config.steps || "20"),
                             cfg: toString(config.cfg || "7.0"),
                             models: models,
                             loras: loras,
+                            lora_omit_triggers: omitTriggers,
                             combine: hasCombined
                         });
                     });
@@ -849,6 +1235,7 @@ app.registerExtension({
                         cfg: "7.0",
                         models: ["None"],
                         loras: ["None"],
+                        lora_omit_triggers: [],
                         combine: false
                     }];
                 };
@@ -856,7 +1243,6 @@ app.registerExtension({
                 this.loadSession = async function (sessionName) {
                     console.log(`[ConfigBuilder] Loading session: ${sessionName}`);
 
-                    // 1. ENSURE LISTS ARE READY
                     if (!availableLoras) await getAvailableLoras();
                     if (!loraFolders) await getLoraFolders();
                     if (!availableModels) await getAvailableModels();
@@ -874,25 +1260,17 @@ app.registerExtension({
                                 const configs = JSON.parse(meta.configs_json);
                                 let loadedArrays = this.convertConfigsToConfigArrays(configs);
 
-                                // 2. REPAIR & NORMALIZE FOLDERS
-                                // We strictly convert backslashes to forward slashes to ensure matching works
                                 const normalize = (str) => str.replace(/\\/g, "/");
 
                                 loadedArrays.forEach(arr => {
-                                    // Fix LoRAs
                                     arr.loras = arr.loras.map(loraStr => {
                                         const parsed = parseLoraString(loraStr);
                                         const normName = normalize(parsed.name);
 
-                                        // If it's already marked as a folder, just normalize the slash direction
                                         if (normName.endsWith("/") || normName.endsWith("/*")) {
-                                            // Rebuild with normalized name to ensure UI consistency
                                             return buildLoraString(normName, parsed.model_str, parsed.clip_str);
                                         }
 
-                                        // If it's NOT marked as a folder, check if it SHOULD be
-                                        // Check 1: Does the normalized name exist in our folder list?
-                                        // Check 2: Does name + "/" exist? (Common case for saved sessions)
                                         const potentialFolder = normName + "/";
 
                                         if (loraFolders.includes(potentialFolder)) {
@@ -905,19 +1283,15 @@ app.registerExtension({
                                         return loraStr;
                                     });
 
-                                    // Fix Models
                                     arr.models = arr.models.map(modelStr => {
                                         const normModel = normalize(modelStr);
 
-                                        // Already correct?
                                         if (normModel.endsWith("/")) return normModel;
 
-                                        // Missing slash?
                                         if (modelFolders.includes(normModel + "/")) {
                                             return normModel + "/";
                                         }
 
-                                        // Return normalized version at least
                                         return normModel;
                                     });
                                 });

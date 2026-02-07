@@ -537,13 +537,13 @@ Exclude specific trigger words from auto-appended LoRA triggers:
     "sampler": "euler",
     "steps": 28,
     "cfg": 7.0,
-    "lora": "bimbo_style.safetensors:0.8:0.6",
-    "lora_omit_triggers": ["bimbo", "makeup", "jewelry"]
+    "lora": "style2.safetensors:0.8:0.6",
+    "lora_omit_triggers": ["style", "makeup", "jewelry"]
   }
 ]
 ```
 - Automatically fetches trigger words from CivitAI
-- Filters out unwanted triggers (e.g., "bimbo, makeup, jewelry")
+- Filters out unwanted triggers (e.g., "style, makeup, jewelry")
 - Only keeps relevant triggers
 - Handles comma normalization (CivitAI stores triggers with trailing commas)
 
