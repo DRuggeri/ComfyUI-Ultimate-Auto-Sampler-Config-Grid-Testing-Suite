@@ -13,17 +13,7 @@ from aiohttp import web
 import hashlib
 import requests
 
-def parse_int_list(self, value: str) -> List[int]:
-        """Parse comma-separated integers"""
-        items = self.parse_comma_list(value)
-        result = []
-        for item in items:
-            try:
-                # Cast to float first to handle strings like "20.0", then to int
-                result.append(int(float(item)))
-            except ValueError:
-                print(f"[ConfigBuilder] Warning: Could not parse integer '{item}'")
-        return result
+
 
 
 # =============================================================================
@@ -375,6 +365,18 @@ class UltimateConfigBuilder:
                         trigger_map[lora_name] = []
         
         return trigger_map
+    
+    def parse_int_list(self, value: str) -> List[int]:
+        """Parse comma-separated integers"""
+        items = self.parse_comma_list(value)
+        result = []
+        for item in items:
+            try:
+                # Cast to float first to handle strings like "20.0", then to int
+                result.append(int(float(item)))
+            except ValueError:
+                print(f"[ConfigBuilder] Warning: Could not parse integer '{item}'")
+        return result
     
     def parse_comma_list(self, value: str) -> List[str]:
         """Parse comma-separated string"""
