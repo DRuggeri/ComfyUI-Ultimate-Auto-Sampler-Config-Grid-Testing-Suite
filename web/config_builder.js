@@ -46,12 +46,12 @@ async function getAvailableModels() {
         // Look for standard CheckpointLoaderSimple or similar
         const loaderNode = objectInfo["CheckpointLoaderSimple"] || objectInfo["CheckpointLoader"];
         if (loaderNode?.input?.required?.ckpt_name) {
-             const modelInput = loaderNode.input.required.ckpt_name;
-             if (Array.isArray(modelInput) && Array.isArray(modelInput[0])) {
-                 availableModels = modelInput[0];
-                 console.log(`[ConfigBuilder] Found ${availableModels.length} Models`);
-                 return availableModels;
-             }
+            const modelInput = loaderNode.input.required.ckpt_name;
+            if (Array.isArray(modelInput) && Array.isArray(modelInput[0])) {
+                availableModels = modelInput[0];
+                console.log(`[ConfigBuilder] Found ${availableModels.length} Models`);
+                return availableModels;
+            }
         }
     } catch (e) { console.error("[ConfigBuilder] Error fetching Models:", e); }
     availableModels = ["None"];
@@ -118,8 +118,8 @@ function parseLoraString(loraStr) {
 
 function buildLoraString(name, modelStr, clipStr) {
     if (!name || name === "None") return "None";
-    if (name.endsWith("/")) return name;
-    if (modelStr === 1.0 && clipStr === 1.0) return name;
+    // if (name.endsWith("/")) return name;
+    // if (modelStr === 1.0 && clipStr === 1.0) return name;
     return `${name}:${modelStr.toFixed(2)}:${clipStr.toFixed(2)}`;
 }
 
@@ -179,9 +179,9 @@ app.registerExtension({
                     } else if (existing.lora_config) {
                         this.state = this.migrateOldFormat(existing);
                     }
-                } catch (e) {}
+                } catch (e) { }
 
-                this.migrateOldFormat = function(oldState) {
+                this.migrateOldFormat = function (oldState) {
                     const arrays = oldState.lora_config?.arrays || [];
                     return {
                         session_name: oldState.session_name || "my_test_session",
@@ -199,7 +199,7 @@ app.registerExtension({
                     };
                 };
 
-                this.saveState = function() {
+                this.saveState = function () {
                     configWidget.value = JSON.stringify(this.state, null, 2);
                     this.updatePreview();
                 };
@@ -209,20 +209,32 @@ app.registerExtension({
                 this.addDOMWidget("config_ui", "div", this.htmlContainer, { serialize: false, hideOnZoom: false });
 
                 // --- UI RENDER ---
-                this.renderUI = function() {
+                // --- UI RENDERING ---
+                this.renderUI = function () {
+                    // 1. SAVE SCROLL POSITION
+                    const scrollContainer = this.htmlContainer.querySelector(".cb-container");
+                    const savedScrollTop = scrollContainer ? scrollContainer.scrollTop : 0;
+
                     this.htmlContainer.innerHTML = `
                         <style>
-                            .cb-container { padding: 12px; height: 100%; overflow-y: auto; box-sizing: border-box; }
+                            .cb-container {
+                                padding: 12px;
+                                height: 100%;
+                                overflow-y: auto;
+                                box-sizing: border-box;
+                            }
+                            /* ... (All your existing CSS styles remain exactly the same) ... */
                             .cb-sections-row { display: flex; flex-wrap: wrap; gap: 12px; margin-bottom: 12px; }
                             .cb-section { background: #2a2a2a; border-radius: 4px; padding: 12px; border: 1px solid #3a3a3a; box-sizing: border-box; flex: 1 1 300px; }
                             .cb-section.full-width { flex: 1 1 100%; width: 100%; }
-                            .cb-section-title { color: #0066cc; font-size: 14px; font-weight: bold; margin-bottom: 10px; border-bottom: 1px solid #3a3a3a; padding-bottom: 6px; }
+                            .cb-section-title { color: #0066cc; font-size: 14px; font-weight: bold; margin-bottom: 10px; padding-bottom: 6px; border-bottom: 1px solid #3a3a3a; }
                             .cb-flex-grid { display: flex; flex-wrap: wrap; gap: 10px; align-items: flex-end; }
                             .cb-input-group { flex: 1 1 180px; min-width: 140px; display: flex; flex-direction: column; }
-                            .cb-input, .cb-select { background: #1a1a1a; border: 1px solid #4a4a4a; color: white; padding: 8px 10px; border-radius: 4px; width: 100%; font-family: monospace; }
+                            .cb-input-group.wide { flex: 2 1 300px; }
+                            .cb-input, .cb-select { background: #1a1a1a; border: 1px solid #4a4a4a; color: white; padding: 8px 10px; border-radius: 4px; width: 100%; box-sizing: border-box; font-size: 13px; font-family: monospace; }
                             .cb-input:focus, .cb-select:focus { outline: none; border-color: #0066cc; }
-                            .cb-label { color: #aaa; font-size: 12px; margin-bottom: 4px; display: block; }
-                            .cb-button { background: #4a4a4a; border: none; color: white; padding: 8px 12px; border-radius: 4px; cursor: pointer; font-size: 13px; margin: 4px 2px; }
+                            .cb-label { color: #aaa; font-size: 12px; margin-bottom: 4px; display: block; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+                            .cb-button { background: #4a4a4a; border: none; color: white; padding: 8px 12px; border-radius: 4px; cursor: pointer; font-size: 13px; margin: 4px 2px; white-space: nowrap; }
                             .cb-button:hover { background: #5a5a5a; }
                             .cb-button.primary { background: #0066cc; }
                             .cb-button.primary:hover { background: #0077ee; }
@@ -230,37 +242,32 @@ app.registerExtension({
                             .cb-button.danger:hover { background: #dd4444; }
                             .cb-array { background: #333; border-radius: 4px; padding: 12px; margin: 8px 0; border: 1px solid #3a3a3a; width: 100%; }
                             .cb-arrays-container { display: flex; flex-direction: column; gap: 12px; }
-                            
-                            /* Shared Grid for Models & Loras */
                             .cb-list-grid { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; padding-top: 10px; border-top: 1px dashed #444; }
                             .cb-item-card { background: #2a2a2a; border-radius: 4px; padding: 10px; border-left: 3px solid #0066cc; flex: 1 1 300px; min-width: 250px; display: flex; flex-direction: column; gap: 6px; }
-                            .cb-item-card.model-card { border-left-color: #cc6600; } /* Orange for models */
-                            
-                            .cb-controls-bar { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; margin-top: 10px; padding: 8px; background: #252525; border-radius: 4px; }
-                            .cb-header-bar { display: flex; justify-content: space-between; margin-bottom: 4px; }
+                            .cb-item-card.model-card { border-left-color: #cc6600; }
                             .cb-slider-container { display: flex; align-items: center; gap: 10px; }
                             .cb-slider { flex: 1; height: 6px; background: #1a1a1a; border-radius: 3px; outline: none; }
                             .cb-slider-value { color: #0066cc; font-weight: bold; min-width: 45px; text-align: right; font-size: 12px; }
+                            .cb-toggle { display: inline-flex; align-items: center; gap: 8px; cursor: pointer; padding: 6px 0; }
                             .cb-preview { background: #0a0a0a; border: 1px solid #3a3a3a; border-radius: 4px; padding: 10px; margin: 10px 0; max-height: 400px; overflow-y: auto; font-family: monospace; font-size: 11px; color: #0cc; }
-                            .cb-toggle { display: inline-flex; align-items: center; gap: 8px; cursor: pointer; color: #ccc; }
+                            .cb-controls-bar { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; margin-top: 10px; padding: 8px; background: #252525; border-radius: 4px; }
+                            .cb-header-bar { display: flex; justify-content: space-between; margin-bottom: 4px; }
                         </style>
                         <div class="cb-container" id="cb-root"></div>
                     `;
 
                     const root = this.htmlContainer.querySelector("#cb-root");
-                    
-                    // Top Section
+
                     const topRow = document.createElement("div");
                     topRow.className = "cb-sections-row";
                     this.renderSessionSection(topRow);
-                    // this.renderOptionsSection(topRow);
+                    this.renderOptionsSection(topRow);
                     root.appendChild(topRow);
 
-                    // Config Arrays
                     const configSection = document.createElement("div");
                     configSection.className = "cb-section full-width";
                     configSection.innerHTML = '<div class="cb-section-title">⚙️ Config Arrays</div>';
-                    
+
                     const headerBar = document.createElement("div");
                     headerBar.style.marginBottom = "10px";
                     const addConfigBtn = document.createElement("button");
@@ -282,7 +289,7 @@ app.registerExtension({
                     };
                     headerBar.appendChild(addConfigBtn);
                     configSection.appendChild(headerBar);
-                    
+
                     const arraysContainer = document.createElement("div");
                     arraysContainer.className = "cb-arrays-container";
                     this.state.config_arrays.forEach((configArray, arrayIdx) => {
@@ -293,9 +300,15 @@ app.registerExtension({
 
                     this.renderPreviewSection(root);
                     this.updatePreview();
-                };
 
-                this.createInputGroup = function(labelText, inputElement) {
+                    // 2. RESTORE SCROLL POSITION
+                    const newScrollContainer = this.htmlContainer.querySelector(".cb-container");
+                    if (newScrollContainer) {
+                        newScrollContainer.scrollTop = savedScrollTop;
+                    }
+                };;
+
+                this.createInputGroup = function (labelText, inputElement) {
                     const group = document.createElement("div");
                     group.className = "cb-input-group";
                     const label = document.createElement("label");
@@ -306,7 +319,7 @@ app.registerExtension({
                     return group;
                 };
 
-                this.renderSessionSection = function(container) {
+                this.renderSessionSection = function (container) {
                     const section = document.createElement("div");
                     section.className = "cb-section";
                     section.innerHTML = '<div class="cb-section-title">📁 Session Management</div>';
@@ -329,7 +342,7 @@ app.registerExtension({
                     container.appendChild(section);
                 };
 
-                this.renderOptionsSection = function(container) {
+                this.renderOptionsSection = function (container) {
                     const section = document.createElement("div");
                     section.className = "cb-section";
                     section.innerHTML = '<div class="cb-section-title">🎯 Options</div>';
@@ -344,13 +357,13 @@ app.registerExtension({
                     toggleInput.onchange = () => { this.state.include_none = toggleInput.checked; this.saveState(); };
                     toggleLabel.appendChild(toggleInput);
                     toggleLabel.appendChild(document.createTextNode(" Include 'None' in Lists"));
-                    
+
                     grid.appendChild(toggleLabel);
                     section.appendChild(grid);
                     container.appendChild(section);
                 };
 
-                this.createConfigArrayElement = function(configArray, arrayIdx) {
+                this.createConfigArrayElement = function (configArray, arrayIdx) {
                     const div = document.createElement("div");
                     div.className = "cb-array";
 
@@ -413,7 +426,7 @@ app.registerExtension({
                     addModelBtn.style.borderLeft = "4px solid #cc6600"; // Orange accent
                     addModelBtn.textContent = `➕ Add Model`;
                     addModelBtn.onclick = () => {
-                        if(!this.state.config_arrays[arrayIdx].models) this.state.config_arrays[arrayIdx].models = [];
+                        if (!this.state.config_arrays[arrayIdx].models) this.state.config_arrays[arrayIdx].models = [];
                         this.state.config_arrays[arrayIdx].models.push("None");
                         this.saveState();
                         this.renderUI();
@@ -483,7 +496,7 @@ app.registerExtension({
                 };
 
                 // Create Model Element
-                this.createModelElement = function(modelStr, arrayIdx, modelIdx) {
+                this.createModelElement = function (modelStr, arrayIdx, modelIdx) {
                     const div = document.createElement("div");
                     div.className = "cb-item-card model-card";
                     const isFolder = modelStr.endsWith("/");
@@ -542,12 +555,14 @@ app.registerExtension({
                 };
 
                 // Create LoRA Element
+                // Create LoRA Element
                 this.createLoraElement = function(loraStr, arrayIdx, loraIdx) {
                     const div = document.createElement("div");
                     div.className = "cb-item-card";
                     const parsed = parseLoraString(loraStr);
                     const isFolder = parsed.name.endsWith("/");
 
+                    // Header
                     const header = document.createElement("div");
                     header.className = "cb-header-bar";
                     const label = document.createElement("span");
@@ -568,6 +583,7 @@ app.registerExtension({
                     header.appendChild(deleteBtn);
                     div.appendChild(header);
 
+                    // Type Select
                     const typeSelect = document.createElement("select");
                     typeSelect.className = "cb-select";
                     typeSelect.innerHTML = `
@@ -581,50 +597,85 @@ app.registerExtension({
                     };
                     div.appendChild(typeSelect);
 
+                    // Name Select
                     const nameSelect = document.createElement("select");
                     nameSelect.className = "cb-select";
                     const options = isFolder ? loraFolders : availableLoras;
                     const optionsList = (options.includes(parsed.name) || parsed.name === "None") ? options : [parsed.name, ...options];
                     
                     nameSelect.innerHTML = optionsList.map(opt => `<option value="${opt}" ${opt === parsed.name ? 'selected' : ''}>${opt}</option>`).join('');
+                    
+                    // --- FIX IS HERE ---
                     nameSelect.onchange = () => {
-                        if (isFolder) this.state.config_arrays[arrayIdx].loras[loraIdx] = nameSelect.value;
-                        else this.state.config_arrays[arrayIdx].loras[loraIdx] = buildLoraString(nameSelect.value, parsed.model_str, parsed.clip_str);
+                        // ALWAYS use buildLoraString to preserve sliders, even for folders
+                        this.state.config_arrays[arrayIdx].loras[loraIdx] = buildLoraString(
+                            nameSelect.value, 
+                            parsed.model_str, 
+                            parsed.clip_str
+                        );
                         this.saveState();
+                        this.renderUI();
                     };
                     div.appendChild(nameSelect);
 
-                    if (!isFolder && parsed.name !== "None") {
-                        // Sliders logic...
-                        const makeSlider = (label, val, onChange) => {
-                            const c = document.createElement("div");
-                            c.className = "cb-slider-container";
-                            const l = document.createElement("span");
-                            l.style.fontSize = "10px"; l.style.color = "#aaa"; l.textContent = label;
-                            c.appendChild(l);
-                            const s = document.createElement("input");
-                            s.type = "range"; s.className = "cb-slider"; s.min = "-10"; s.max = "10"; s.step = "0.01"; s.value = val;
-                            const v = document.createElement("span");
-                            v.className = "cb-slider-value"; v.textContent = val.toFixed(2);
-                            s.oninput = () => v.textContent = parseFloat(s.value).toFixed(2);
-                            s.onchange = () => onChange(parseFloat(s.value));
-                            c.appendChild(s); c.appendChild(v);
-                            return c;
+                    // Expand Button (Folders only)
+                    if (isFolder && parsed.name !== "None" && parsed.name !== "/") {
+                        const expandBtn = document.createElement("button");
+                        expandBtn.className = "cb-button primary";
+                        expandBtn.style.width = "100%";
+                        expandBtn.style.fontSize = "11px";
+                        expandBtn.style.marginTop = "4px";
+                        expandBtn.textContent = "📂 Add all individually";
+                        expandBtn.onclick = () => {
+                            const folderPrefix = parsed.name;
+                            const matchingLoras = availableLoras.filter(l => l.startsWith(folderPrefix));
+                            if (matchingLoras.length > 0) {
+                                const newEntries = matchingLoras.map(name => 
+                                    buildLoraString(name, parsed.model_str, parsed.clip_str)
+                                );
+                                this.state.config_arrays[arrayIdx].loras.splice(loraIdx, 1, ...newEntries);
+                                this.saveState();
+                                this.renderUI();
+                            } else {
+                                alert("No LoRAs found in this folder!");
+                            }
                         };
-
-                        div.appendChild(makeSlider("M", parsed.model_str, (v) => {
-                             this.state.config_arrays[arrayIdx].loras[loraIdx] = buildLoraString(parsed.name, v, parsed.clip_str);
-                             this.saveState();
-                        }));
-                        div.appendChild(makeSlider("C", parsed.clip_str, (v) => {
-                             this.state.config_arrays[arrayIdx].loras[loraIdx] = buildLoraString(parsed.name, parsed.model_str, v);
-                             this.saveState();
-                        }));
+                        div.appendChild(expandBtn);
                     }
-                    return div;
-                };
 
-                this.renderPreviewSection = function(root) {
+                    // Sliders (Always Visible)
+                    const makeSlider = (label, val, onChange) => {
+                        const c = document.createElement("div");
+                        c.className = "cb-slider-container";
+                        const l = document.createElement("span");
+                        l.style.fontSize = "10px"; l.style.color = "#aaa"; l.textContent = label;
+                        c.appendChild(l);
+                        const s = document.createElement("input");
+                        s.type = "range"; s.className = "cb-slider"; s.min = "-10"; s.max = "10"; s.step = "0.01"; s.value = val;
+                        
+                        if (parsed.name === "None") s.disabled = true;
+
+                        const v = document.createElement("span");
+                        v.className = "cb-slider-value"; v.textContent = val.toFixed(2);
+                        s.oninput = () => v.textContent = parseFloat(s.value).toFixed(2);
+                        s.onchange = () => onChange(parseFloat(s.value));
+                        c.appendChild(s); c.appendChild(v);
+                        return c;
+                    };
+
+                    div.appendChild(makeSlider("M", parsed.model_str, (v) => {
+                            this.state.config_arrays[arrayIdx].loras[loraIdx] = buildLoraString(parsed.name, v, parsed.clip_str);
+                            this.saveState();
+                    }));
+                    div.appendChild(makeSlider("C", parsed.clip_str, (v) => {
+                            this.state.config_arrays[arrayIdx].loras[loraIdx] = buildLoraString(parsed.name, parsed.model_str, v);
+                            this.saveState();
+                    }));
+
+                    return div;
+                };;;
+
+                this.renderPreviewSection = function (root) {
                     const section = document.createElement("div");
                     section.className = "cb-section full-width";
                     section.innerHTML = '<div class="cb-section-title">👁️ Config Preview (Final Output)</div>';
@@ -635,18 +686,18 @@ app.registerExtension({
                     root.appendChild(section);
                 };
 
-                this.updatePreview = function() {
+                this.updatePreview = function () {
                     const preview = this.htmlContainer.querySelector("#cb-preview");
                     if (!preview) return;
-                    try { preview.textContent = JSON.stringify(this.generateOutput(), null, 2); } 
+                    try { preview.textContent = JSON.stringify(this.generateOutput(), null, 2); }
                     catch (e) { preview.textContent = `Error: ${e.message}`; }
                 };
 
-                this.generateOutput = function() {
+                this.generateOutput = function () {
                     const configs = [];
                     this.state.config_arrays.forEach(configArray => {
                         const split = (str) => str.split(",").map(s => s.trim()).filter(s => s);
-                        
+
                         // Process LoRAs
                         let loras = [...configArray.loras];
                         const nonNoneLoras = loras.filter(l => l !== "None");
@@ -679,44 +730,44 @@ app.registerExtension({
                     return configs;
                 };
 
-                this.loadSession = async function(sessionName) {
+                this.loadSession = async function (sessionName) {
                     // (Session loading logic mostly same, just updating models parsing)
                     // Simplified for brevity - assumes previous robust logic handles this
                     // just ensure we map meta.model to array if single string
                     try {
                         const manifestUrl = `/view?filename=manifest.json&type=output&subfolder=benchmarks/${sessionName}&t=${Date.now()}`;
                         const resp = await fetch(manifestUrl);
-                        if(!resp.ok) return;
+                        if (!resp.ok) return;
                         const manifest = await resp.json();
                         const meta = manifest.meta || {};
-                        
-                        if(meta.configs_json) {
+
+                        if (meta.configs_json) {
                             const configs = JSON.parse(meta.configs_json);
                             // Simple conversion
-                             this.state.config_arrays = configs.map((c, i) => {
-                                 // Handle Model Array conversion
-                                 let m = c.model;
-                                 if(!Array.isArray(m)) m = m ? [m] : ["None"];
-                                 
-                                 // Handle Lora logic (same as before)
-                                 let l = Array.isArray(c.lora) ? c.lora : [c.lora || "None"];
-                                 
-                                 return {
-                                    name: `Loaded Config ${i+1}`,
+                            this.state.config_arrays = configs.map((c, i) => {
+                                // Handle Model Array conversion
+                                let m = c.model;
+                                if (!Array.isArray(m)) m = m ? [m] : ["None"];
+
+                                // Handle Lora logic (same as before)
+                                let l = Array.isArray(c.lora) ? c.lora : [c.lora || "None"];
+
+                                return {
+                                    name: `Loaded Config ${i + 1}`,
                                     samplers: Array.isArray(c.sampler) ? c.sampler.join(", ") : c.sampler,
                                     schedulers: Array.isArray(c.scheduler) ? c.scheduler.join(", ") : c.scheduler,
                                     steps: Array.isArray(c.steps) ? c.steps.join(", ") : c.steps,
                                     cfg: Array.isArray(c.cfg) ? c.cfg.join(", ") : c.cfg,
                                     models: m,
                                     loras: l,
-                                    combine: false 
-                                 };
-                             });
+                                    combine: false
+                                };
+                            });
                         }
                         this.state.session_name = sessionName;
                         this.saveState();
                         this.renderUI();
-                    } catch(e) { console.error(e); }
+                    } catch (e) { console.error(e); }
                 };
 
                 this.renderUI();
