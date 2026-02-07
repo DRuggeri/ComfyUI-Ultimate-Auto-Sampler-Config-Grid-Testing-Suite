@@ -108,7 +108,7 @@ def load_and_save_tags(lora_name, force_fetch, auto_fetch=True):
     # ==== FIX: If found in cache, return immediately without hashing ====
     # This includes empty lists [] - they mean "we already checked and found nothing"
     if found_in_cache:
-        print(f"[Lora-Auto-Trigger] ✅ Found in cache: {lora_name}")
+        # print(f"[Lora-Auto-Trigger] ✅ Found in cache: {lora_name}")
         return output_tags if output_tags is not None else []
     
     # ==== NOT IN CACHE - Need to fetch from API ====

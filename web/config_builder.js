@@ -261,7 +261,6 @@ app.registerExtension({
                     const topRow = document.createElement("div");
                     topRow.className = "cb-sections-row";
                     this.renderSessionSection(topRow);
-                    this.renderOptionsSection(topRow);
                     root.appendChild(topRow);
 
                     const configSection = document.createElement("div");
@@ -342,27 +341,7 @@ app.registerExtension({
                     container.appendChild(section);
                 };
 
-                this.renderOptionsSection = function (container) {
-                    const section = document.createElement("div");
-                    section.className = "cb-section";
-                    section.innerHTML = '<div class="cb-section-title">🎯 Options</div>';
-                    const grid = document.createElement("div");
-                    grid.className = "cb-flex-grid";
-
-                    const toggleLabel = document.createElement("label");
-                    toggleLabel.className = "cb-toggle";
-                    const toggleInput = document.createElement("input");
-                    toggleInput.type = "checkbox";
-                    toggleInput.checked = this.state.include_none;
-                    toggleInput.onchange = () => { this.state.include_none = toggleInput.checked; this.saveState(); };
-                    toggleLabel.appendChild(toggleInput);
-                    toggleLabel.appendChild(document.createTextNode(" Include 'None' in Lists"));
-
-                    grid.appendChild(toggleLabel);
-                    section.appendChild(grid);
-                    container.appendChild(section);
-                };
-
+                
                 this.createConfigArrayElement = function (configArray, arrayIdx) {
                     const div = document.createElement("div");
                     div.className = "cb-array";
@@ -540,7 +519,7 @@ app.registerExtension({
                     const nameSelect = document.createElement("select");
                     nameSelect.className = "cb-select";
                     const options = isFolder ? modelFolders : availableModels;
-                    // Ensure current value is in list
+
                     const currentVal = modelStr;
                     const optionsList = (options.includes(currentVal) || currentVal === "None" || currentVal === "/") ? options : [currentVal, ...options];
 
@@ -548,21 +527,58 @@ app.registerExtension({
                     nameSelect.onchange = () => {
                         this.state.config_arrays[arrayIdx].models[modelIdx] = nameSelect.value;
                         this.saveState();
+                        this.renderUI();
                     };
                     div.appendChild(nameSelect);
+
+                    // --- EXPAND BUTTON (Fixed for Windows Slashes) ---
+                    if (isFolder && modelStr !== "None" && modelStr !== "/") {
+                        const expandBtn = document.createElement("button");
+                        expandBtn.className = "cb-button";
+                        expandBtn.style.borderLeft = "3px solid #cc6600";
+                        expandBtn.style.width = "100%";
+                        expandBtn.style.fontSize = "11px";
+                        expandBtn.style.marginTop = "4px";
+                        expandBtn.textContent = "📂 Add all individually";
+
+                        expandBtn.onclick = () => {
+                            // Helper to convert backslashes to forward slashes
+                            const normalize = (str) => str.replace(/\\/g, "/");
+
+                            // 1. Normalize the folder prefix we are looking for
+                            const folderPrefix = normalize(modelStr);
+
+                            // 2. Filter models by normalizing them on the fly for comparison
+                            const matchingModels = availableModels.filter(m => normalize(m).startsWith(folderPrefix));
+
+                            if (matchingModels.length > 0) {
+                                this.state.config_arrays[arrayIdx].models.splice(modelIdx, 1, ...matchingModels);
+                                this.saveState();
+                                this.renderUI();
+                            } else {
+                                alert(`No Checkpoints found in folder: ${folderPrefix}\n(Checked against ${availableModels.length} available models)`);
+                            }
+                        };
+                        div.appendChild(expandBtn);
+                    }
 
                     return div;
                 };
 
                 // Create LoRA Element
-                // Create LoRA Element
-                this.createLoraElement = function(loraStr, arrayIdx, loraIdx) {
+                this.createLoraElement = function (loraStr, arrayIdx, loraIdx) {
                     const div = document.createElement("div");
                     div.className = "cb-item-card";
                     const parsed = parseLoraString(loraStr);
-                    const isFolder = parsed.name.endsWith("/");
 
-                    // Header
+                    // CHECK: It is a folder if it ends in "/" OR "/*"
+                    const isFolder = parsed.name.endsWith("/") || parsed.name.endsWith("/*");
+                    const isCombined = parsed.name.endsWith("/*");
+
+                    // The "clean" name (without *) for matching the dropdown list
+                    const cleanName = isCombined ? parsed.name.slice(0, -1) : parsed.name;
+
+                    // --- Header ---
                     const header = document.createElement("div");
                     header.className = "cb-header-bar";
                     const label = document.createElement("span");
@@ -583,7 +599,7 @@ app.registerExtension({
                     header.appendChild(deleteBtn);
                     div.appendChild(header);
 
-                    // Type Select
+                    // --- Type Select ---
                     const typeSelect = document.createElement("select");
                     typeSelect.className = "cb-select";
                     typeSelect.innerHTML = `
@@ -597,53 +613,85 @@ app.registerExtension({
                     };
                     div.appendChild(typeSelect);
 
-                    // Name Select
+                    // --- Name Select ---
                     const nameSelect = document.createElement("select");
                     nameSelect.className = "cb-select";
                     const options = isFolder ? loraFolders : availableLoras;
-                    const optionsList = (options.includes(parsed.name) || parsed.name === "None") ? options : [parsed.name, ...options];
-                    
-                    nameSelect.innerHTML = optionsList.map(opt => `<option value="${opt}" ${opt === parsed.name ? 'selected' : ''}>${opt}</option>`).join('');
-                    
-                    // --- FIX IS HERE ---
+
+                    const optionsList = (options.includes(cleanName) || cleanName === "None") ? options : [cleanName, ...options];
+
+                    nameSelect.innerHTML = optionsList.map(opt => `<option value="${opt}" ${opt === cleanName ? 'selected' : ''}>${opt}</option>`).join('');
+
                     nameSelect.onchange = () => {
-                        // ALWAYS use buildLoraString to preserve sliders, even for folders
-                        this.state.config_arrays[arrayIdx].loras[loraIdx] = buildLoraString(
-                            nameSelect.value, 
-                            parsed.model_str, 
-                            parsed.clip_str
-                        );
+                        const newName = nameSelect.value;
+                        // Preserve combined state if currently combined
+                        const finalName = (isFolder && isCombined && newName.endsWith("/")) ? newName + "*" : newName;
+
+                        this.state.config_arrays[arrayIdx].loras[loraIdx] = buildLoraString(finalName, parsed.model_str, parsed.clip_str);
                         this.saveState();
                         this.renderUI();
                     };
                     div.appendChild(nameSelect);
 
-                    // Expand Button (Folders only)
-                    if (isFolder && parsed.name !== "None" && parsed.name !== "/") {
+                    // --- FOLDER MODE SELECT ---
+                    if (isFolder && cleanName !== "None" && cleanName !== "/") {
+                        const modeSelect = document.createElement("select");
+                        modeSelect.className = "cb-select";
+                        modeSelect.style.marginTop = "4px";
+                        modeSelect.style.borderLeft = "3px solid #0066cc";
+                        modeSelect.innerHTML = `
+                            <option value="separate" ${!isCombined ? 'selected' : ''}>Load Separately (One At A Time)</option>
+                            <option value="combined" ${isCombined ? 'selected' : ''}>Load Combined (All Together *)</option>
+                        `;
+                        modeSelect.onchange = () => {
+                            const wantCombined = modeSelect.value === "combined";
+                            let newName = cleanName;
+
+                            if (wantCombined && !newName.endsWith("*")) {
+                                newName += "*";
+                            } else if (!wantCombined && newName.endsWith("*")) {
+                                newName = newName.slice(0, -1);
+                            }
+
+                            this.state.config_arrays[arrayIdx].loras[loraIdx] = buildLoraString(newName, parsed.model_str, parsed.clip_str);
+                            this.saveState();
+                            this.renderUI();
+                        };
+                        div.appendChild(modeSelect);
+                    }
+
+                    // --- EXPAND BUTTON (Always show for folders, even if combined) ---
+                    // FIXED: Removed the `!isCombined` check so you can always expand.
+                    if (isFolder && cleanName !== "None" && cleanName !== "/") {
                         const expandBtn = document.createElement("button");
                         expandBtn.className = "cb-button primary";
                         expandBtn.style.width = "100%";
                         expandBtn.style.fontSize = "11px";
                         expandBtn.style.marginTop = "4px";
-                        expandBtn.textContent = "📂 Add all individually";
+                        expandBtn.textContent = "📂 Expand into individual files";
                         expandBtn.onclick = () => {
-                            const folderPrefix = parsed.name;
-                            const matchingLoras = availableLoras.filter(l => l.startsWith(folderPrefix));
+                            // Normalize slashes to handle Windows paths correctly
+                            const normalize = (str) => str.replace(/\\/g, "/");
+                            const folderPrefix = normalize(cleanName);
+
+                            const matchingLoras = availableLoras.filter(l => normalize(l).startsWith(folderPrefix));
+
                             if (matchingLoras.length > 0) {
-                                const newEntries = matchingLoras.map(name => 
+                                const newEntries = matchingLoras.map(name =>
                                     buildLoraString(name, parsed.model_str, parsed.clip_str)
                                 );
+                                // Replaces the single "Combined" entry with multiple "Individual" entries
                                 this.state.config_arrays[arrayIdx].loras.splice(loraIdx, 1, ...newEntries);
                                 this.saveState();
                                 this.renderUI();
                             } else {
-                                alert("No LoRAs found in this folder!");
+                                alert(`No LoRAs found in this folder: ${folderPrefix}`);
                             }
                         };
                         div.appendChild(expandBtn);
                     }
 
-                    // Sliders (Always Visible)
+                    // --- SLIDERS ---
                     const makeSlider = (label, val, onChange) => {
                         const c = document.createElement("div");
                         c.className = "cb-slider-container";
@@ -652,7 +700,7 @@ app.registerExtension({
                         c.appendChild(l);
                         const s = document.createElement("input");
                         s.type = "range"; s.className = "cb-slider"; s.min = "-10"; s.max = "10"; s.step = "0.01"; s.value = val;
-                        
+
                         if (parsed.name === "None") s.disabled = true;
 
                         const v = document.createElement("span");
@@ -664,16 +712,16 @@ app.registerExtension({
                     };
 
                     div.appendChild(makeSlider("M", parsed.model_str, (v) => {
-                            this.state.config_arrays[arrayIdx].loras[loraIdx] = buildLoraString(parsed.name, v, parsed.clip_str);
-                            this.saveState();
+                        this.state.config_arrays[arrayIdx].loras[loraIdx] = buildLoraString(parsed.name, v, parsed.clip_str);
+                        this.saveState();
                     }));
                     div.appendChild(makeSlider("C", parsed.clip_str, (v) => {
-                            this.state.config_arrays[arrayIdx].loras[loraIdx] = buildLoraString(parsed.name, parsed.model_str, v);
-                            this.saveState();
+                        this.state.config_arrays[arrayIdx].loras[loraIdx] = buildLoraString(parsed.name, parsed.model_str, v);
+                        this.saveState();
                     }));
 
                     return div;
-                };;;
+                };
 
                 this.renderPreviewSection = function (root) {
                     const section = document.createElement("div");
@@ -730,10 +778,90 @@ app.registerExtension({
                     return configs;
                 };
 
+                // --- NEW HELPER FUNCTION ---
+                this.convertConfigsToConfigArrays = function (configs) {
+                    if (!configs || !Array.isArray(configs)) {
+                        return [{
+                            name: "Config 1",
+                            samplers: "euler",
+                            schedulers: "normal",
+                            steps: "20",
+                            cfg: "7.0",
+                            models: ["None"],
+                            loras: ["None"],
+                            combine: false
+                        }];
+                    }
+
+                    const configArrays = [];
+
+                    // Helper to force everything into a comma-separated string
+                    const toString = (val) => {
+                        if (Array.isArray(val)) return val.join(", ");
+                        return String(val !== undefined && val !== null ? val : "");
+                    };
+
+                    configs.forEach((config, idx) => {
+                        // 1. Handle LoRAs
+                        const loraValue = config.lora;
+                        const loras = [];
+                        let hasCombined = false;
+                        let loraList = [];
+
+                        if (typeof loraValue === 'string') loraList = [loraValue];
+                        else if (Array.isArray(loraValue)) loraList = loraValue;
+                        else loraList = ["None"];
+
+                        loraList.forEach(loraStr => {
+                            if (!loraStr || loraStr === "None") {
+                                loras.push("None");
+                            } else if (loraStr.includes(" + ")) {
+                                hasCombined = true;
+                                const parts = loraStr.split(" + ");
+                                parts.forEach(part => loras.push(part.trim()));
+                            } else {
+                                loras.push(loraStr);
+                            }
+                        });
+
+                        // 2. Handle Models
+                        let models = config.model;
+                        if (!Array.isArray(models)) models = models ? [models] : ["None"];
+
+                        configArrays.push({
+                            name: `Loaded Config ${idx + 1}`,
+                            // FORCE CONVERSION TO STRING HERE to prevent .split errors later
+                            samplers: toString(config.sampler || "euler"),
+                            schedulers: toString(config.scheduler || "normal"),
+                            steps: toString(config.steps || "20"),
+                            cfg: toString(config.cfg || "7.0"),
+                            models: models,
+                            loras: loras,
+                            combine: hasCombined
+                        });
+                    });
+
+                    return configArrays.length > 0 ? configArrays : [{
+                        name: "Config 1",
+                        samplers: "euler",
+                        schedulers: "normal",
+                        steps: "20",
+                        cfg: "7.0",
+                        models: ["None"],
+                        loras: ["None"],
+                        combine: false
+                    }];
+                };
+
                 this.loadSession = async function (sessionName) {
-                    // (Session loading logic mostly same, just updating models parsing)
-                    // Simplified for brevity - assumes previous robust logic handles this
-                    // just ensure we map meta.model to array if single string
+                    console.log(`[ConfigBuilder] Loading session: ${sessionName}`);
+
+                    // 1. ENSURE LISTS ARE READY
+                    if (!availableLoras) await getAvailableLoras();
+                    if (!loraFolders) await getLoraFolders();
+                    if (!availableModels) await getAvailableModels();
+                    if (!modelFolders) await getModelFolders();
+
                     try {
                         const manifestUrl = `/view?filename=manifest.json&type=output&subfolder=benchmarks/${sessionName}&t=${Date.now()}`;
                         const resp = await fetch(manifestUrl);
@@ -742,32 +870,71 @@ app.registerExtension({
                         const meta = manifest.meta || {};
 
                         if (meta.configs_json) {
-                            const configs = JSON.parse(meta.configs_json);
-                            // Simple conversion
-                            this.state.config_arrays = configs.map((c, i) => {
-                                // Handle Model Array conversion
-                                let m = c.model;
-                                if (!Array.isArray(m)) m = m ? [m] : ["None"];
+                            try {
+                                const configs = JSON.parse(meta.configs_json);
+                                let loadedArrays = this.convertConfigsToConfigArrays(configs);
 
-                                // Handle Lora logic (same as before)
-                                let l = Array.isArray(c.lora) ? c.lora : [c.lora || "None"];
+                                // 2. REPAIR & NORMALIZE FOLDERS
+                                // We strictly convert backslashes to forward slashes to ensure matching works
+                                const normalize = (str) => str.replace(/\\/g, "/");
 
-                                return {
-                                    name: `Loaded Config ${i + 1}`,
-                                    samplers: Array.isArray(c.sampler) ? c.sampler.join(", ") : c.sampler,
-                                    schedulers: Array.isArray(c.scheduler) ? c.scheduler.join(", ") : c.scheduler,
-                                    steps: Array.isArray(c.steps) ? c.steps.join(", ") : c.steps,
-                                    cfg: Array.isArray(c.cfg) ? c.cfg.join(", ") : c.cfg,
-                                    models: m,
-                                    loras: l,
-                                    combine: false
-                                };
-                            });
+                                loadedArrays.forEach(arr => {
+                                    // Fix LoRAs
+                                    arr.loras = arr.loras.map(loraStr => {
+                                        const parsed = parseLoraString(loraStr);
+                                        const normName = normalize(parsed.name);
+
+                                        // If it's already marked as a folder, just normalize the slash direction
+                                        if (normName.endsWith("/") || normName.endsWith("/*")) {
+                                            // Rebuild with normalized name to ensure UI consistency
+                                            return buildLoraString(normName, parsed.model_str, parsed.clip_str);
+                                        }
+
+                                        // If it's NOT marked as a folder, check if it SHOULD be
+                                        // Check 1: Does the normalized name exist in our folder list?
+                                        // Check 2: Does name + "/" exist? (Common case for saved sessions)
+                                        const potentialFolder = normName + "/";
+
+                                        if (loraFolders.includes(potentialFolder)) {
+                                            return buildLoraString(potentialFolder, parsed.model_str, parsed.clip_str);
+                                        }
+                                        if (loraFolders.includes(normName)) {
+                                            return buildLoraString(normName, parsed.model_str, parsed.clip_str);
+                                        }
+
+                                        return loraStr;
+                                    });
+
+                                    // Fix Models
+                                    arr.models = arr.models.map(modelStr => {
+                                        const normModel = normalize(modelStr);
+
+                                        // Already correct?
+                                        if (normModel.endsWith("/")) return normModel;
+
+                                        // Missing slash?
+                                        if (modelFolders.includes(normModel + "/")) {
+                                            return normModel + "/";
+                                        }
+
+                                        // Return normalized version at least
+                                        return normModel;
+                                    });
+                                });
+
+                                this.state.config_arrays = loadedArrays;
+
+                            } catch (e) {
+                                console.error("[ConfigBuilder] Error parsing configs_json:", e);
+                            }
                         }
+
                         this.state.session_name = sessionName;
                         this.saveState();
                         this.renderUI();
-                    } catch (e) { console.error(e); }
+                    } catch (e) {
+                        console.error("[ConfigBuilder] Error loading session:", e);
+                    }
                 };
 
                 this.renderUI();
