@@ -201,7 +201,7 @@ class UltimateConfigBuilder:
                 
                 # Options (hidden, controlled by HTML)
                 "include_none": ("BOOLEAN", {
-                    "default": True
+                    "default": False
                 }),
             },
             "optional": {
@@ -223,7 +223,7 @@ class UltimateConfigBuilder:
         """Return default complete configuration"""
         config = {
             "session_name": "my_test_session",
-            "include_none": True,
+            "include_none": False,
             "config_arrays": [
                 {
                     "name": "Config 1",
@@ -500,8 +500,6 @@ class UltimateConfigBuilder:
             
             # Process models
             model_strings = [str(m) for m in models if m and m != "None"]
-            if actual_include_none or len(model_strings) == 0:
-                model_strings.insert(0, "None")
             
             # Process loras for this config
             lora_strings = self.process_lora_array(config_array, actual_include_none)

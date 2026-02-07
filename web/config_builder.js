@@ -1146,9 +1146,6 @@ app.registerExtension({
 
                         // Process Models
                         let finalModels = configArray.models?.filter(m => m && m !== "None") || [];
-                        if (this.state.include_none || finalModels.length === 0) {
-                            finalModels = ["None", ...finalModels];
-                        }
 
                         const config = {
                             sampler: split(configArray.samplers),
