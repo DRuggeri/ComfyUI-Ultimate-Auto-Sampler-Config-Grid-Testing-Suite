@@ -423,8 +423,8 @@ class UltimateConfigBuilder:
                 print(f"[ConfigBuilder] {array_name}: Using combined version only")
         
         # Handle None option
-        if include_none:
-            lora_strings.insert(0, "None")
+        # if include_none:
+        #     lora_strings.insert(0, "None")
         
         # Remove duplicates while preserving order
         seen = set()

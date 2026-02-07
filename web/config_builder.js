@@ -1141,7 +1141,7 @@ app.registerExtension({
                         // Process LoRAs
                         let loras = configArray.loras.filter(l => l && l !== "None");
                         if (this.state.include_none || loras.length === 0) {
-                            loras = ["None", ...loras];
+                            loras = [loras];
                         }
 
                         // Process Models
