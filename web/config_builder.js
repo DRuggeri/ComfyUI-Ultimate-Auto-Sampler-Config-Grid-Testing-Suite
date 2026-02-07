@@ -1153,7 +1153,7 @@ app.registerExtension({
                         const config = {
                             sampler: split(configArray.samplers),
                             scheduler: split(configArray.schedulers),
-                            steps: configArray.steps.split(",").map(s => parseFloat(s)),
+                            steps: configArray.steps.split(",").map(s => parseInt(s)),
                             cfg: configArray.cfg.split(",").map(s => parseFloat(s)),
                             lora: loras.length > 1 ? loras : loras[0] || "None",
                             model: finalModels.length > 1 ? finalModels : finalModels[0] || "None",

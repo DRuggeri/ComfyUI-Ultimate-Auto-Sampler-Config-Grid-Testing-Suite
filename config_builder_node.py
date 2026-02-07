@@ -13,6 +13,19 @@ from aiohttp import web
 import hashlib
 import requests
 
+def parse_int_list(self, value: str) -> List[int]:
+        """Parse comma-separated integers"""
+        items = self.parse_comma_list(value)
+        result = []
+        for item in items:
+            try:
+                # Cast to float first to handle strings like "20.0", then to int
+                result.append(int(float(item)))
+            except ValueError:
+                print(f"[ConfigBuilder] Warning: Could not parse integer '{item}'")
+        return result
+
+
 # =============================================================================
 # INLINE LORA_UTILS FUNCTIONS (for compatibility)
 # =============================================================================
@@ -478,7 +491,7 @@ class UltimateConfigBuilder:
             # Parse values from this config array
             sampler_list = self.parse_comma_list(config_array.get("samplers", "euler"))
             scheduler_list = self.parse_comma_list(config_array.get("schedulers", "normal"))
-            steps_list = self.parse_number_list(config_array.get("steps", "20"))
+            steps_list = self.parse_int_list(config_array.get("steps", "20"))
             cfg_list = self.parse_number_list(config_array.get("cfg", "7.0"))
             models = config_array.get("models", ["None"])
             omit_triggers = config_array.get("lora_omit_triggers", [])

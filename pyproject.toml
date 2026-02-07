@@ -1,7 +1,7 @@
 [project]
 name = "ultimate-auto-sampler-config-grid-testing-suite"
 description = "ComfyUI Sampler testing & benchmarking tool for testing Stable Diffusion samplers, schedulers, CFG scales, prompts, img2img denoise values, and LoRA combinations. Features infinite-canvas dashboard image grids with virtual scrolling that can handle thousands of images, multi-model comparison, automatic resume on interrupt, and real-time visualization. Test entire checkpoint folders, stack multiple LoRAs, generate random seed variations, and export optimized configs. Includes fullscreen mode, keyboard navigation, smart filtering by parameters, and one-click regeneration workflow. Perfect for sampler output optimization and hyperparameter tuning."
-version = "1.5.0"
+version = "1.5.1"
 license = {file = "LICENSE"} 
 classifiers = [
 #     # For OS-independent nodes (works on all operating systems)
