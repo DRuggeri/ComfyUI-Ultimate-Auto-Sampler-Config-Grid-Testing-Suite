@@ -9,6 +9,8 @@ import json
 import hashlib
 import os
 import threading
+import piexif
+import piexif.helper
 
 # Global cache for model hashes
 _hash_cache = {}
@@ -16,7 +18,14 @@ _hash_cache_dirty = False
 _cache_lock = threading.Lock()
 _cache_file = None
 
+workflow_raw_string = r'''{"id":"45fadf35-ff07-4f8a-944d-040bb9aa66d4","revision":0,"last_node_id":4,"last_link_id":4,"nodes":[{"id":4,"type":"UltimateGridDashboard","pos":[10738.192160985536,4835.035782643685],"size":[1700,1060],"flags":{"collapsed":false},"order":3,"mode":0,"inputs":[{"localized_name":"dashboard_html","name":"dashboard_html","shape":7,"type":"STRING","link":3},{"localized_name":"session_name","name":"session_name","type":"STRING","widget":{"name":"session_name"},"link":null}],"outputs":[],"properties":{"cnr_id":"ultimate-auto-sampler-config-grid-testing-suite","ver":"926798a412df24e753c3bfd1009c6d61b4567f0a","Node name for S&R":"UltimateGridDashboard","ue_properties":{"widget_ue_connectable":{},"input_ue_unconnectable":{},"version":"7.5.2"},"aux_id":"JasonHoku/ComfyUI-Ultimate-Auto-Sampler-Config-Grid-Testing-Suite"},"widgets_values":["SmexyTrendy12",null,"",""]},{"id":1,"type":"UltimateSamplerGrid","pos":[10260,4870],"size":[420,1182.6153846153848],"flags":{},"order":2,"mode":0,"inputs":[{"localized_name":"optional_model","name":"optional_model","shape":7,"type":"MODEL","link":null},{"localized_name":"optional_clip","name":"optional_clip","shape":7,"type":"CLIP","link":null},{"localized_name":"optional_vae","name":"optional_vae","shape":7,"type":"VAE","link":null},{"localized_name":"optional_positive","name":"optional_positive","shape":7,"type":"CONDITIONING","link":null},{"localized_name":"optional_negative","name":"optional_negative","shape":7,"type":"CONDITIONING","link":null},{"localized_name":"optional_latent","name":"optional_latent","shape":7,"type":"LATENT","link":null},{"localized_name":"ckpt_name","name":"ckpt_name","type":"COMBO","widget":{"name":"ckpt_name"},"link":null},{"localized_name":"positive_text","name":"positive_text","type":"STRING","widget":{"name":"positive_text"},"link":null},{"localized_name":"negative_text","name":"negative_text","type":"STRING","widget":{"name":"negative_text"},"link":null},{"localized_name":"seed","name":"seed","type":"INT","widget":{"name":"seed"},"link":null},{"localized_name":"denoise","name":"denoise","type":"STRING","widget":{"name":"denoise"},"link":null},{"localized_name":"vae_batch_size","name":"vae_batch_size","type":"INT","widget":{"name":"vae_batch_size"},"link":null},{"localized_name":"configs_json","name":"configs_json","type":"STRING","widget":{"name":"configs_json"},"link":4},{"localized_name":"resolutions_json","name":"resolutions_json","type":"STRING","widget":{"name":"resolutions_json"},"link":null},{"localized_name":"session_name","name":"session_name","type":"STRING","widget":{"name":"session_name"},"link":null},{"localized_name":"overwrite_existing","name":"overwrite_existing","type":"BOOLEAN","widget":{"name":"overwrite_existing"},"link":null},{"localized_name":"flush_batch_every","name":"flush_batch_every","type":"INT","widget":{"name":"flush_batch_every"},"link":null},{"localized_name":"add_random_seeds_to_gens","name":"add_random_seeds_to_gens","type":"INT","widget":{"name":"add_random_seeds_to_gens"},"link":null},{"localized_name":"lora_triggerwords_mode","name":"lora_triggerwords_mode","type":"COMBO","widget":{"name":"lora_triggerwords_mode"},"link":null},{"localized_name":"remote_vae_endpoint","name":"remote_vae_endpoint","type":"COMBO","widget":{"name":"remote_vae_endpoint"},"link":null},{"localized_name":"save_conditioning_cache_to_file","name":"save_conditioning_cache_to_file","type":"BOOLEAN","widget":{"name":"save_conditioning_cache_to_file"},"link":null}],"outputs":[{"localized_name":"dashboard_html","name":"dashboard_html","type":"STRING","links":[3]}],"properties":{"cnr_id":"ultimate-auto-sampler-config-grid-testing-suite","ver":"926798a412df24e753c3bfd1009c6d61b4567f0a","Node name for S&R":"UltimateSamplerGrid","ue_properties":{"widget_ue_connectable":{},"input_ue_unconnectable":{},"version":"7.5.2"},"aux_id":"JasonHoku/ComfyUI-Ultimate-Auto-Sampler-Config-Grid-Testing-Suite"},"widgets_values":["XL\\IL\\New\\waiIllustriousSDXL_v160.safetensors","","worst quality, bad quality, text, words, font, blurry, blur",43,"fixed","1",-1,"","[[832, 1216]]","SmexyTrendy12",false,1,0,"Append To End","SDXL",false]},{"id":2,"type":"SmartJSONText","pos":[9587.203247321488,4587.304138002992],"size":[520,560],"flags":{},"order":0,"mode":0,"inputs":[{"localized_name":"json_text","name":"json_text","type":"STRING","widget":{"name":"json_text"},"link":null},{"localized_name":"validate_on_input","name":"validate_on_input","shape":7,"type":"BOOLEAN","widget":{"name":"validate_on_input"},"link":null}],"outputs":[{"localized_name":"json_text","name":"json_text","type":"STRING","links":[]},{"localized_name":"parsed_json","name":"parsed_json","type":"STRING","links":null}],"properties":{"cnr_id":"ultimate-auto-sampler-config-grid-testing-suite","ver":"4c2ce478f49c05206d374f0a97cabd4681c83fb7","Node name for S&R":"SmartJSONText","ue_properties":{"widget_ue_connectable":{},"input_ue_unconnectable":{},"version":"7.5.2"}},"widgets_values":["[\n    [\n        \"semirealistic, modern anime, 8k, smooth, \",\n        \"Test pre-append prompts here, or use this to pre-append a prompt to all, \"\n    ],\n    [\n        \"Nested JSON Prompt Array Example\",\n        \"This example would create 4 prompts total through nested JSON iteration\"\n    ],\n    [\n        \"This will be apppended to the end of all prompts \"\n    ]\n]",true]},{"id":3,"type":"UltimateConfigBuilder","pos":[8870.136925369541,5300.75413741907],"size":[1250,1680],"flags":{},"order":1,"mode":0,"inputs":[{"localized_name":"session_name","name":"session_name","type":"STRING","widget":{"name":"session_name"},"link":null},{"localized_name":"load_session","name":"load_session","type":"COMBO","widget":{"name":"load_session"},"link":null},{"localized_name":"samplers","name":"samplers","type":"STRING","widget":{"name":"samplers"},"link":null},{"localized_name":"schedulers","name":"schedulers","type":"STRING","widget":{"name":"schedulers"},"link":null},{"localized_name":"steps","name":"steps","type":"STRING","widget":{"name":"steps"},"link":null},{"localized_name":"cfg","name":"cfg","type":"STRING","widget":{"name":"cfg"},"link":null},{"localized_name":"lora_config","name":"lora_config","type":"STRING","widget":{"name":"lora_config"},"link":null},{"localized_name":"include_none","name":"include_none","type":"BOOLEAN","widget":{"name":"include_none"},"link":null},{"localized_name":"model","name":"model","shape":7,"type":"STRING","widget":{"name":"model"},"link":null}],"outputs":[{"localized_name":"configs_json","name":"configs_json","type":"STRING","links":[4]},{"localized_name":"session_name","name":"session_name","type":"STRING","links":null}],"properties":{"cnr_id":"ultimate-auto-sampler-config-grid-testing-suite","ver":"b23e4c8db69e7086945c444d3a0cd1ec5775dff1","Node name for S&R":"UltimateConfigBuilder","ue_properties":{"widget_ue_connectable":{},"input_ue_unconnectable":{},"version":"7.5.2"}},"widgets_values":["my_test_session","None","euler, dpmpp_2m","normal, karras","20, 30","7.0","{\n  \"session_name\": \"\",\n  \"include_none\": true,\n  \"config_arrays\": [],\n \n  \"config_name\": \"\",\n  \"auto_save\": false\n}",true,"",""]}],"links":[[3,1,0,4,0,"STRING"],[4,3,0,1,12,"STRING"]],"groups":[],"config":{},"extra":{"workflowRendererVersion":"LG","ds":{"scale":0.779645346653729,"offset":[-8597.11226526943,-5252.748644871856]}},"version":0.4}'''
 
+try:
+    workflowExample = json.loads(workflow_raw_string)
+except json.JSONDecodeError as e:
+    print(f"Error parsing JSON: {e}")
+    workflowExample = None
+    
 def get_cache_file_path():
     """Get the path to the hash cache file."""
     global _cache_file
@@ -166,7 +175,7 @@ def find_model_file(model_path, search_paths=None):
     return None
 
 
-def pack_metadata_into_image(source_path, dest_path, item_data, meta_data):
+def pack_metadata_into_image(source_path, dest_path, item_data, meta_data, workflow_json_path=None, workflow_data=None):
     """
     Pack generation metadata into a PNG image for CivitAI compatibility.
     
@@ -175,11 +184,43 @@ def pack_metadata_into_image(source_path, dest_path, item_data, meta_data):
         dest_path: Path to save image with metadata
         item_data: Item dictionary from manifest (contains sampler, cfg, etc.)
         meta_data: Meta dictionary from manifest (fallback for missing data)
+        workflow_json_path: Optional path to workflow JSON file to embed in metadata.
+                           If None and workflow_data is None, will automatically search for:
+                           1. <source_name>.json (e.g., image_00001.png -> image_00001.json)
+                           2. <source_base>.json (e.g., image_00001.png -> image.json)
+        workflow_data: Optional workflow dict to embed directly (takes precedence over workflow_json_path).
+                      Can be the workflow dict, prompt dict, or extra_pnginfo dict from ComfyUI.
     """
     # Load hash cache if not already loaded
     if not _hash_cache:
         load_hash_cache()
     
+    # Auto-detect workflow JSON path if workflow_data not provided
+    if workflow_data is None and workflow_json_path is None:
+        # Try to find JSON file with same name as source image
+        # e.g., image_00001.png -> image_00001.json
+        base_path = os.path.splitext(source_path)[0]
+        potential_json = base_path + ".json"
+        
+        if os.path.exists(potential_json):
+            workflow_json_path = potential_json
+            print(f"[MetadataPacker] Auto-detected workflow JSON: {potential_json}")
+        else:
+            # Also try without the batch number suffix
+            # e.g., image_00001.png -> image.json
+            import re
+            source_dir = os.path.dirname(source_path)
+            source_filename = os.path.basename(source_path)
+            
+            # Remove _00001 pattern from filename
+            base_name = re.sub(r'_\d{5}$', '', os.path.splitext(source_filename)[0])
+            potential_json_alt = os.path.join(source_dir, base_name + ".json")
+            
+            if os.path.exists("./TestWorkflow.json"):
+                workflow_json_path = potential_json_alt
+                print(f"[MetadataPacker] Auto-detected workflow JSON: {potential_json_alt}")
+            else:
+                print("Path Doesn't Exist")
     try:
         print(f"[MetadataPacker] Starting to pack metadata for {source_path}")
         
@@ -355,8 +396,37 @@ def pack_metadata_into_image(source_path, dest_path, item_data, meta_data):
     # Add to PNG metadata
     metadata.add_text("parameters", parameters_text)
     
-    # Also add raw workflow data as JSON for full compatibility
-    workflow_data = {
+    # Handle workflow data (either from dict or file)
+    workflow_data_full = None
+    
+    # Priority 1: Use workflow_data if provided directly
+    if workflow_data is not None:
+        workflow_data_full = workflow_data
+        print(f"[MetadataPacker] Using provided workflow data dict")
+    # Priority 2: Load from workflow_json_path if provided
+    elif workflow_json_path and os.path.exists(workflow_json_path):
+        try:
+            with open(workflow_json_path, "r", encoding="utf-8") as f:
+                workflow_data_full = json.load(f)
+            print(f"[MetadataPacker] Loaded workflow from {workflow_json_path}")
+        except Exception as e:
+            print(f"[MetadataPacker] Warning: Could not load workflow JSON: {e}")
+    
+    if True:
+        workflow_data_full = workflowExample
+    # Add workflow to metadata if we have it
+    if workflow_data_full:
+        # Add workflow to metadata
+        metadata.add_text("workflow", json.dumps(workflow_data_full))
+        
+        # If there's a prompt structure in the workflow, add it too
+        # (ComfyUI format compatibility)
+        if isinstance(workflow_data_full, dict) and "prompt" in workflow_data_full:
+            metadata.add_text("prompt", json.dumps(workflow_data_full["prompt"]))
+    
+        print("Workflow added!")
+    # Also add raw workflow data as JSON for basic compatibility
+    workflow_data_basic = {
         "model": model,
         "positive": positive,
         "negative": negative,
@@ -372,22 +442,78 @@ def pack_metadata_into_image(source_path, dest_path, item_data, meta_data):
         "clip_skip": clip_skip
     }
     
-    metadata.add_text("workflow", json.dumps(workflow_data, indent=2))
+    # Only add basic workflow if we didn't load a full one
+    if not workflow_data_full:
+        metadata.add_text("workflow", json.dumps(workflow_data_basic, indent=2))
     
-    # Convert to PNG if needed and save with metadata
-    # Force PNG extension for metadata compatibility
-    if not dest_path.lower().endswith('.png'):
-        dest_path = dest_path.rsplit('.', 1)[0] + '.png'
+    # Determine output format from dest_path extension
+    dest_ext = dest_path.lower().split('.')[-1]
     
-    # Convert to RGB if necessary (WebP might be RGBA)
-    if img.mode in ('RGBA', 'LA', 'P'):
-        # Keep RGBA for transparency
-        pass
-    elif img.mode != 'RGB':
-        img = img.convert('RGB')
+    # Convert to RGB if necessary for JPG (JPG doesn't support transparency)
+    if dest_ext in ['jpg', 'jpeg']:
+        if img.mode in ('RGBA', 'LA', 'P'):
+            # Convert RGBA to RGB with white background
+            background = Image.new('RGB', img.size, (255, 255, 255))
+            if img.mode == 'P':
+                img = img.convert('RGBA')
+            background.paste(img, mask=img.split()[-1] if img.mode == 'RGBA' else None)
+            img = background
+        elif img.mode != 'RGB':
+            img = img.convert('RGB')
+    elif dest_ext == 'webp':
+        # WebP supports both RGB and RGBA
+        if img.mode == 'P':
+            img = img.convert('RGBA')
+        elif img.mode not in ('RGB', 'RGBA'):
+            img = img.convert('RGB')
+    elif dest_ext == 'png':
+        # PNG - keep mode as is, but convert palette if needed
+        if img.mode == 'P':
+            img = img.convert('RGBA')
     
-    # Save as PNG with metadata
-    img.save(dest_path, format='PNG', pnginfo=metadata, optimize=False)
+    # Save based on format
+    if dest_ext == 'png':
+        # Save as PNG with metadata
+        img.save(dest_path, format='PNG', pnginfo=metadata, optimize=False)
+    elif dest_ext in ['jpg', 'jpeg']:
+        # Save as JPG first without metadata
+        img.save(dest_path, format='JPEG', quality=95, optimize=True)
+        
+        # Insert EXIF metadata for JPG
+        exif_bytes = piexif.dump({
+            "Exif": {
+                piexif.ExifIFD.UserComment: piexif.helper.UserComment.dump(
+                    parameters_text, encoding="unicode"
+                )
+            }
+        })
+        piexif.insert(exif_bytes, dest_path)
+    elif dest_ext == 'webp':
+        # Save as WebP first
+        img.save(dest_path, format='WEBP', quality=95, method=6)
+        
+        # Insert EXIF metadata for WebP
+        exif_bytes = piexif.dump({
+            "Exif": {
+                piexif.ExifIFD.UserComment: piexif.helper.UserComment.dump(
+                    parameters_text, encoding="unicode"
+                )
+            }
+        })
+        piexif.insert(exif_bytes, dest_path)
+    else:
+        # Fallback - force PNG extension for metadata compatibility
+        if not dest_path.lower().endswith('.png'):
+            dest_path = dest_path.rsplit('.', 1)[0] + '.png'
+        
+        # Convert to RGBA for PNG if necessary
+        if img.mode in ('LA', 'P'):
+            img = img.convert('RGBA')
+        elif img.mode != 'RGB' and img.mode != 'RGBA':
+            img = img.convert('RGB')
+        
+        # Save as PNG with metadata
+        img.save(dest_path, format='PNG', pnginfo=metadata, optimize=False)
     
     # Save hash cache if there were any new hashes calculated
     save_hash_cache()

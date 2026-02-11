@@ -234,6 +234,7 @@ class UltimateConfigBuilder:
                     "model": "",
                     "loras": ["None"],
                     "lora_omit_triggers": [],
+                    "lora_triggerwords_append_settings": {},
                     "combine": False
                 }
             ]
@@ -483,6 +484,7 @@ class UltimateConfigBuilder:
                 "model": "",
                 "loras": ["None"],
                 "lora_omit_triggers": [],
+                "lora_triggerwords_append_settings": {},
                 "combine": False
             }]
         
@@ -497,6 +499,7 @@ class UltimateConfigBuilder:
             cfg_list = self.parse_number_list(config_array.get("cfg", "7.0"))
             models = config_array.get("models", ["None"])
             omit_triggers = config_array.get("lora_omit_triggers", [])
+            lora_triggerwords_append_settings = config_array.get("lora_triggerwords_append_settings", {})
             
             # Process models
             model_strings = [str(m) for m in models if m and m != "None"]
@@ -518,7 +521,12 @@ class UltimateConfigBuilder:
             # Add omit triggers if present
             if omit_triggers:
                 config["lora_omit_triggers"] = omit_triggers
-            
+                
+            # Add trigger append settings if present
+            if lora_triggerwords_append_settings and any(v != "none" for v in lora_triggerwords_append_settings.values()):
+                config["lora_triggerwords_append_settings"] = lora_triggerwords_append_settings
+                
+                    
             configs_output.append(config)
         
         json_output = json.dumps(configs_output, indent=2, ensure_ascii=False)
@@ -564,6 +572,29 @@ async def lookup_triggers_endpoint(request):
         })
     except Exception as e:
         print(f"[ConfigBuilder] ❌ Error in lookup_triggers endpoint: {e}")
+        import traceback
+        traceback.print_exc()
+        return web.json_response({
+            "error": str(e)
+        }, status=500)
+
+
+# API endpoint to refresh model/lora lists (triggered by "Update Node Definitions")
+@server.PromptServer.instance.routes.post("/configbuilder/refresh_models")
+async def refresh_models_endpoint(request):
+    """
+    API endpoint to signal frontend to clear its caches.
+    Called when ComfyUI updates node definitions.
+    """
+    try:
+        print(f"[ConfigBuilder] 🔄 Refresh signal received - clearing frontend caches")
+        
+        return web.json_response({
+            "status": "ok",
+            "message": "Frontend caches should be cleared"
+        })
+    except Exception as e:
+        print(f"[ConfigBuilder] ❌ Error in refresh_models endpoint: {e}")
         import traceback
         traceback.print_exc()
         return web.json_response({

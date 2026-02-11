@@ -33,20 +33,28 @@
                 title="Set grid columns (0 = Auto)">
         </div>
 
-        <div class="meta-box">
-            <span class="meta-label">Sort</span>
-            <select id="sort-select" class="sort-select" onchange="changeSort()">
-                <option value="oldest">Oldest</option>
-                <option value="newest">Newest</option>
-                <option value="fastest">Fastest</option>
-                <option value="favorited">Favorited</option>
-                <option value="model">Model</option>
-                <option value="prompt">Prompt</option>
-                <option value="cfg">CFG</option>
-                <option value="denoise">Denoise</option>
-                <option value="lora">LoRA</option>
-                <option value="sampler">Sampler</option>
-            </select>
+        <div class="meta-box" style="overflow: visible;"> <span class="meta-label">Sort</span>
+
+            <div class="sort-container" id="sort-container" ">
+                <button class=" sort-btn" id="sort-main-btn" onclick="toggleSortPopup()">
+                <span id="sort-primary-label">Oldest</span>
+                <span style="opacity:0.5; font-size:8px;">▼</span>
+                </button>
+
+                <div id="sort-popup" class="sort-popup-panel" style="display: none;">
+                    <div class="sort-col">
+                        <div class="sort-col-header" style="color:var(--accent);">PRIMARY</div>
+                        <div id="sort-list-primary">
+                        </div>
+                    </div>
+
+                    <div class="sort-col">
+                        <div class="sort-col-header" style="color:var(--accent-sch);">SECONDARY</div>
+                        <div id="sort-list-secondary">
+                        </div>
+                    </div>
+                </div>
+            </div>
         </div>
 
         <button class="action-btn" onclick="resetZoom()" title="Reset Zoom (0)">⊙</button>
@@ -64,6 +72,26 @@
         </div>
 
         <div class="filters-popup-content">
+            <!-- TOP-LEVEL FILTERS SECTION -->
+            <div class="popup-section"
+                style="border-bottom: 2px solid #333; padding-bottom: 16px; margin-bottom: 16px;">
+                <div class="popup-section-title">VISIBILITY</div>
+                <div style="display: flex; gap: 10px; margin-top: 10px;">
+                    <button id="top-filter-favorites" class="filter-btn top-filter-btn active"
+                        onclick="toggleFavoritesFilter()" title="Toggle visibility of favorited images">
+                        ⭐ Favorites
+                    </button>
+                    <button id="top-filter-nonfavorited" class="filter-btn top-filter-btn active"
+                        onclick="toggleNonFavoritedFilter()" title="Toggle visibility of non-favorited images">
+                        ◯ Non-Favorited
+                    </button>
+                    <button id="top-filter-rejected" class="filter-btn top-filter-btn" onclick="toggleRejectedFilter()"
+                        title="Toggle visibility of rejected images">
+                        ✕ Rejected
+                    </button>
+                </div>
+            </div>
+
             <!-- SEARCH FILTER SECTION -->
             <div class="popup-section">
                 <div class="popup-section-title">SEARCH FILTER</div>
@@ -159,7 +187,7 @@
             <!-- NEW: Export Favorites Section -->
             <div style="border-top: 1px solid #333; margin-top: 12px; padding-top: 12px;">
                 <button class="session-action-btn"
-                    style="background: #ff6b35; width: 100%; font-size: 11px; padding: 10px;"
+                    style="background: #00d1b2; width: 100%; font-size: 11px; padding: 10px;"
                     onclick="exportFavorites()" title="Export favorited images to benchmark_favorites folder">
                     📦 COPY FAVORITES TO BENCHMARK FAVORITES FOLDER
                 </button>
@@ -180,6 +208,16 @@
                         style="font-size: 10px; color: #999; cursor: pointer; user-select: none;">
                         Organize into separate folders by prompt (Prompt1, Prompt2, etc.)
                     </label>
+                </div>
+                <div style="margin-top: 8px; display: flex; align-items: center; gap: 6px;">
+
+                    <input type="checkbox" id="organize-by-lora-checkbox"
+                        style="width: 14px; height: 14px; cursor: pointer;">
+                    <label for="organize-by-lora-checkbox"
+                        style="font-size: 10px; color: #999; cursor: pointer; user-select: none;">
+                        Organize into separate folders by lora sets (loras1, loras2, etc.)
+                    </label>
+
                 </div>
 
                 <div id="export-status" style="margin-top: 8px; font-size: 10px; color: #666; min-height: 16px;"></div>
@@ -233,6 +271,10 @@
             <div class="preview"><img id="m-img" src=""></div>
             <div class="controls">
                 <h2 style="margin:0 0 10px 0; color:#fff;">Revise & Generate</h2>
+                <button class="modal-action-btn copy-comfy-btn" onclick="copyConfigsAsComfyNodes(window.currentModalId)"
+                    style="background: #6366f1; margin-top: 10px;">
+                    📋 Copy Configs To Clipboard As Comfy Nodes
+                </button>
                 <div class="field"><label>Model</label><input id="f-model" disabled style="opacity:0.6;"></div>
                 <div class="field"><label>Seed</label><input id="f-seed" type="number" disabled style="opacity:0.6;">
                 </div>
@@ -272,6 +314,7 @@
 
         // INJECTED LOGIC
         __JS_CONTENT__
+
     </script>
     <style>
         /* Default behavior: The button is visible */
@@ -294,7 +337,8 @@
         }
     </style>
 
-    <div class="gh-hide-on-mobile" style="position: absolute; top: 2px; left: 50%; transform: translateX(-50%); z-index: 999;">
+    <div class="gh-hide-on-mobile"
+        style="position: absolute; top: 2px; left: 50%; transform: translateX(-50%); z-index: 999;">
         <a href="https://github.com/JasonHoku/ComfyUI-Ultimate-Auto-Sampler-Config-Grid-Testing-Suite" target="_blank"
             style="
        display: inline-flex; 

@@ -64,10 +64,21 @@ class SamplerGridTester:
                 "overwrite_existing": ("BOOLEAN", {"default": False, "tooltip": "True = Re-run everything. False = Skip already generated images (Resume)."}),
                 "flush_batch_every": ("INT", {"default": 4, "min": 0, "max": 64, "tooltip": "Update dashboard every X images. 0 = Use VAE Batch Size."}),
                 "add_random_seeds_to_gens": ("INT", {"default": 0, "min": 0, "max": 100, "tooltip": "Generate X extra images per config using consistent random seeds."}),
-                "lookup_and_append_lora_triggerwords": ("BOOLEAN", {"default": False, "tooltip": "Calculates sha256, uses hash to call Civitai API to get triggerwords for loras, caches results to JSON, and appends them to end of prompt."}),
+                "lora_triggerwords_mode": (["None", "Append To End", "Append To Start", "Read From Config"], {
+                    "default": "None",
+                    "tooltip": "None = Don't fetch/append trigger words. Append To End = Add triggers at end of prompt (default behavior). Append To Start = Add triggers at start of prompt. Read From Config = Use lora_triggerwords_append_settings in config JSON to specify per-lora placement."
+                }),
                 "remote_vae_endpoint": (["None", "Auto (Experimental)", "SD", "SDXL", "Flux", "HunyuanVideo"], {
                     "default": "None",
                     "tooltip": "Offload VAE decoding to HuggingFace remote endpoints. Auto detects model type, or manually select endpoint. Ignores vae_batch_size and flush_batch_every when enabled."
+                }),
+                "save_conditioning_cache_to_file": ("BOOLEAN", {
+                    "default": False, 
+                    "tooltip": "Save CLIP conditioning cache to disk.  \n\n Pretty much only helps if you want to use the same prompts without changing models or loras and are planning to experiment with different values AND want to skip the text encoding step after stopping and restarting/resuming a job. \n\n WARNING: Can create very large files in your output/benchmarks folder if you use many prompts with many LoRAs on large runs. Automatically disabled when optional inputs (model/clip/conditioning) are connected, as changes cannot be reliably detected."
+                }),
+                "enable_model_cache": ("BOOLEAN", {
+                    "default": False,
+                    "tooltip": "\n\n Experimental WIP feature that cuts lora switching loading times. Very useful if you are using lots of loras and then switching out some of them on additional runs. Skips re-loading from disk and loads cached loras from RAM instead. \n\n This is currently hard-coded to work best on my 8gb VRAM and 64gb RAM setup, it should work fine on most systems unless you have more LoRAs than available RAM. \n\n Enable intelligent model/LoRA caching system with async background preloading. Dramatically speeds up generation by caching models and preloading next model in background. Disable for debugging or to reduce RAM/VRAM usage (can be much slower if your text encoding step takes a long time and you're doing lots of starting and stopping with the same prompt).  \n\n WILL NOT AUTODELETE THE CACHED ENCODED PROMPTS. You'll need to delete them manually from the benchmark session's folder manually when you're done with them."
                 }),
   
             },
@@ -197,20 +208,27 @@ class SamplerGridTester:
 
     def run_tests(self, ckpt_name, positive_text, negative_text, seed, denoise, vae_batch_size, 
                 overwrite_existing, flush_batch_every, configs_json, resolutions_json, 
-                session_name, unique_id, add_random_seeds_to_gens, lookup_and_append_lora_triggerwords,
-                remote_vae_endpoint,
+                session_name, unique_id, add_random_seeds_to_gens, lora_triggerwords_mode,
+                remote_vae_endpoint, save_conditioning_cache_to_file, enable_model_cache,
                 optional_model=None, optional_clip=None, optional_vae=None, 
                 optional_positive=None, optional_negative=None, optional_latent=None):
 
         # Import the generation logic from the separate module
         from .generation_orchestrator import run_generation_loop
         
+        # Disable cache saving if any optional inputs are connected
+        # (changes in models/LoRAs cannot be reliably detected from optional inputs)
+        if optional_model is not None or optional_clip is not None or optional_positive is not None or optional_negative is not None:
+            if save_conditioning_cache_to_file:
+                print("[GridTester] ⚠️ save_conditioning_cache_to_file disabled: optional inputs connected (changes cannot be reliably detected)")
+            save_conditioning_cache_to_file = False
+        
         return run_generation_loop(
             self,
             ckpt_name, positive_text, negative_text, seed, denoise, vae_batch_size,
             overwrite_existing, flush_batch_every, configs_json, resolutions_json,
-            session_name, unique_id, add_random_seeds_to_gens, lookup_and_append_lora_triggerwords,
-            remote_vae_endpoint,
+            session_name, unique_id, add_random_seeds_to_gens, lora_triggerwords_mode,
+            remote_vae_endpoint, save_conditioning_cache_to_file, enable_model_cache,
             optional_model, optional_clip, optional_vae,
             optional_positive, optional_negative, optional_latent
         )

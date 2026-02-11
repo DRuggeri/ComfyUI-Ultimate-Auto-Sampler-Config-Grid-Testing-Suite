@@ -107,7 +107,17 @@ app.registerExtension({
                     }
 
                     const el = graphNode.iframe;
+                    el.addEventListener('load', () => {
+                        console.log('[UltimateGrid] Iframe reloaded, restoring session...');
 
+                        // Get the session name from the node's widget
+                        const sessionWidget = graphNode.widgets?.find(w => w.name === "session_name");
+                        const sessionName = sessionWidget ? sessionWidget.value : null;
+
+                        if (sessionName && graphNode.forceLoadSession) {
+                            graphNode.forceLoadSession(sessionName);
+                        }
+                    }, { once: true });
                     // Exit fullscreen
                     if (el.classList.contains('dashboard-fullscreen')) {
                         el.classList.remove('dashboard-fullscreen');

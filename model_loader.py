@@ -1,9 +1,10 @@
 """
-Model, CLIP, VAE, and LoRA Loading Module
-Handles loading and patching of models with LoRAs
+Model, CLIP, VAE, and LoRA Loading Module (WITH CACHING)
+Handles loading and patching of models with LoRAs using intelligent caching
 """
 
 import gc
+import time
 import torch
 import folder_paths
 import comfy.sd
@@ -23,10 +24,12 @@ def load_checkpoint(
     optional_positive=None,
     optional_negative=None,
     loaded_clip=None,
-    loaded_vae=None
+    loaded_vae=None,
+    model_cache=None  # NEW: Model cache instance
 ):
     """
     Load a checkpoint (model, CLIP, VAE) based on configuration.
+    NOW WITH CACHING SUPPORT!
     
     Args:
         target_model_name: Name of the checkpoint to load (or "Default")
@@ -39,23 +42,38 @@ def load_checkpoint(
         optional_negative: Optional pre-encoded negative conditioning
         loaded_clip: Currently loaded CLIP (to avoid reloading)
         loaded_vae: Currently loaded VAE (to avoid reloading)
+        model_cache: ModelCache instance (optional, for caching)
         
     Returns:
         tuple: (loaded_model, loaded_clip, loaded_vae)
     """
-    # ==== CRITICAL FIX: Check for optional inputs FIRST ====
-    # Priority 1: All optional inputs provided - skip checkpoint loading entirely
+    # Determine actual checkpoint name
+    actual_ckpt = ckpt_name if target_model_name == "Default" else target_model_name
+    
+    # ==== PRIORITY 1: Check cache first (if available) ====
+    if model_cache is not None:
+        cached = model_cache.get_base_model(actual_ckpt)
+        if cached is not None:
+            cached_model, cached_clip, cached_vae = cached
+            
+            # Use cached values, but respect optional overrides
+            final_model = optional_model if optional_model is not None else cached_model
+            final_clip = optional_clip if optional_clip is not None else cached_clip
+            final_vae = optional_vae if optional_vae is not None and not use_remote_vae else (None if use_remote_vae else cached_vae)
+            
+            return final_model, final_clip, final_vae
+    
+    # ==== PRIORITY 2: Check for optional inputs ====
+    # All optional inputs provided - skip checkpoint loading entirely
     if optional_model is not None and optional_clip is not None and optional_vae is not None:
         print(f"[GridTester] 🔌 Using optional MODEL, CLIP, and VAE (skipping checkpoint load)")
         return optional_model, optional_clip, optional_vae
     
-    # Priority 2: Some optional inputs provided - load checkpoint for missing pieces
+    # Some optional inputs provided - load checkpoint for missing pieces
     if optional_model is not None or optional_clip is not None or (optional_vae is not None and not use_remote_vae):
         print(f"[GridTester] 🔌 Using optional inputs (Model: {optional_model is not None}, "
               f"CLIP: {optional_clip is not None}, VAE: {optional_vae is not None})")
         
-        # Determine which checkpoint to use
-        actual_ckpt = ckpt_name if target_model_name == "Default" else target_model_name
         ckpt_path = folder_paths.get_full_path("checkpoints", actual_ckpt)
         
         # Determine what we need to load from checkpoint
@@ -69,7 +87,9 @@ def load_checkpoint(
         loaded_vae_temp = optional_vae
         
         if need_model or need_clip or need_vae:
-            print(f"[GridTester] 📦 Loading from {actual_ckpt} (need - Model: {need_model}, CLIP: {need_clip}, VAE: {need_vae})")
+            start_time = time.time()
+            print(f"[GridTester] 💿 LOADING FROM DISK: {actual_ckpt}")
+            print(f"[GridTester]    (need - Model: {need_model}, CLIP: {need_clip}, VAE: {need_vae})")
             
             # Load checkpoint with appropriate outputs
             output_vae = need_vae
@@ -81,6 +101,13 @@ def load_checkpoint(
                 output_clip=output_clip,
                 embedding_directory=folder_paths.get_folder_paths("embeddings")
             )
+            
+            elapsed = time.time() - start_time
+            print(f"[GridTester] ✅ Loaded from disk in {elapsed:.2f}s")
+            
+            # Record disk load in cache
+            if model_cache is not None:
+                model_cache.record_disk_load(is_base_model=True, load_time=elapsed)
             
             # Extract what we need
             if need_model:
@@ -97,49 +124,56 @@ def load_checkpoint(
         if use_remote_vae:
             loaded_vae_temp = None  # Remote VAE mode
         
-        print(f"[GridTester] ✅ Loaded {actual_ckpt} with optional overrides")
+        # Store in cache if available
+        if model_cache is not None and loaded_model is not None:
+            model_cache.put_base_model(actual_ckpt, loaded_model, loaded_clip_temp, loaded_vae_temp)
+        
         return loaded_model, loaded_clip_temp, loaded_vae_temp
     
-    # ==== Priority 3: No optional inputs - standard checkpoint loading ====
+    # ==== PRIORITY 3: No optional inputs and no cache - standard checkpoint loading ====
+    start_time = time.time()
+    
     if target_model_name == "Default":
-        print(f"[GridTester] 📦 Loading from ckpt_name: {ckpt_name}")
-        ckpt_path = folder_paths.get_full_path("checkpoints", ckpt_name)
-        if use_remote_vae:
-            out = comfy.sd.load_checkpoint_guess_config(
-                ckpt_path, output_vae=False, output_clip=True,
-                embedding_directory=folder_paths.get_folder_paths("embeddings")
-            )
-            loaded_model, loaded_clip = out[0], out[1]
-            loaded_vae = None
-        else:
-            out = comfy.sd.load_checkpoint_guess_config(
-                ckpt_path, output_vae=True, output_clip=True,
-                embedding_directory=folder_paths.get_folder_paths("embeddings")
-            )
-            loaded_model, loaded_clip, loaded_vae = out[:3]
+        print(f"[GridTester] 💿 LOADING FROM DISK: {ckpt_name} (default)")
     else:
-        print(f"[GridTester] 🔄 Switching to checkpoint: {target_model_name}")
-        ckpt_path = folder_paths.get_full_path("checkpoints", target_model_name)
-        if use_remote_vae:
-            out = comfy.sd.load_checkpoint_guess_config(
-                ckpt_path, output_vae=False, output_clip=True,
-                embedding_directory=folder_paths.get_folder_paths("embeddings")
-            )
-            loaded_model, loaded_clip = out[0], out[1]
-            loaded_vae = None
-        else:
-            out = comfy.sd.load_checkpoint_guess_config(
-                ckpt_path, output_vae=True, output_clip=True,
-                embedding_directory=folder_paths.get_folder_paths("embeddings")
-            )
-            loaded_model, loaded_clip, loaded_vae = out[:3]
+        print(f"[GridTester] 💿 LOADING FROM DISK: {target_model_name}")
+    
+    ckpt_path = folder_paths.get_full_path("checkpoints", actual_ckpt)
+    
+    if use_remote_vae:
+        out = comfy.sd.load_checkpoint_guess_config(
+            ckpt_path, output_vae=False, output_clip=True,
+            embedding_directory=folder_paths.get_folder_paths("embeddings")
+        )
+        loaded_model, loaded_clip = out[0], out[1]
+        loaded_vae = None
+    else:
+        out = comfy.sd.load_checkpoint_guess_config(
+            ckpt_path, output_vae=True, output_clip=True,
+            embedding_directory=folder_paths.get_folder_paths("embeddings")
+        )
+        loaded_model, loaded_clip, loaded_vae = out[:3]
+    
+    elapsed = time.time() - start_time
+    print(f"[GridTester] ✅ Loaded from disk in {elapsed:.2f}s")
+    
+    # Record disk load in cache
+    if model_cache is not None:
+        model_cache.record_disk_load(is_base_model=True, load_time=elapsed)
+        # Store in cache
+        model_cache.put_base_model(actual_ckpt, loaded_model, loaded_clip, loaded_vae)
     
     return loaded_model, loaded_clip, loaded_vae
 
 
-def load_loras(base_model, base_clip, lora_string, target_model_name, incompatible_loras):
+def load_loras(base_model, base_clip, lora_string, target_model_name, incompatible_loras, model_cache=None):
     """
     Load and patch LoRAs onto model and CLIP.
+    NOW WITH THREE-TIER CACHING SUPPORT!
+    
+    Tier 1: LoRA File Cache - Caches individual LoRA files (A, B, C)
+    Tier 2: Incremental State - Reuses partial patched states (A+B+C when need A+B+C+D)
+    Tier 3: Complete Result Cache - Caches final combinations (A+B+C)
     
     Args:
         base_model: Base model to patch
@@ -147,6 +181,7 @@ def load_loras(base_model, base_clip, lora_string, target_model_name, incompatib
         lora_string: LoRA definition string (e.g., "lora1:0.8:0.6 + lora2:1.0:1.0")
         target_model_name: Name of the current model (for incompatibility tracking)
         incompatible_loras: Dict tracking incompatible LoRAs
+        model_cache: ModelCache instance (optional, for caching)
         
     Returns:
         tuple: (patched_model, patched_clip, should_skip_config)
@@ -154,16 +189,64 @@ def load_loras(base_model, base_clip, lora_string, target_model_name, incompatib
     Raises:
         LoRAFileNotFoundError: If a LoRA file is not found (critical error)
     """
-    patched_model = base_model
-    patched_clip = base_clip
+    # ==== TIER 3: Check complete result cache first ====
+    if model_cache is not None and lora_string != "None":
+        cached = model_cache.get_lora_model(target_model_name, lora_string)
+        if cached is not None:
+            patched_model, patched_clip = cached
+            return patched_model, patched_clip, False
     
+    # ==== Handle "None" case ====
     if lora_string == "None":
-        return patched_model, patched_clip, False
+        return base_model, base_clip, False
     
+    # ==== TIER 2: Check incremental cache (can we reuse partial state?) ====
+    start_model = base_model
+    start_clip = base_clip
+    start_index = 0  # Which LoRA to start applying from
+    
+    if model_cache is not None and hasattr(model_cache, 'enable_incremental') and model_cache.enable_incremental:
+        incremental = model_cache.check_incremental_cache(target_model_name, lora_string)
+        
+        if incremental is not None:
+            partial_model, partial_clip, num_applied = incremental
+            
+            # Start from the partial state!
+            start_model = partial_model
+            start_clip = partial_clip
+            start_index = num_applied
+            
+            lora_parts = lora_string.split(" + ")
+            remaining = len(lora_parts) - num_applied
+            
+            print(f"[GridTester] ⚡ INCREMENTAL: Reusing {num_applied} cached LoRAs, applying {remaining} new")
+    
+    # ==== Parse LoRA string ====
+    start_time = time.time()
     active_loras = parse_lora_definition(lora_string)
     
-    for lora_def in active_loras:
+    # Display what we're doing
+    if start_index == 0:
+        # Loading from scratch
+        lora_display = lora_string[:60] + "..." if len(lora_string) > 60 else lora_string
+        print(f"[GridTester] 🔧 LOADING LORAS: {lora_display}")
+    else:
+        # Incremental - show what we're adding
+        remaining_loras = active_loras[start_index:]
+        remaining_str = " + ".join([lname for lname, _, _ in remaining_loras])
+        remaining_display = remaining_str[:60] + "..." if len(remaining_str) > 60 else remaining_str
+        print(f"[GridTester] 🔧 APPLYING REMAINING LORAS: {remaining_display}")
+    
+    # ==== TIER 1: Apply LoRAs (with file caching) ====
+    patched_model = start_model
+    patched_clip = start_clip
+    
+    # Start from start_index (may skip already-applied LoRAs from incremental cache)
+    for i in range(start_index, len(active_loras)):
+        lora_def = active_loras[i]
         lname, lstr_m, lstr_c = lora_def
+        
+        # Get full path
         lora_path = folder_paths.get_full_path("loras", lname)
         
         # CRITICAL: Check if lora_path is valid - if not, STOP EVERYTHING
@@ -183,20 +266,79 @@ def load_loras(base_model, base_clip, lora_string, target_model_name, incompatib
             print(f"{'='*80}\n")
             raise LoRAFileNotFoundError(lname, error_msg)
         
+        # Check for known incompatibilities
         lora_key = f"{target_model_name}:{lname}"
         if lora_key in incompatible_loras:
+            elapsed = time.time() - start_time
+            if model_cache is not None:
+                model_cache.record_disk_load(is_base_model=False, load_time=elapsed)
             return patched_model, patched_clip, True  # Skip this config
         
+        # ==== NEW: Check file cache before loading from disk ====
+        lora_data = None
+        if model_cache is not None and hasattr(model_cache, 'get_lora_file'):
+            # Create LoRA part string for cache (path:model_str:clip_str)
+            lora_part = f"{lname}:{lstr_m}:{lstr_c}"
+            lora_data = model_cache.get_lora_file(lora_part)
+        
+        # Load from disk if not in cache
+        if lora_data is None:
+            load_start = time.time()
+            
+            try:
+                lora_data = comfy.utils.load_torch_file(lora_path, safe_load=True)
+                
+                load_elapsed = time.time() - load_start
+                
+                # Store in file cache for next time
+                if model_cache is not None and hasattr(model_cache, 'put_lora_file'):
+                    lora_part = f"{lname}:{lstr_m}:{lstr_c}"
+                    model_cache.put_lora_file(lora_part, lora_data)
+                    
+                    # Record individual file disk load
+                    if hasattr(model_cache, 'record_lora_file_disk_load'):
+                        model_cache.record_lora_file_disk_load(load_elapsed)
+                
+            except Exception as e:
+                print(f"[GridTester]    ❌ Failed to load: {lname}: {e}")
+                incompatible_loras[lora_key] = (target_model_name, lname, str(e))
+                elapsed = time.time() - start_time
+                if model_cache is not None:
+                    model_cache.record_disk_load(is_base_model=False, load_time=elapsed)
+                return patched_model, patched_clip, True  # Skip this config
+        
+        # Apply the LoRA
         try:
-            lora = comfy.utils.load_torch_file(lora_path, safe_load=True)
             patched_model, patched_clip = comfy.sd.load_lora_for_models(
-                patched_model, patched_clip, lora, lstr_m, lstr_c
+                patched_model, patched_clip, lora_data, lstr_m, lstr_c
             )
-            print(f"[GridTester] ✅ Loaded LoRA: {lname} (model: {lstr_m}, clip: {lstr_c})")
+            # print(f"[GridTester]    ✅ Applied: {lname} (model: {lstr_m}, clip: {lstr_c})")
         except Exception as e:
-            print(f"[GridTester] ❌ Failed to load LoRA {lname}: {e}")
+            print(f"[GridTester]    ❌ Failed to apply: {lname}: {e}")
             incompatible_loras[lora_key] = (target_model_name, lname, str(e))
+            elapsed = time.time() - start_time
+            if model_cache is not None:
+                model_cache.record_disk_load(is_base_model=False, load_time=elapsed)
             return patched_model, patched_clip, True  # Skip this config
+    
+    elapsed = time.time() - start_time
+    
+    if start_index == 0:
+        print(f"[GridTester] ✅ All LoRAs loaded in {elapsed:.2f}s")
+    else:
+        print(f"[GridTester] ✅ Remaining LoRAs applied in {elapsed:.2f}s")
+    
+    # ==== Store in caches ====
+    if model_cache is not None:
+        # Record the operation time
+        model_cache.record_disk_load(is_base_model=False, load_time=elapsed)
+        
+        # Store complete result in result cache
+        model_cache.put_lora_model(target_model_name, lora_string, patched_model, patched_clip)
+        
+        # Update incremental state (for next incremental check)
+        if hasattr(model_cache, 'update_incremental_cache'):
+            model_cache.update_incremental_cache(target_model_name, lora_string, patched_model, patched_clip)
     
     return patched_model, patched_clip, False
 

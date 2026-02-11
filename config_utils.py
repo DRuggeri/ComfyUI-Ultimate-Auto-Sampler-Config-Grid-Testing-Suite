@@ -316,6 +316,11 @@ def expand_configs(raw_configs, pos_prompts, neg_prompts, denoise_values, seed, 
         if not isinstance(lora_omit_triggers, list):
             lora_omit_triggers = [lora_omit_triggers]
         
+        # Get LoRA trigger word append settings (if specified)
+        lora_triggerwords_append_settings = entry.get("lora_triggerwords_append_settings", {})
+        if not isinstance(lora_triggerwords_append_settings, dict):
+            lora_triggerwords_append_settings = {}
+        
         # Build all combinations
         base_combos = []
         for combo in itertools.product(samplers, schedulers, steps_l, cfgs, clip_skips, expanded_loras, 
@@ -332,7 +337,8 @@ def expand_configs(raw_configs, pos_prompts, neg_prompts, denoise_values, seed, 
                 "negative": combo[7][1],
                 "model": combo[8],
                 "seed": seed,
-                "lora_omit_triggers": lora_omit_triggers
+                "lora_omit_triggers": lora_omit_triggers,
+                "lora_triggerwords_append_settings": lora_triggerwords_append_settings
             })
         
         # Apply base seed and extra seeds

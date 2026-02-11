@@ -11,6 +11,7 @@ import gc
 import torch
 import hashlib
 import folder_paths
+import comfy.sd  # Required for async workers
 
 from .trigger_words import collect_unique_prompts_with_triggers, build_prompt_with_triggers
 from .batch_encoding import batch_encode_prompts
@@ -37,15 +38,7 @@ except ImportError:
 
 
 def setup_session_directories(session_name):
-    """
-    Create session directories and return paths.
-    
-    Returns:
-        dict: Paths dictionary with 'base', 'images', 'manifest'
-    """
-    # base_dir = os.path.join("benchmarks", session_name)
-    # img_dir = os.path.join(base_dir, "images")
-    
+    """Create session directories and return paths."""
     base_dir = os.path.join(folder_paths.get_output_directory(), "benchmarks", session_name)
     img_dir = os.path.join(base_dir, "images")
     manifest_path = os.path.join(base_dir, "manifest.json")
@@ -61,41 +54,22 @@ def setup_session_directories(session_name):
 
 
 def initialize_remote_vae(remote_vae_endpoint, img_dir, manifest_path, existing_data, session_name, unique_id):
-    """
-    Initialize remote VAE worker if enabled.
-    
-    Args:
-        remote_vae_endpoint: Remote VAE endpoint URL OR model type (SD/SDXL/Flux/HunyuanVideo)
-        img_dir: Image output directory
-        manifest_path: Path to manifest file
-        existing_data: Existing manifest data
-        session_name: Session name
-        unique_id: Unique ID for this node
-    
-    Returns:
-        RemoteVAEDecodeWorker or None
-    """
+    """Initialize remote VAE worker if enabled."""
     if not remote_vae_endpoint or remote_vae_endpoint == "None":
         return None
     
-    # ==== FIX: Convert model type to actual endpoint URL ====
-    # If user selected a model type (SD/SDXL/Flux/HunyuanVideo), convert to URL
     if remote_vae_endpoint in ["SD", "SDXL", "Flux", "HunyuanVideo"]:
         actual_endpoint = HF_ENDPOINTS.get(remote_vae_endpoint)
         print(f"[GridTester] 🌐 Using {remote_vae_endpoint} endpoint: {actual_endpoint}")
     elif remote_vae_endpoint == "Auto (Experimental)":
-        # For Auto mode, we can't initialize worker yet - return None
-        # Worker will be initialized lazily in flush_batch when model type is detected
         print(f"[GridTester] 🌐 Auto mode selected - worker will initialize on first flush")
         return None
     else:
-        # Assume it's a direct URL
         actual_endpoint = remote_vae_endpoint
         print(f"[GridTester] 🌐 Using custom endpoint: {actual_endpoint}")
     
-    # ==== Create worker with actual endpoint URL ====
     worker = RemoteVAEDecodeWorker(
-        endpoint=actual_endpoint,  # ← FIXED: Use resolved URL, not model type string
+        endpoint=actual_endpoint,
         img_dir=img_dir,
         manifest_path=manifest_path,
         existing_data=existing_data,
@@ -121,36 +95,73 @@ def calculate_clip_hash(clip_model):
         return "unknown"
 
 
+def check_if_job_completed(existing_items, conf, seed, width, height, batch_idx, positive_prompt, negative_prompt):
+    """Independent check to see if a specific generation job already exists."""
+    FLOAT_TOLERANCE = 0.0001
+    
+    for idx, item in enumerate(existing_items):
+        if item.get("seed") != seed: continue
+        if item.get("width") != width: continue
+        if item.get("height") != height: continue
+        if item.get("batch_idx", 0) != batch_idx: continue
+        if item.get("model") != conf["model"]: continue
+        if item.get("sampler") != conf["sampler"]: continue
+        if item.get("scheduler") != conf["scheduler"]: continue
+        
+        try:
+            if abs(float(item.get("steps")) - float(conf["steps"])) > FLOAT_TOLERANCE: continue
+            if abs(float(item.get("cfg")) - float(conf["cfg"])) > FLOAT_TOLERANCE: continue
+            if abs(float(item.get("denoise")) - float(conf["denoise"])) > FLOAT_TOLERANCE: continue
+        except (ValueError, TypeError):
+            continue 
+            
+        if item.get("positive", "").strip() != positive_prompt.strip(): continue
+        if item.get("negative", "").strip() != negative_prompt.strip(): continue
+        
+        item_lora = item.get("lora", "None")
+        conf_lora = conf.get("lora_expanded", "None")
+        if item_lora != conf_lora: continue
+
+        return idx
+        
+    return -1
+
+
 def run_generation_loop(
-    node_instance, ckpt_name, positive_text, negative_text, seed, denoise, vae_batch_size,
+    self,
+    ckpt_name, positive_text, negative_text, seed, denoise, vae_batch_size,
     overwrite_existing, flush_batch_every, configs_json, resolutions_json,
-    session_name, unique_id, add_random_seeds_to_gens, lookup_and_append_lora_triggerwords,
-    remote_vae_endpoint,
-    optional_model=None, optional_clip=None, optional_vae=None,
-    optional_positive=None, optional_negative=None, optional_latent=None
+    session_name, unique_id, add_random_seeds_to_gens, lora_triggerwords_mode,
+    remote_vae_endpoint, save_conditioning_cache_to_file, enable_model_cache,
+    optional_model, optional_clip, optional_vae,
+    optional_positive, optional_negative, optional_latent
 ):
-    """
-    Main generation loop orchestrator.
-    
-    Coordinates:
-    - Session setup
-    - Config expansion  
-    - Model/LoRA loading
-    - Batch encoding
-    - Image generation
-    - Progress tracking
-    - Manifest management
-    
-    Returns:
-        tuple: (html_dashboard,)
-    """
+    """Main generation loop orchestrator."""
+
+    from .model_cache import ModelCache
+
+    # Initialize Model Cache (or disable completely if user requested)
+    if enable_model_cache:
+        model_cache = ModelCache(
+            max_models=1,        # Adjust for your VRAM
+            max_lora_sets=2,    # Adjust for your VRAM
+            max_lora_files=30,   # Adjust for your VRAM
+            enable_preload=True,   # Preloading enabled when cache is on
+            async_preload=True,    # Always async when preloading
+            cache_device='cpu',
+            verbose=True
+        )
+    else:
+        # Completely disable entire cache system
+        print("[GridTester] ⚠️ Model cache DISABLED - all models will load from disk (slower but saves RAM/VRAM)")
+        model_cache = None
+
     # ==== SETUP ====
     session_name = sanitize_session_name(session_name)
     paths = setup_session_directories(session_name)
     existing_data = load_existing_manifest(paths["manifest"])
     existing_data["session_name"] = session_name
     
-    # Parse configs and expand
     from .config_utils import (
         parse_json_with_error, parse_float_input, parse_prompt_input_nested,
         expand_configs, prepare_input_jobs
@@ -171,39 +182,33 @@ def run_generation_loop(
     expanded = expand_configs(raw_configs, pos_prompts, neg_prompts, denoise_values, seed, extra_seeds, ckpt_name)
     expanded.sort(key=lambda x: (x['model'], x['lora'], x['positive'], x['negative']))
     
-    # ==== EXPAND LORA FOLDERS AND RANDOM SELECTIONS ====
-    # Process all LoRA random syntax ONCE before generation loop
-    # This ensures consistent LoRA selection and allows trigger words to be included
+    # ==== EXPAND LORA FOLDERS ====
     print(f"[GridTester] 🎲 Expanding LoRA folders and random selections...")
     for conf in expanded:
         if conf["lora"] != "None":
             lora_parts = conf["lora"].split(" + ")
             expanded_parts = []
-            
             for part in lora_parts:
                 part = part.strip()
-                # Check if this part uses random syntax: "folder/[count,strength]" or "folder/[count,strength,random]"
                 if "[" in part and "]" in part:
-                    # Expand using the config's seed for reproducibility (unless 'random' keyword is used)
                     expanded_lora = expand_lora_folder(part, seed=conf.get("seed"))
                     if expanded_lora:
-                        # expand_lora_folder returns a string or list
                         if isinstance(expanded_lora, list):
                             expanded_parts.extend(expanded_lora)
                         else:
                             expanded_parts.append(expanded_lora)
                 else:
-                    # Regular LoRA path - keep as-is
                     expanded_parts.append(part)
-            
-            # Store expanded version in config
             conf["lora_expanded"] = " + ".join(expanded_parts) if expanded_parts else "None"
-            # Also update the original lora field so trigger word lookup uses expanded version
             conf["lora"] = conf["lora_expanded"]
         else:
             conf["lora_expanded"] = "None"
     print(f"[GridTester] ✅ LoRA expansion complete")
-    
+
+    # ==== REGISTER SMART CACHE SCHEDULE ====
+    if model_cache:
+        model_cache.register_schedule(expanded)
+
     input_jobs = prepare_input_jobs(optional_latent, resolutions)
     total_jobs = len(expanded) * len(input_jobs)
     
@@ -216,21 +221,12 @@ def run_generation_loop(
     if optional_positive or optional_negative:
         pos_hash = hashlib.md5(str(optional_positive).encode()).hexdigest()[:16] if optional_positive else None
         neg_hash = hashlib.md5(str(optional_negative).encode()).hexdigest()[:16] if optional_negative else None
-        MATCH_KEYS = [
-            "sampler", "scheduler", "steps", "cfg", "lora", "denoise", "seed",
-            "width", "height", "batch_idx", "model", "conditioning_pos_hash", "conditioning_neg_hash"
-        ]
     else:
         pos_hash, neg_hash = None, None
-        MATCH_KEYS = [
-            "sampler", "scheduler", "steps", "cfg", "lora", "denoise", "seed",
-            "width", "height", "positive", "negative", "batch_idx", "model"
-        ]
     
     # ==== REMOTE VAE SETUP ====
     use_remote_vae = remote_vae_endpoint and remote_vae_endpoint != "None"
     
-    # ==== PROGRESS BAR ====
     try:
         if PromptServer is not None:
             pbar = PromptServer.instance.progress_bar_pool.get_progress_bar(unique_id)
@@ -244,6 +240,7 @@ def run_generation_loop(
     patched_model, patched_clip = None, None
     cached_model_key = None
     cached_lora_key = None
+    cached_lora_cache_key = None
     conditioning_cache = {"positive": {}, "negative": {}}
     incompatible_loras = {}
     pending_batch = []
@@ -253,8 +250,7 @@ def run_generation_loop(
     job_durations = []
     eta_start_time = time.time()
     
-    # Initialize remote VAE worker if needed (before pre-encoding stage)
-    # This needs to happen regardless of pre-encoding status
+    # Initialize remote VAE worker
     remote_vae_worker = None
     if use_remote_vae and expanded:
         remote_vae_worker = initialize_remote_vae(
@@ -265,12 +261,8 @@ def run_generation_loop(
             session_name,
             unique_id
         )
-        if remote_vae_worker:
-            print(f"[GridTester] 🌐 Remote VAE initialized")
     
     # ==== PRE-ENCODING STAGE ====
-    # CRITICAL: Only pre-encode if all configs use the SAME model
-    # Different models have different CLIP models, so we can't reuse encodings
     unique_models = set(conf["model"] for conf in expanded)
     
     if not (optional_positive and optional_negative) and expanded and len(unique_models) == 1:
@@ -279,14 +271,12 @@ def run_generation_loop(
         
         print(f"[GridTester] ✅ Single model detected ({target_model_name}) - enabling pre-encoding")
         
-        # Load model for pre-encoding
         loaded_model, loaded_clip, loaded_vae = load_checkpoint(
             target_model_name, ckpt_name, use_remote_vae,
             optional_model, optional_clip, optional_vae,
-            optional_positive, optional_negative, None, None
+            optional_positive, optional_negative, None, None, model_cache=model_cache
         )
         
-        # Load LoRAs if needed (use expanded version)
         if first_conf["lora_expanded"] != "None":
             patched_model, patched_clip = load_loras_for_preencoding(
                 loaded_model, loaded_clip, first_conf["lora_expanded"]
@@ -294,32 +284,34 @@ def run_generation_loop(
         else:
             patched_model, patched_clip = loaded_model, loaded_clip
         
-        # Initialize conditioning cache
         clip_hash = calculate_clip_hash(patched_clip)
-        cond_cache = ConditioningCache(paths["base"], clip_hash)
+        cond_cache = ConditioningCache(
+            cache_dir=paths["base"], 
+            clip_hash=clip_hash, 
+            enable_disk_cache=save_conditioning_cache_to_file)
         
-        # Collect unique prompts with triggers
         print(f"[GridTester] 🧠 Collecting unique prompts...")
         unique_positives, unique_negatives = collect_unique_prompts_with_triggers(
-            expanded, lookup_and_append_lora_triggerwords
+            expanded, lora_triggerwords_mode
         )
         
-        # Batch encode all prompts with clip_skip from first config
         clip_skip = first_conf.get("clip_skip", 0)
         if clip_skip != 0:
             print(f"[GridTester] 🔧 Using clip_skip={clip_skip}")
         
         conditioning_cache = batch_encode_prompts(
-            patched_clip, unique_positives, unique_negatives, cond_cache, clip_skip
+            patched_clip, unique_positives, unique_negatives, cond_cache, clip_skip, enable_disk_cache=save_conditioning_cache_to_file
         )
         
         cached_model_key = target_model_name
         cached_lora_key = first_conf["lora_expanded"]
+        if model_cache:
+            cached_lora_cache_key = model_cache._get_lora_cache_key(target_model_name, first_conf["lora_expanded"])
+        else:
+            cached_lora_cache_key = None
         latent_channels = get_latent_channels(loaded_model, optional_latent)
     elif len(unique_models) > 1:
         print(f"[GridTester] ⚠️ Multiple models detected ({len(unique_models)} different models) - pre-encoding DISABLED")
-        print(f"[GridTester] ℹ️  Each model has a different CLIP - encoding will happen per-generation")
-        print(f"[GridTester] ℹ️  This is slower but ensures correct CLIP encodings for each model")
         cond_cache = None
         latent_channels = 4
     else:
@@ -330,19 +322,21 @@ def run_generation_loop(
     # ==== MAIN GENERATION LOOP ====
     print(f"\n{'='*80}\n")
     
-    for job in input_jobs:
+    for job_idx, job in enumerate(input_jobs):
         w, h = job["width"], job["height"]
         batch_idx = job["batch_idx"]
         
         for conf_idx, conf in enumerate(expanded):
-            # ==== CHECK FOR INTERRUPT AT START OF EACH ITERATION ====
+            # ==== CHECK FOR INTERRUPT ====
+            # ==== UPDATE CURRENT STEP ====
+            if model_cache:
+                model_cache.set_current_step(conf_idx)
+
             try:
                 import comfy.model_management as mm
                 if mm.processing_interrupted():
                     print(f"\n[GridTester] 🛑 INTERRUPTED - Stopping all jobs")
-                    print(f"[GridTester] ✅ Completed {total_generated}/{total_jobs} images before interrupt")
                     
-                    # Flush any pending images
                     if pending_batch:
                         if use_remote_vae:
                             flush_batch_with_remote_vae(pending_batch, remote_vae_worker, existing_data, session_name)
@@ -350,26 +344,21 @@ def run_generation_loop(
                             flush_batch_with_vae(pending_batch, loaded_vae, paths["images"], existing_data, session_name, paths["manifest"], unique_id)
                         pending_batch = []
                     
-                    # Wait for remote VAE if active
                     if remote_vae_worker:
-                        print(f"[GridTester] 🌐 Waiting for remote VAE...")
                         remote_vae_worker.wait_completion()
                         remote_vae_worker.stop()
                     
-                            
                     existing_data["meta"] = {
-                        "positive": positive_text,  # Base positive prompt
-                        "negative": negative_text,  # Base negative prompt
-                        "model": ckpt_name,         # Base model
-                        "seed": seed,               # Base seed
+                        "positive": positive_text,
+                        "negative": negative_text,
+                        "model": ckpt_name,
+                        "seed": seed,
                         "vae_batch_size": vae_batch_size,
                         "configs_json": configs_json,
                         "resolutions_json": resolutions_json
                     }
-                    # Save manifest
                     save_manifest(paths["manifest"], existing_data)
                     
-                    # Cleanup
                     loaded_model, loaded_clip, loaded_vae = None, None, None
                     patched_model, patched_clip = None, None
                     conditioning_cache.clear()
@@ -377,39 +366,45 @@ def run_generation_loop(
                     if torch.cuda.is_available():
                         torch.cuda.empty_cache()
                     
-                    # Generate HTML with what we have
                     html = get_html_template(session_name, existing_data, unique_id)
                     return (html,)
             except:
-                pass  # If interrupt checking fails, continue normally
+                pass
             
             current_seed = conf["seed"]
             current_job += 1
             
-            # Update progress bar
             if pbar:
                 try:
                     pbar.update_absolute(current_job, total_jobs)
                 except:
                     pass
             
-            # Console progress
             progress_pct = int((current_job / total_jobs) * 100)
             print(f"[GridTester] 📊 {current_job}/{total_jobs} ({progress_pct}%) | "
                   f"{conf['sampler']} @ {conf['steps']} steps | {w}x{h}")
             
-            # Build prompt with triggers
             actual_positive_prompt, lora_triggers = build_prompt_with_triggers(
-                conf, lookup_and_append_lora_triggerwords
+                conf, lora_triggerwords_mode
             )
             actual_negative_prompt = conf["negative"]
             
-            # Check for existing match (overwrite mode)
-            if overwrite_existing:
-                match_index = node_instance.find_existing_match(
-                    existing_data["items"], conf, w, h, current_seed, batch_idx, MATCH_KEYS
-                )
-                if match_index != -1:
+            # ==== CHECK EXISTING MATCH ====
+            match_index = check_if_job_completed(
+                existing_data["items"], 
+                conf, 
+                current_seed, 
+                w, h, 
+                batch_idx, 
+                actual_positive_prompt, 
+                actual_negative_prompt
+            )
+
+            if match_index != -1:
+                if not overwrite_existing:
+                    skipped_count += 1
+                    continue
+                else:
                     old_item = existing_data["items"][match_index]
                     try:
                         old_fname_match = re.search(r'filename=([^&]+)', old_item["file"])
@@ -417,81 +412,85 @@ def run_generation_loop(
                             old_file_path = os.path.join(paths["images"], old_fname_match.group(1))
                             if os.path.exists(old_file_path):
                                 os.remove(old_file_path)
-                    except:
-                        pass
+                    except Exception as e:
+                        print(f"[GridTester] ⚠️ Warning: Could not delete old file: {e}")
+                    
                     existing_data["items"].pop(match_index)
-                    continue  # Skip generation, we're overwriting
             
-            # Load model if switching
+            # ==== MODEL SWITCHING ====
             target_model_name = conf["model"]
             if target_model_name != cached_model_key:
                 if cached_model_key is not None:
                     patched_model, patched_clip = cleanup_model_references(
                         patched_model, patched_clip, conditioning_cache
                     )
+                    # CRITICAL FIX: Restore dict structure after clear
+                    conditioning_cache["positive"] = {}
+                    conditioning_cache["negative"] = {}
                 
                 loaded_model, loaded_clip, loaded_vae = load_checkpoint(
                     target_model_name, ckpt_name, use_remote_vae,
                     optional_model, optional_clip, optional_vae,
-                    optional_positive, optional_negative, loaded_clip, loaded_vae
+                    optional_positive, optional_negative, loaded_clip, loaded_vae, model_cache=model_cache
                 )
                 
                 cached_model_key = target_model_name
                 cached_lora_key = None
+                cached_lora_cache_key = None
                 latent_channels = get_latent_channels(loaded_model, optional_latent)
-                
-                # Flag to trigger batch encoding after LoRAs are loaded
                 model_switched = True
             else:
                 model_switched = False
             
-            # Load LoRAs if switching (use expanded version)
-            current_lora_key = conf["lora_expanded"]
-            if current_lora_key != cached_lora_key or patched_model is None:
+            # ==== LORA SWITCHING ====
+            current_lora_string = conf["lora_expanded"]
+            
+            if model_cache:
+                current_cache_key = model_cache._get_lora_cache_key(target_model_name, current_lora_string)
+                need_to_load = (current_cache_key != cached_lora_cache_key) or patched_model is None
+            else:
+                need_to_load = (current_lora_string != cached_lora_key) or patched_model is None
+            
+            if need_to_load:
                 patched_model, patched_clip, should_skip = load_loras(
-                    loaded_model, loaded_clip, conf["lora_expanded"],
-                    target_model_name, incompatible_loras
+                    loaded_model, loaded_clip, current_lora_string,
+                    target_model_name, incompatible_loras, model_cache=model_cache
                 )
                 
                 if should_skip:
                     skipped_count += 1
                     continue
                 
-                cached_lora_key = current_lora_key
+                cached_lora_key = current_lora_string
+                if model_cache:
+                    cached_lora_cache_key = current_cache_key
                 
-                # ==== FIX: Batch encode for THIS model when switching models/LoRAs ====
-                # Even in multi-model mode, batch encode all prompts for the current
-                # model to avoid encoding during the hot path (which causes CLIP thrashing)
+                # Batch encode logic for multi-model switching
+                # Because of short-circuit, if model_switched is True, conditioning_cache['positive'] isn't checked initially
+                # But inside the loop, we access it.
                 if model_switched or not conditioning_cache["positive"]:
-                    # Collect all unique prompts for THIS model from remaining configs
                     model_unique_positives = set()
                     model_unique_negatives = set()
                     
-                    # Look ahead at remaining configs for this model
                     for future_idx in range(conf_idx, len(expanded)):
                         future_conf = expanded[future_idx]
                         if future_conf["model"] == target_model_name:
-                            # Build prompt with triggers
                             future_positive, _ = build_prompt_with_triggers(
-                                future_conf, lookup_and_append_lora_triggerwords
+                                future_conf, lora_triggerwords_mode
                             )
                             model_unique_positives.add(future_positive)
                             model_unique_negatives.add(future_conf["negative"])
                     
                     if model_unique_positives:
                         print(f"[GridTester] 🧠 Batch encoding {len(model_unique_positives)} prompts for {target_model_name}")
-                        
-                        # Keep CLIP in VRAM during batch encoding
                         import comfy.model_management as mm_batch
                         mm_batch.load_models_gpu([patched_clip.patcher], force_patch_weights=True)
                         
-                        # Get clip_skip from current config
                         clip_skip = conf.get("clip_skip", 0)
                         
-                        # Batch encode all prompts for this model
                         for prompt in model_unique_positives:
+                            # print(prompt)
                             if prompt not in conditioning_cache["positive"]:
-                                # Apply clip_skip if needed
                                 original_layer = None
                                 if clip_skip != 0 and hasattr(patched_clip.cond_stage_model, 'clip_layer'):
                                     original_layer = patched_clip.cond_stage_model.clip_layer
@@ -501,13 +500,11 @@ def run_generation_loop(
                                 cond, pooled = patched_clip.encode_from_tokens(tokens, return_pooled=True)
                                 conditioning_cache["positive"][prompt] = [[cond, {"pooled_output": pooled}]]
                                 
-                                # Restore layer
                                 if original_layer is not None:
                                     patched_clip.cond_stage_model.set_clip_options({"layer": original_layer})
                         
                         for prompt in model_unique_negatives:
                             if prompt not in conditioning_cache["negative"]:
-                                # Apply clip_skip if needed
                                 original_layer = None
                                 if clip_skip != 0 and hasattr(patched_clip.cond_stage_model, 'clip_layer'):
                                     original_layer = patched_clip.cond_stage_model.clip_layer
@@ -517,7 +514,6 @@ def run_generation_loop(
                                 cond, pooled = patched_clip.encode_from_tokens(tokens, return_pooled=True)
                                 conditioning_cache["negative"][prompt] = [[cond, {"pooled_output": pooled}]]
                                 
-                                # Restore layer
                                 if original_layer is not None:
                                     patched_clip.cond_stage_model.set_clip_options({"layer": original_layer})
                         
@@ -527,14 +523,13 @@ def run_generation_loop(
                 if cond_cache:
                     cond_cache.set_lora_config(conf['lora_expanded'])
             
-            # Get conditioning (should always be in cache after batch encoding)
+            # Get conditioning
             if optional_positive:
                 final_positive = optional_positive
             else:
                 full_positive = actual_positive_prompt
                 final_positive = conditioning_cache["positive"].get(full_positive)
                 if final_positive is None:
-                    # This should never happen since we batch encoded all prompts
                     raise RuntimeError(f"[GridTester] ❌ BUG: Encoding not found for: {full_positive[:50]}...")
             
             if optional_negative:
@@ -542,16 +537,70 @@ def run_generation_loop(
             else:
                 final_negative = conditioning_cache["negative"].get(conf["negative"])
                 if final_negative is None:
-                    # This should never happen since we batch encoded all prompts
                     raise RuntimeError(f"[GridTester] ❌ BUG: Encoding not found for: {conf['negative'][:50]}...")
             
+            # =========================================================
+            # ==== 🚀 ASYNC LOOK-AHEAD PRE-FETCHING (CORRECTED) ====
+            # =========================================================
+            if model_cache is not None and model_cache.async_preload:
+                current_overall_index = (job_idx * len(expanded)) + conf_idx
+                
+                # Check if next job exists
+                if current_overall_index + 1 < total_jobs:
+                    next_idx = current_overall_index + 1
+                    next_job_idx = next_idx // len(expanded)
+                    next_conf_idx = next_idx % len(expanded)
+                    
+                    if next_job_idx < len(input_jobs):
+                        next_conf = expanded[next_conf_idx]
+                        
+                        # RESOLVE "Default" to actual ckpt name
+                        next_model_raw = next_conf["model"]
+                        next_model_resolved = ckpt_name if next_model_raw == "Default" else next_model_raw
+                        next_lora = next_conf["lora_expanded"]
+                        
+                        # CASE 1: Same Base, Different LoRA
+                        if next_model_resolved == target_model_name and next_lora != current_lora_string:
+                            def _preload_lora_worker():
+                                return load_loras(
+                                    loaded_model, loaded_clip, next_lora,
+                                    next_model_resolved, {}, model_cache=None 
+                                )
+                            model_cache.preload_lora_model(next_model_resolved, next_lora, _preload_lora_worker)
+                            
+                        # CASE 2: Different Base Model
+                        elif next_model_resolved != target_model_name:
+                            print(f"[GridTester] 🔮 Pre-loading Base Model: {next_model_resolved}")
+                            
+                            def _preload_base_worker(path_to_load=next_model_resolved):
+                                try:
+                                    import comfy.sd # Re-import locally to be safe in thread
+                                    ckpt_path = folder_paths.get_full_path("checkpoints", path_to_load)
+                                    if use_remote_vae:
+                                        out = comfy.sd.load_checkpoint_guess_config(
+                                            ckpt_path, output_vae=False, output_clip=True,
+                                            embedding_directory=folder_paths.get_folder_paths("embeddings")
+                                        )
+                                        return out[0], out[1], None
+                                    else:
+                                        out = comfy.sd.load_checkpoint_guess_config(
+                                            ckpt_path, output_vae=True, output_clip=True,
+                                            embedding_directory=folder_paths.get_folder_paths("embeddings")
+                                        )
+                                        return out[0], out[1], out[2]
+                                except Exception as e:
+                                    print(f"[GridTester] ❌ Async Worker Error: {e}")
+                                    return None, None, None
+                            
+                            model_cache.preload_base_model(next_model_resolved, _preload_base_worker)
+            # =========================================================
+
             # Generate image
             if job["latent"] is not None:
                 latent_in = {"samples": job["latent"]["samples"].clone()}
             else:
                 latent_in = {"samples": torch.zeros([1, latent_channels, h // 8, w // 8])}
             
-            # ==== GENERATION WITH PROPER INTERRUPT HANDLING ====
             result_latent = None
             try:
                 result_latent, duration = generate_image(
@@ -560,13 +609,11 @@ def run_generation_loop(
                     latent_in, conf["denoise"]
                 )
                 
-                # Track ETA
                 job_durations.append(duration)
                 eta_info = calculate_eta(job_durations, current_job, total_jobs)
                 if eta_info:
                     print_generation_progress(current_job, total_jobs, conf, w, h, duration, eta_info)
                 
-                # Create metadata
                 meta = create_image_metadata(
                     conf, w, h, duration, current_seed, batch_idx,
                     actual_positive_prompt, actual_negative_prompt
@@ -575,23 +622,17 @@ def run_generation_loop(
                     meta["conditioning_pos_hash"] = pos_hash
                     meta["conditioning_neg_hash"] = neg_hash
                 
-                # Clone tensor to break reference chain
                 pending_batch.append((result_latent["samples"].clone(), meta))
                 total_generated += 1
             
-            # ==== FIX: CATCH INTERRUPT SEPARATELY ====
             except Exception as e:
-                # Check if this is an interrupt exception
                 import comfy.model_management
                 if isinstance(e, comfy.model_management.InterruptProcessingException):
                     print(f"\n[GridTester] 🛑 INTERRUPTED during generation - Stopping all jobs")
-                    
-                    # Clean up current generation
                     if result_latent is not None:
                         del result_latent
                     result_latent = None
                     
-                    # Flush pending batch
                     if pending_batch:
                         if use_remote_vae:
                             flush_batch_with_remote_vae(pending_batch, remote_vae_worker, existing_data, session_name)
@@ -599,25 +640,21 @@ def run_generation_loop(
                             flush_batch_with_vae(pending_batch, loaded_vae, paths["images"], existing_data, session_name, paths["manifest"], unique_id)
                         pending_batch = []
                     
-                    # Wait for remote VAE
                     if remote_vae_worker:
-                        print(f"[GridTester] 🌐 Waiting for remote VAE...")
                         remote_vae_worker.wait_completion()
                         remote_vae_worker.stop()
                             
                     existing_data["meta"] = {
-                        "positive": positive_text,  # Base positive prompt
-                        "negative": negative_text,  # Base negative prompt
-                        "model": ckpt_name,         # Base model
-                        "seed": seed,               # Base seed
+                        "positive": positive_text,
+                        "negative": negative_text,
+                        "model": ckpt_name,
+                        "seed": seed,
                         "vae_batch_size": vae_batch_size,
                         "configs_json": configs_json,
                         "resolutions_json": resolutions_json
                     }
-                    # Save manifest
                     save_manifest(paths["manifest"], existing_data)
                     
-                    # Cleanup all models
                     loaded_model, loaded_clip, loaded_vae = None, None, None
                     patched_model, patched_clip = None, None
                     conditioning_cache.clear()
@@ -625,31 +662,25 @@ def run_generation_loop(
                     if torch.cuda.is_available():
                         torch.cuda.empty_cache()
                     
-                    # Generate HTML and return - this stops everything
                     html = get_html_template(session_name, existing_data, unique_id)
                     return (html,)
                 else:
-                    # Regular error - just skip this config
                     print(f"[GridTester] ❌ Generation failed: {e}")
                     if result_latent is not None:
                         del result_latent
                     continue
-            # ==== END FIX ====
             
-            # Clean up after each generation
             if result_latent is not None:
                 del result_latent
             result_latent = None
             del latent_in
             latent_in = None
             
-            # Periodic garbage collection
             if current_job % 10 == 0:
                 gc.collect()
                 if torch.cuda.is_available():
                     torch.cuda.empty_cache()
             
-            # Flush batch if needed
             threshold = vae_batch_size if flush_batch_every <= 0 else flush_batch_every
             if len(pending_batch) >= threshold:
                 if use_remote_vae:
@@ -659,38 +690,33 @@ def run_generation_loop(
                 pending_batch = []
     
     # ==== FINALIZATION ====
-    # Flush remaining
     if pending_batch:
         if use_remote_vae:
             flush_batch_with_remote_vae(pending_batch, remote_vae_worker, existing_data, session_name)
         else:
             flush_batch_with_vae(pending_batch, loaded_vae, paths["images"], existing_data, session_name, paths["manifest"], unique_id)
     
-    # Wait for remote VAE
     if remote_vae_worker:
         print(f"[GridTester] 🌐 Waiting for remote VAE...")
         remote_vae_worker.wait_completion()
         remote_vae_worker.stop()
     
-    # Print summaries
     print_incompatible_loras_summary(incompatible_loras)
     
     if skipped_count > 0:
         print(f"[GridTester] ⏭️ Skipped {skipped_count} configs")
 
     existing_data["meta"] = {
-        "positive": positive_text,  # Base positive prompt
-        "negative": negative_text,  # Base negative prompt
-        "model": ckpt_name,         # Base model
-        "seed": seed,               # Base seed
+        "positive": positive_text,
+        "negative": negative_text,
+        "model": ckpt_name,
+        "seed": seed,
         "vae_batch_size": vae_batch_size,
         "configs_json": configs_json,
         "resolutions_json": resolutions_json
     }
-    # Save manifest
     save_manifest(paths["manifest"], existing_data)
     
-    # Cleanup
     print(f"[GridTester] 🧹 Cleaning up...")
     loaded_model, loaded_clip, loaded_vae = None, None, None
     patched_model, patched_clip = None, None
@@ -698,11 +724,9 @@ def run_generation_loop(
     gc.collect()
     if torch.cuda.is_available():
         torch.cuda.empty_cache()
-    
-    # Generate HTML
+     
     html = get_html_template(session_name, existing_data, unique_id)
-    
-    # Final summary
+      
     if job_durations:
         total_elapsed = time.time() - eta_start_time
         total_hours = int(total_elapsed // 3600)

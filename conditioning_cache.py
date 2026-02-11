@@ -20,17 +20,19 @@ class ConditioningCache:
     keyed by a hash of the prompt text + CLIP model state.
     """
     
-    def __init__(self, cache_dir: str, clip_hash: str = "unknown"):
+    def __init__(self, cache_dir: str, clip_hash: str = "unknown", enable_disk_cache: bool = True):
         """
         Initialize the conditioning cache.
         
         Args:
             cache_dir: Directory to store cache files (e.g., benchmarks/session_name/)
             clip_hash: Hash of the CLIP model to ensure compatibility
+            enable_disk_cache: Whether to save/load cache to/from disk
         """
         self.cache_dir = cache_dir
         self.clip_hash = clip_hash
         self.cache_file = os.path.join(cache_dir, "conditioning_cache.json")
+        self.enable_disk_cache = enable_disk_cache
         
         # Track current LoRA configuration for cache key generation
         self.current_lora_config = ""
@@ -49,8 +51,16 @@ class ConditioningCache:
             "negative": {}
         }
         
-        # Load existing cache from disk (uses self.stats)
-        self.disk_cache = self._load_from_disk()
+        # Load existing cache from disk (uses self.stats) - only if enabled
+        if self.enable_disk_cache:
+            self.disk_cache = self._load_from_disk()
+        else:
+            self.disk_cache = {
+                "version": "1.0",
+                "clip_hash": self.clip_hash,
+                "entries": {}
+            }
+            print(f"[CondCache] ℹ️ Disk cache disabled - using memory-only cache for this session")
     
     def _get_clip_hash(self, clip_model) -> str:
         """
@@ -270,7 +280,13 @@ class ConditioningCache:
                 print(f"[CondCache] ✅ Memory cache hit for: {prompt_text[:50]}...")
             return self.memory_cache[prompt_type][prompt_text]
         
-        # Check disk cache (uses hash as key)
+        # Check disk cache (uses hash as key) - only if enabled
+        if not self.enable_disk_cache:
+            self.stats["misses"] += 1
+            if debug:
+                print(f"[CondCache] ❌ Cache miss (disk cache disabled)")
+            return None
+        
         key = self._prompt_key(prompt_text)
         if debug:
             print(f"[CondCache] 🔍 Looking for key: {key}")
@@ -302,10 +318,13 @@ class ConditioningCache:
             conditioning: The conditioning tensor
             prompt_type: "positive" or "negative"
         """
-        # Store in memory cache
+        # Store in memory cache (always enabled)
         self.memory_cache[prompt_type][prompt_text] = conditioning
         
-        # Store in disk cache
+        # Store in disk cache (only if enabled)
+        if not self.enable_disk_cache:
+            return
+        
         key = self._prompt_key(prompt_text)
         serialized = self._conditioning_to_dict(conditioning)
         
@@ -322,8 +341,11 @@ class ConditioningCache:
             self.stats["saves"] += 1
     
     def save(self):
-        """Save the cache to disk."""
-        self._save_to_disk()
+        """Save the cache to disk (only if disk cache is enabled)."""
+        if self.enable_disk_cache:
+            self._save_to_disk()
+        else:
+            print(f"[CondCache] ℹ️ Skipping disk save (disk cache disabled)")
     
     def get_stats(self) -> Dict[str, int]:
         """Get cache statistics."""

@@ -12,6 +12,76 @@ from .config_builder_node import UltimateConfigBuilder
 from .json_text_node import SmartJSONTextNode
 from .metadata_packer import pack_metadata_into_image
 
+
+# --- CONFIG MANAGEMENT PATH ---
+CONFIGS_DIR = os.path.join(folder_paths.get_output_directory(), "ultimate-configs")
+os.makedirs(CONFIGS_DIR, exist_ok=True)
+
+# --- API: CONFIG MANAGEMENT ---
+@server.PromptServer.instance.routes.get("/configbuilder/list_configs")
+async def list_configs(request):
+    try:
+        if not os.path.exists(CONFIGS_DIR):
+            os.makedirs(CONFIGS_DIR, exist_ok=True)
+        
+        files = [f for f in os.listdir(CONFIGS_DIR) if f.endswith(".json")]
+        files.sort()
+        return web.json_response(files)
+    except Exception as e:
+        return web.Response(status=500, text=str(e))
+
+@server.PromptServer.instance.routes.post("/configbuilder/save_config")
+async def save_config(request):
+    try:
+        data = await request.json()
+        filename = data.get("name")
+        config_data = data.get("data")
+        
+        if not filename or not config_data:
+            return web.Response(status=400, text="Missing name or data")
+        
+        if not filename.endswith(".json"):
+            filename += ".json"
+            
+        # Basic sanitization
+        filename = os.path.basename(filename)
+        filepath = os.path.join(CONFIGS_DIR, filename)
+        
+        with open(filepath, "w") as f:
+            json.dump(config_data, f, indent=4)
+            
+        return web.Response(status=200, text="Saved")
+    except Exception as e:
+        print(f"[ConfigBuilder] Error saving config: {e}")
+        return web.Response(status=500, text=str(e))
+
+@server.PromptServer.instance.routes.post("/configbuilder/load_config")
+async def load_config(request):
+    try:
+        data = await request.json()
+        filename = data.get("name")
+        
+        if not filename:
+             return web.Response(status=400, text="Missing name")
+             
+        if not filename.endswith(".json"):
+            filename += ".json"
+
+        filename = os.path.basename(filename)
+        filepath = os.path.join(CONFIGS_DIR, filename)
+        
+        if not os.path.exists(filepath):
+            return web.Response(status=404, text="Config not found")
+            
+        with open(filepath, "r") as f:
+            config_data = json.load(f)
+            
+        return web.json_response(config_data)
+    except Exception as e:
+        print(f"[ConfigBuilder] Error loading config: {e}")
+        return web.Response(status=500, text=str(e))
+
+
 # --- API: DELETE SESSION ---
 @server.PromptServer.instance.routes.post("/config_tester/delete_session")
 async def delete_session(request):
@@ -217,6 +287,7 @@ async def export_favorites(request):
         session_name = data.get("session_name")
         pack_metadata = data.get("pack_metadata", False)
         organize_by_prompt = data.get("organize_by_prompt", False)
+        organize_by_lora = data.get("organize_by_lora", False)
         
         # Sanitize
         if session_name:
@@ -258,6 +329,21 @@ async def export_favorites(request):
             
             print(f"[Export] Organizing into {len(unique_prompts)} prompt folders")
         
+        # Build lora mapping if organizing by lora
+        lora_to_folder = {}
+        if organize_by_lora:
+            unique_loras = []
+            for item in favorited:
+                lora = item.get("lora_expanded") or manifest.get("meta", {}).get("lora", "")
+                if lora and lora not in unique_loras:
+                    unique_loras.append(lora)
+            
+            # Create Lora1, Lora2, etc. mapping
+            for idx, lora in enumerate(unique_loras, 1):
+                lora_to_folder[lora] = f"Loras{idx}"
+            
+            print(f"[Export] Organizing into {len(unique_loras)} lora folders")
+        
         # Create base export directory
         export_base = os.path.join(folder_paths.get_output_directory(), "benchmarks", session_name, "favorites")
         os.makedirs(export_base, exist_ok=True)
@@ -294,9 +380,22 @@ async def export_favorites(request):
                 continue
             
             # Determine destination folder
-            if organize_by_prompt:
+            if organize_by_prompt and organize_by_lora:
+                # Both options: create nested folders Prompt/Lora
+                prompt = item.get("positive") or manifest.get("meta", {}).get("positive", "")
+                lora = item.get("lora") or manifest.get("meta", {}).get("lora", "")
+                prompt_folder = prompt_to_folder.get(prompt, "Unknown")
+                lora_folder = lora_to_folder.get(lora, "Unknown")
+                dest_dir = os.path.join(export_base, prompt_folder, lora_folder)
+                os.makedirs(dest_dir, exist_ok=True)
+            elif organize_by_prompt:
                 prompt = item.get("positive") or manifest.get("meta", {}).get("positive", "")
                 folder_name = prompt_to_folder.get(prompt, "Unknown")
+                dest_dir = os.path.join(export_base, folder_name)
+                os.makedirs(dest_dir, exist_ok=True)
+            elif organize_by_lora:
+                lora = item.get("lora") or manifest.get("meta", {}).get("lora", "")
+                folder_name = lora_to_folder.get(lora, "Unknown")
                 dest_dir = os.path.join(export_base, folder_name)
                 os.makedirs(dest_dir, exist_ok=True)
             else:
@@ -325,8 +424,12 @@ async def export_favorites(request):
                 exported_count += 1
         
         result_msg = f"Exported {exported_count} favorited images to 'benchmarks/{session_name}/favorites/'"
-        if organize_by_prompt:
+        if organize_by_prompt and organize_by_lora:
+            result_msg += f" (organized into {len(prompt_to_folder)} prompt folders with {len(lora_to_folder)} lora subfolders)"
+        elif organize_by_prompt:
             result_msg += f" (organized into {len(prompt_to_folder)} prompt folders)"
+        elif organize_by_lora:
+            result_msg += f" (organized into {len(lora_to_folder)} lora folders)"
         if pack_metadata:
             result_msg += " (with metadata packed)"
         

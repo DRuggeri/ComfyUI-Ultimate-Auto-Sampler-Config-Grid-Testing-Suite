@@ -232,8 +232,8 @@ class RemoteVAEDecodeWorker:
             try:
                 latent_tensor, meta, height, width = item
                 
-                print(f"[GridTester] 🌐 Processing remote decode for image #{meta['id']}")
-                print(f"[GridTester] 🌐 Input latent shape: {latent_tensor.shape}")
+                # print(f"[GridTester] 🌐 Processing remote decode for image #{meta['id']}")
+                # print(f"[GridTester] 🌐 Input latent shape: {latent_tensor.shape}")
                 
                 # Ensure batch dimension exists
                 if latent_tensor.ndim == 3:
@@ -243,8 +243,8 @@ class RemoteVAEDecodeWorker:
                 # Remote decode - returns [B, C, H, W] tensor
                 decoded = remote_decode_hf(self.endpoint, latent_tensor, height, width)
                 
-                print(f"[GridTester] 🌐 Decoded shape: {decoded.shape}")
-                print(f"[GridTester] 🌐 Decoded dtype: {decoded.dtype}")
+                # print(f"[GridTester] 🌐 Decoded shape: {decoded.shape}")
+                # print(f"[GridTester] 🌐 Decoded dtype: {decoded.dtype}")
                 
                 # Use VaeImageProcessor to properly postprocess the VAE output
                 # This handles denormalization from [-1, 1] to [0, 1] and format conversion
@@ -270,9 +270,9 @@ class RemoteVAEDecodeWorker:
                 
                 # Save image
                 filename = f"img_{meta['id']}.webp"
-                print("Saving")
-                print(filename)
-                print(self.img_dir)
+                # print("Saving")
+                # print(filename)
+                # print(self.img_dir)
                 img.save(os.path.join(self.img_dir, filename), quality=80)
                 
                 meta.update({
@@ -334,7 +334,7 @@ class RemoteVAEDecodeWorker:
                     pass
                 
                 self.total_decoded += 1
-                print(f"[GridTester] ✅ Remote VAE decoded #{meta['id']} ({self.total_decoded} total)")
+                # print(f"[GridTester] ✅ Remote VAE decoded #{meta['id']} ({self.total_decoded} total)")
                 
             except Exception as e:
                 print(f"[GridTester] ❌ Remote VAE worker error: {e}")

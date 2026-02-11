@@ -49,13 +49,87 @@ def get_filtered_lora_triggers(lora_string, omit_list, lookup_triggers=True):
     return trigger_list
 
 
-def collect_unique_prompts_with_triggers(expanded_configs, lookup_and_append_lora_triggerwords):
+def get_trigger_placement_for_lora(lora_name, config, lora_triggerwords_mode):
+    """
+    Determine where to place trigger words for a specific LoRA.
+    
+    Args:
+        lora_name: The LoRA filename (e.g., "XL/Tmp-Trendy/lora1.safetensors")
+        config: Configuration dictionary
+        lora_triggerwords_mode: The global mode (None, Append To End, Append To Start, Read From Config)
+        
+    Returns:
+        str: "start", "end", or "none"
+    """
+    if lora_triggerwords_mode == "None":
+        return "none"
+    elif lora_triggerwords_mode == "Append To End":
+        return "end"
+    elif lora_triggerwords_mode == "Append To Start":
+        return "start"
+    elif lora_triggerwords_mode == "Read From Config":
+        # Check if config has lora_triggerwords_append_settings
+        settings = config.get("lora_triggerwords_append_settings", {})
+        
+        # Normalize the lora_name path (handle both / and \)
+        normalized_lora = lora_name.replace('\\', '/')
+        
+        # print(f"[DEBUG] lora_name: {lora_name}")
+        # print(f"[DEBUG] normalized_lora: {normalized_lora}")
+        # print(f"[DEBUG] settings: {settings}")
+        
+        # Try exact match first (with original path)
+        if lora_name in settings:
+            placement = settings[lora_name].lower()
+            if placement in ["start", "end"]:
+                # print(f"[DEBUG] Exact match (original): {placement}")
+                return placement
+        
+        # Try exact match with normalized path
+        if normalized_lora != lora_name and normalized_lora in settings:
+            placement = settings[normalized_lora].lower()
+            if placement in ["start", "end"]:
+                # print(f"[DEBUG] Exact match (normalized): {placement}")
+                return placement
+        
+        # Try matching without extension (normalized)
+        lora_base = normalized_lora.replace('.safetensors', '').replace('.ckpt', '').replace('.pt', '')
+        if lora_base in settings:
+            placement = settings[lora_base].lower()
+            if placement in ["start", "end"]:
+                # print(f"[DEBUG] Base name match: {placement}")
+                return placement
+        
+        # Try matching against folders (check if lora is in any configured folder)
+        for setting_key, placement in settings.items():
+            # Normalize the setting key as well
+            normalized_key = setting_key.replace('\\', '/')
+            
+            # print(f"[DEBUG] Checking folder: '{normalized_key}' vs '{normalized_lora}'")
+            
+            # Check if this is a folder setting (ends with /)
+            if normalized_key.endswith('/'):
+                # Check if the normalized lora path starts with this normalized folder path
+                if normalized_lora.startswith(normalized_key):
+                    placement_lower = placement.lower()
+                    if placement_lower in ["start", "end"]:
+                        # print(f"[DEBUG] Folder match! '{normalized_lora}' starts with '{normalized_key}' -> {placement_lower}")
+                        return placement_lower
+        
+        # Default to end if not specified in config
+        # print(f"[DEBUG] No match found, defaulting to 'end'")
+        return "end"
+    
+    return "none"
+
+
+def collect_unique_prompts_with_triggers(expanded_configs, lora_triggerwords_mode):
     """
     Collect all unique prompts from configs, applying LoRA trigger words where needed.
     
     Args:
         expanded_configs: List of expanded configuration dictionaries
-        lookup_and_append_lora_triggerwords: Whether to append LoRA trigger words
+        lora_triggerwords_mode: Mode for trigger word placement
         
     Returns:
         tuple: (unique_positives set, unique_negatives set)
@@ -66,7 +140,7 @@ def collect_unique_prompts_with_triggers(expanded_configs, lookup_and_append_lor
     for conf in expanded_configs:
         full_positive = conf["positive"]
          
-        if lookup_and_append_lora_triggerwords and conf["lora"] != "None":
+        if lora_triggerwords_mode != "None" and conf["lora"] != "None":
             omit_list = conf.get("lora_omit_triggers", [])
             trigger_list = get_filtered_lora_triggers(
                 conf["lora"],
@@ -75,8 +149,41 @@ def collect_unique_prompts_with_triggers(expanded_configs, lookup_and_append_lor
             )
             
             if trigger_list:
-                lora_triggers = ", ".join(trigger_list)
-                full_positive = f"{conf['positive']}, {lora_triggers}"
+                # Parse the lora string to get individual loras
+                active_loras = parse_lora_definition(conf["lora"])
+                
+                # Separate triggers by placement
+                start_triggers = []
+                end_triggers = []
+                
+                for lora_def in active_loras:
+                    lname, _, _ = lora_def
+                    placement = get_trigger_placement_for_lora(lname, conf, lora_triggerwords_mode)
+                    
+                    # Get triggers specific to this lora
+                    try:
+                        lora_triggers = load_and_save_tags(lname, force_fetch=False)
+                        omit_normalized = [str(t).lower().strip().rstrip(',').strip() for t in omit_list]
+                        
+                        for tag in lora_triggers:
+                            cleaned_tag = tag.strip().rstrip(',').strip()
+                            if cleaned_tag.lower() not in omit_normalized:
+                                if placement == "start":
+                                    start_triggers.append(cleaned_tag)
+                                elif placement == "end":
+                                    end_triggers.append(cleaned_tag)
+                    except:
+                        pass
+                
+                # Build the full prompt with triggers in correct positions
+                parts = []
+                if start_triggers:
+                    parts.append(", ".join(start_triggers))
+                parts.append(conf['positive'])
+                if end_triggers:
+                    parts.append(", ".join(end_triggers))
+                
+                full_positive = ", ".join(parts)
                 
                 # Show omitted triggers only once during pre-encoding
                 if omit_list:
@@ -90,7 +197,7 @@ def collect_unique_prompts_with_triggers(expanded_configs, lookup_and_append_lor
                         except:
                             pass
                     
-                    omitted = set(all_triggers) - set(trigger_list)
+                    omitted = set(all_triggers) - set(start_triggers + end_triggers)
                     if omitted:
                         print(f"[GridTester] 🚫 Omitted triggers: {', '.join(omitted)}")
         
@@ -100,29 +207,63 @@ def collect_unique_prompts_with_triggers(expanded_configs, lookup_and_append_lor
     return unique_positives, unique_negatives
 
 
-def build_prompt_with_triggers(config, lookup_and_append_lora_triggerwords):
+def build_prompt_with_triggers(config, lora_triggerwords_mode):
     """
     Build final prompt with LoRA triggers applied.
     
     Args:
         config: Configuration dictionary
-        lookup_and_append_lora_triggerwords: Whether to append LoRA trigger words
+        lora_triggerwords_mode: Mode for trigger word placement
         
     Returns:
         tuple: (final_prompt, trigger_string)
     """
-    lora_triggers = ""
+    if config["lora"] == "None" or lora_triggerwords_mode == "None":
+        return config["positive"], ""
     
-    if config["lora"] != "None" and lookup_and_append_lora_triggerwords:
-        omit_list = config.get("lora_omit_triggers", [])
-        trigger_list = get_filtered_lora_triggers(
-            config["lora"],
-            omit_list,
-            lookup_triggers=True
-        )
-        
-        if trigger_list:
-            lora_triggers = ", " + ", ".join(trigger_list)
+    omit_list = config.get("lora_omit_triggers", [])
     
-    final_prompt = config["positive"] + lora_triggers
-    return final_prompt, lora_triggers
+    # Parse the lora string to get individual loras
+    active_loras = parse_lora_definition(config["lora"])
+    
+    # Separate triggers by placement
+    start_triggers = []
+    end_triggers = []
+    
+    for lora_def in active_loras:
+        lname, _, _ = lora_def
+        placement = get_trigger_placement_for_lora(lname, config, lora_triggerwords_mode)
+        # print('placement')
+        # print(placement)
+        # Get triggers specific to this lora
+        try:
+            lora_triggers = load_and_save_tags(lname, force_fetch=False)
+            omit_normalized = [str(t).lower().strip().rstrip(',').strip() for t in omit_list]
+            
+            for tag in lora_triggers:
+                cleaned_tag = tag.strip().rstrip(',').strip()
+                if cleaned_tag.lower() not in omit_normalized:
+                    if placement == "start":
+                        start_triggers.append(cleaned_tag)
+                    elif placement == "end":
+                        end_triggers.append(cleaned_tag)
+        except:
+            pass
+    
+    # Build the trigger string for return value
+    all_triggers = start_triggers + end_triggers
+    trigger_string = ""
+    if all_triggers:
+        trigger_string = ", " + ", ".join(all_triggers)
+    
+    # Build the full prompt with triggers in correct positions
+    parts = []
+    if start_triggers:
+        parts.append(", ".join(start_triggers))
+    parts.append(config['positive'])
+    if end_triggers:
+        parts.append(", ".join(end_triggers))
+    
+    final_prompt = ", ".join(parts)
+    
+    return final_prompt, trigger_string

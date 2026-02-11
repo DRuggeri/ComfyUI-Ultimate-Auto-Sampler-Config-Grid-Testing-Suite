@@ -27,6 +27,7 @@ def batch_encode_with_cache(clip_model, prompts, cond_cache, prompt_type="positi
     results = {}
     prompts_to_encode = []
     
+
     # Check cache first
     print(f"[GridTester] 🔍 Checking cache for {len(prompts)} {prompt_type} prompts...")
     for prompt in prompts:
@@ -93,7 +94,7 @@ def batch_encode_with_cache(clip_model, prompts, cond_cache, prompt_type="positi
     return results
 
 
-def batch_encode_prompts(patched_clip, unique_positives, unique_negatives, cond_cache, clip_skip=0):
+def batch_encode_prompts(patched_clip, unique_positives, unique_negatives, cond_cache, clip_skip=0, enable_disk_cache=True):
     """
     Batch encode both positive and negative prompts.
     
@@ -103,6 +104,7 @@ def batch_encode_prompts(patched_clip, unique_positives, unique_negatives, cond_
         unique_negatives: Set of unique negative prompts
         cond_cache: ConditioningCache instance
         clip_skip: Number of CLIP layers to skip from the end
+        enable_disk_cache: Whether to save cache to disk (passed through to cache)
         
     Returns:
         dict: conditioning_cache with "positive" and "negative" keys
@@ -135,7 +137,7 @@ def batch_encode_prompts(patched_clip, unique_positives, unique_negatives, cond_
             clip_skip=clip_skip
         )
     
-    # Save and print cache stats
+    # Save and print cache stats (only saves if disk cache is enabled)
     if cond_cache is not None:
         cond_cache.save()
         cond_cache.print_stats()

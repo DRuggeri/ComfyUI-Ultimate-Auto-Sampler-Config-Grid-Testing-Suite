@@ -1,24 +1,22 @@
 /**
- * OPTIMIZED DATA PIPELINE
- * Fixed: New items appear immediately when prepended to top
- * Added: Prompt, Size, Seed filters, and Search Filters
+ * OPTIMIZED DATA PIPELINE & SORT LOGIC
+ * Fixes: Clean code (no window. prefixes), restores refreshIndices, enables Dual Sort
  */
 
-let isPipelinePending = false;
-let filterCache = new Map();
-let lastFilterKey = null;
-
-// Helper to update index map
+// RESTORED: Helper to update index map
 function refreshIndices() {
     if (!activeData) return;
     const sorted = activeData.slice().sort((a, b) => a.id - b.id);
     idToIndexMap = new Map(sorted.map((item, index) => [item.id, index + 1]));
 }
- 
-// Generate cache key from current filters (including search filters)
-function getFilterKey() { 
+
+// Generate cache key from current filters
+function getFilterKey() {
     const parts = [
         currentSort,
+        topFilters.showFavorites ? '1' : '0',
+        topFilters.showNonFavorited ? '1' : '0',
+        topFilters.showRejected ? '1' : '0',
         [...filters.sampler].sort().join(','),
         [...filters.scheduler].sort().join(','),
         [...filters.denoise].sort().join(','),
@@ -28,27 +26,199 @@ function getFilterKey() {
         [...filters.negative].sort().join(','),
         [...filters.size].sort().join(','),
         [...filters.seed].sort().join(','),
-        // Include search filters in cache key
         searchFilters.map(f => `${f.type}:${f.term}`).join('|')
     ];
     return parts.join('|');
 }
 
-// INCREMENTAL FILTERING: Only filter new items
-function incrementalFilter(newItems) {
-    const hasButtonFilters = filters.sampler.size > 0 || 
-                              filters.scheduler.size > 0 || 
-                              filters.denoise.size > 0 ||
-                              filters.lora.size > 0 ||
-                              filters.model.size > 0 ||
-                              filters.positive.size > 0 ||
-                              filters.negative.size > 0 ||
-                              filters.size.size > 0 ||
-                              filters.seed.size > 0;
+// --- 3. SORT UI LOGIC ---
+
+function initSortUI() {
+    console.log('[initSortUI] Called');
     
-    return newItems.filter(d => {
-        if (d.rejected) return false;
+    const pList = document.getElementById('sort-list-primary');
+    const sList = document.getElementById('sort-list-secondary');
+    
+    console.log('[initSortUI] Elements found:', {
+        pList: !!pList,
+        sList: !!sList,
+        currentSort,
+        currentSecondarySort
+    });
+    
+    // Safety check: if HTML elements are missing, stop
+    if(!pList || !sList) {
+        console.error('[initSortUI] Missing elements! Cannot initialize sort UI');
+        return;
+    }
+
+    // Helper to create options
+    const renderOptions = (container, isSecondary) => {
+        console.log(`[initSortUI] Rendering ${isSecondary ? 'secondary' : 'primary'} options`);
+        container.innerHTML = ''; // Clear existing
         
+        // Add "None" option for secondary only
+        if (isSecondary) {
+            const div = document.createElement('div');
+            div.className = `sort-option ${currentSecondarySort === 'none' ? 'secondary-selected' : ''}`;
+            div.textContent = 'None';
+            div.onclick = () => setSecondarySort('none');
+            container.appendChild(div);
+        }
+
+        sortOptionsList.forEach(opt => {
+            const div = document.createElement('div');
+            div.className = 'sort-option';
+            div.textContent = opt.label;
+            
+            // Interaction Logic
+            if (!isSecondary) {
+                // Primary Column
+                if (currentSort === opt.id) div.classList.add('selected');
+                div.onclick = () => setPrimarySort(opt.id);
+            } else {
+                // Secondary Column
+                if (currentSecondarySort === opt.id) div.classList.add('secondary-selected');
+                
+                // Disable if same as primary
+                if (currentSort === opt.id) {
+                    div.style.opacity = '0.3';
+                    div.style.pointerEvents = 'none';
+                }
+                div.onclick = () => setSecondarySort(opt.id);
+            }
+            container.appendChild(div);
+        });
+        
+        console.log(`[initSortUI] Rendered ${container.children.length} options for ${isSecondary ? 'secondary' : 'primary'}`);
+    };
+
+    renderOptions(pList, false);
+    renderOptions(sList, true);
+    
+    // Update the main button label
+    const primLabel = sortOptionsList.find(x => x.id === currentSort)?.label || 'Oldest';
+    const secLabel = sortOptionsList.find(x => x.id === currentSecondarySort)?.label;
+    
+    const btnLbl = document.getElementById('sort-primary-label');
+    if(btnLbl) {
+        const secHtml = (secLabel && currentSecondarySort !== 'none') ? '+ ' + secLabel : '';
+        btnLbl.innerHTML = `${primLabel} <span style="color:#666; font-weight:400; font-size:9px;">${secHtml}</span>`;
+        console.log('[initSortUI] Updated button label:', btnLbl.innerHTML);
+    }
+}
+
+function toggleSortPopup() {
+    console.log('[toggleSortPopup] Called');
+    
+    const popup = document.getElementById('sort-popup');
+    const btn = document.getElementById('sort-main-btn');
+    
+    if (!popup) {
+        console.error('[toggleSortPopup] Popup element not found!');
+        return;
+    }
+    
+    const isHidden = popup.style.display === 'none' || !popup.style.display;
+    console.log('[toggleSortPopup] Current state:', isHidden ? 'hidden' : 'visible');
+    
+    if (isHidden) {
+        console.log('[toggleSortPopup] Opening popup');
+        initSortUI(); 
+        popup.style.display = 'flex';
+        if(btn) btn.classList.add('active');
+    } else {
+        console.log('[toggleSortPopup] Closing popup');
+        closeSortPopup();
+    }
+}
+
+function closeSortPopup() {
+    const popup = document.getElementById('sort-popup');
+    const btn = document.getElementById('sort-main-btn');
+    if (popup) popup.style.display = 'none';
+    if (btn) btn.classList.remove('active');
+}
+
+function setPrimarySort(id) {
+    console.log('[setPrimarySort]', id);
+    currentSort = id;
+    localStorage.setItem('ultimate_grid_sort', currentSort);
+    initSortUI(); 
+    updateDataPipeline();
+}
+
+function setSecondarySort(id) {
+    console.log('[setSecondarySort]', id);
+    currentSecondarySort = id;
+    localStorage.setItem('ultimate_grid_sort_sec', currentSecondarySort);
+    closeSortPopup(); 
+    initSortUI();
+    updateDataPipeline();
+}
+
+// Unified Comparison Helper
+function compareItems(a, b, sortKey) {
+    switch (sortKey) {
+        case 'newest': return b.id - a.id;
+        case 'oldest': return a.id - b.id;
+        case 'fastest': return a.duration - b.duration;
+        case 'favorited': return (b.favorited ? 1 : 0) - (a.favorited ? 1 : 0);
+        case 'cfg': return a.cfg - b.cfg;
+        case 'denoise': return a.denoise - b.denoise;
+        case 'seed': return a.seed - b.seed;
+        case 'model': 
+            return (a.model || meta.model || "Default").toLowerCase().localeCompare((b.model || meta.model || "Default").toLowerCase());
+        case 'prompt': 
+            return (a.positive || meta.positive || "").toLowerCase().localeCompare((b.positive || meta.positive || "").toLowerCase());
+        case 'lora': 
+            return (a.lora || "None").toLowerCase().localeCompare((b.lora || "None").toLowerCase());
+        case 'sampler': 
+            return (a.sampler || "").toLowerCase().localeCompare((b.sampler || "").toLowerCase());
+        case 'size':
+            return (a.width * a.height) - (b.width * b.height);
+        default: return 0;
+    }
+}
+
+// Master Sort Function
+function runMultiSort(list) {
+    list.sort((a, b) => {
+        // 1. Primary Sort
+        let res = compareItems(a, b, currentSort);
+        
+        // 2. Secondary Sort (if Primary is tied and Secondary is active)
+        if (res === 0 && currentSecondarySort !== 'none' && currentSecondarySort !== currentSort) {
+            res = compareItems(a, b, currentSecondarySort);
+        }
+        
+        // 3. Fallback to ID (Stable sort)
+        if (res === 0) {
+            return a.id - b.id;
+        }
+        return res;
+    });
+}
+
+// --- 4. PIPELINE & FILTER LOGIC ---
+
+function incrementalFilter(newItems) {
+    const hasButtonFilters = filters.sampler.size > 0 ||
+        filters.scheduler.size > 0 ||
+        filters.denoise.size > 0 ||
+        filters.lora.size > 0 ||
+        filters.model.size > 0 ||
+        filters.positive.size > 0 ||
+        filters.negative.size > 0 ||
+        filters.size.size > 0 ||
+        filters.seed.size > 0;
+
+    return newItems.filter(d => {
+        // Apply top-level filters (Favorites/Non-Favorited/Rejected visibility)
+        if (d.favorited && !topFilters.showFavorites) return false;
+        if (!d.favorited && !d.rejected && !topFilters.showNonFavorited) return false;
+        if (d.rejected && !topFilters.showRejected) return false;
+
         // Apply button filters
         if (hasButtonFilters) {
             if (filters.sampler.size > 0 && !filters.sampler.has(d.sampler)) return false;
@@ -56,31 +226,24 @@ function incrementalFilter(newItems) {
             if (filters.denoise.size > 0 && !filters.denoise.has(d.denoise)) return false;
             if (filters.lora.size > 0 && !filters.lora.has(d.lora)) return false;
             if (filters.model.size > 0 && !filters.model.has(d.model || meta.model || "Default")) return false;
-            
-            // Prompt filters
             if (filters.positive.size > 0 && !filters.positive.has(d.positive || meta.positive || "")) return false;
             if (filters.negative.size > 0 && !filters.negative.has(d.negative || meta.negative || "")) return false;
-            
-            // Size filter
             if (filters.size.size > 0) {
                 const sizeStr = `${d.width}x${d.height}`;
                 if (!filters.size.has(sizeStr)) return false;
             }
-            
-            // Seed filter
             if (filters.seed.size > 0 && !filters.seed.has(d.seed)) return false;
         }
-        
-        // Apply search filters (if function is available)
+
+        // Apply search filters
         if (typeof matchesSearchFilters === 'function') {
             if (!matchesSearchFilters(d)) return false;
         }
-        
+
         return true;
     });
 }
 
-// MAIN TRIGGER: Debounced and cached
 function updateDataPipeline() {
     if (isPipelinePending) return;
     isPipelinePending = true;
@@ -93,115 +256,54 @@ function updateDataPipeline() {
 
 function executePipeline() {
     const startTime = performance.now();
-    
     const currentFilterKey = getFilterKey();
     const filtersChanged = currentFilterKey !== lastFilterKey;
-    
+
     if (filtersChanged) {
         console.log('[Pipeline] Filters changed, full reprocess');
         lastFilterKey = currentFilterKey;
-        
+
         processedData = activeData.filter(d => {
-            if (d.rejected) return false;
-            
-            // Button filters
+            // Apply top-level filters (Favorites/Non-Favorited/Rejected visibility)
+            if (d.favorited && !topFilters.showFavorites) return false;
+            if (!d.favorited && !d.rejected && !topFilters.showNonFavorited) return false;
+            if (d.rejected && !topFilters.showRejected) return false;
+
+            // Re-apply all filters
             if (filters.sampler.size > 0 && !filters.sampler.has(d.sampler)) return false;
             if (filters.scheduler.size > 0 && !filters.scheduler.has(d.scheduler)) return false;
             if (filters.denoise.size > 0 && !filters.denoise.has(d.denoise)) return false;
             if (filters.lora.size > 0 && !filters.lora.has(d.lora)) return false;
             if (filters.model.size > 0 && !filters.model.has(d.model || meta.model || "Default")) return false;
-            
-            // Prompt filters
             if (filters.positive.size > 0 && !filters.positive.has(d.positive || meta.positive || "")) return false;
             if (filters.negative.size > 0 && !filters.negative.has(d.negative || meta.negative || "")) return false;
-            
-            // Size filter
-            if (filters.size.size > 0) {
-                const sizeStr = `${d.width}x${d.height}`;
-                if (!filters.size.has(sizeStr)) return false;
-            }
-            
-            // Seed filter
+            if (filters.size.size > 0 && !filters.size.has(`${d.width}x${d.height}`)) return false;
             if (filters.seed.size > 0 && !filters.seed.has(d.seed)) return false;
             
-            // Search filters
-            if (typeof matchesSearchFilters === 'function') {
-                if (!matchesSearchFilters(d)) return false;
-            }
-            
+            if (typeof matchesSearchFilters === 'function' && !matchesSearchFilters(d)) return false;
+
             return true;
         });
     } else {
-        processedData = processedData.filter(d => !d.rejected);
+        // When filters haven't changed, just filter by top-level visibility
+        processedData = processedData.filter(d => {
+            if (d.favorited && !topFilters.showFavorites) return false;
+            if (!d.favorited && !d.rejected && !topFilters.showNonFavorited) return false;
+            if (d.rejected && !topFilters.showRejected) return false;
+            return true;
+        });
     }
 
-    // Sort
-    switch (currentSort) {
-        case 'newest':
-            processedData.sort((a, b) => b.id - a.id);
-            break;
-        case 'fastest':
-            processedData.sort((a, b) => a.duration - b.duration);
-            break;
-        case 'favorited':
-            // Favorited first, then by ID
-            processedData.sort((a, b) => {
-                const aFav = a.favorited ? 1 : 0;
-                const bFav = b.favorited ? 1 : 0;
-                if (bFav !== aFav) return bFav - aFav;
-                return a.id - b.id;
-            });
-            break;
-        case 'model':
-            processedData.sort((a, b) => {
-                const aModel = (a.model || meta.model || "Default").toLowerCase();
-                const bModel = (b.model || meta.model || "Default").toLowerCase();
-                return aModel.localeCompare(bModel);
-            });
-            break;
-        case 'prompt':
-            processedData.sort((a, b) => {
-                const aPrompt = (a.positive || meta.positive || "").toLowerCase();
-                const bPrompt = (b.positive || meta.positive || "").toLowerCase();
-                return aPrompt.localeCompare(bPrompt);
-            });
-            break;
-        case 'cfg':
-            processedData.sort((a, b) => a.cfg - b.cfg);
-            break;
-        case 'denoise':
-            processedData.sort((a, b) => a.denoise - b.denoise);
-            break;
-        case 'lora':
-            processedData.sort((a, b) => {
-                const aLora = (a.lora || "None").toLowerCase();
-                const bLora = (b.lora || "None").toLowerCase();
-                return aLora.localeCompare(bLora);
-            });
-            break;
-        case 'sampler':
-            processedData.sort((a, b) => {
-                const aSampler = (a.sampler || "").toLowerCase();
-                const bSampler = (b.sampler || "").toLowerCase();
-                return aSampler.localeCompare(bSampler);
-            });
-            break;
-        default: // oldest
-            processedData.sort((a, b) => a.id - b.id);
-    }
+    // Apply Sorting (Multi Sort)
+    runMultiSort(processedData);
 
-    const elapsed = performance.now() - startTime;
-    console.log(`[Pipeline] ✅ Processed ${processedData.length} items in ${elapsed.toFixed(1)}ms`);
-
+    console.log(`[Pipeline] Processed ${processedData.length} items`);
     updateJSONs(processedData);
-    
-    // Only full re-render if filters changed
+
     if (filtersChanged) {
-        renderDOM();
+        if(typeof renderDOM === 'function') renderDOM();
     } else {
-        if (typeof updateVisibleItems === 'function') {
-            updateVisibleItems();
-        }
+        if (typeof updateVisibleItems === 'function') updateVisibleItems();
     }
 }
 
@@ -209,79 +311,36 @@ function executePipeline() {
 function processNewData(newItems) {
     if (!newItems || newItems.length === 0) return;
     
-    console.log(`[Pipeline] ⚡ Processing ${newItems.length} new items incrementally`);
+    // Update global active data
+    activeData.push(...newItems);
     
+    // IMPORTANT: Update indices when new data arrives
+    refreshIndices(); 
+
+    // Update filter options
+    updateFiltersForNewData(newItems);
+    
+    // Process pipeline
     const filtered = incrementalFilter(newItems);
-    
-    // Track if we're prepending (affects visible range)
     let prependedToTop = false;
     
-    // Add to correct position based on sort mode
+    // Logic for Prepend/Append based on Sort Mode
     if (currentSort === 'newest') {
         // Prepend to beginning
         processedData.unshift(...filtered);
-        prependedToTop = true;
+        // Only consider it "prepended" (stable scroll) if we aren't sub-sorting
+        if(currentSecondarySort === 'none') prependedToTop = true;
     } else if (currentSort === 'oldest') {
         // Append to end
         processedData.push(...filtered);
     } else {
         // All other sort modes: add items and re-sort entire array
         processedData.push(...filtered);
-        
-        switch (currentSort) {
-            case 'fastest':
-                processedData.sort((a, b) => a.duration - b.duration);
-                break;
-            case 'favorited':
-                processedData.sort((a, b) => {
-                    const aFav = a.favorited ? 1 : 0;
-                    const bFav = b.favorited ? 1 : 0;
-                    if (bFav !== aFav) return bFav - aFav;
-                    return a.id - b.id;
-                });
-                break;
-            case 'model':
-                processedData.sort((a, b) => {
-                    const aModel = (a.model || meta.model || "Default").toLowerCase();
-                    const bModel = (b.model || meta.model || "Default").toLowerCase();
-                    return aModel.localeCompare(bModel);
-                });
-                break;
-            case 'prompt':
-                processedData.sort((a, b) => {
-                    const aPrompt = (a.positive || meta.positive || "").toLowerCase();
-                    const bPrompt = (b.positive || meta.positive || "").toLowerCase();
-                    return aPrompt.localeCompare(bPrompt);
-                });
-                break;
-            case 'cfg':
-                processedData.sort((a, b) => a.cfg - b.cfg);
-                break;
-            case 'denoise':
-                processedData.sort((a, b) => a.denoise - b.denoise);
-                break;
-            case 'lora':
-                processedData.sort((a, b) => {
-                    const aLora = (a.lora || "None").toLowerCase();
-                    const bLora = (b.lora || "None").toLowerCase();
-                    return aLora.localeCompare(bLora);
-                });
-                break;
-            case 'sampler':
-                processedData.sort((a, b) => {
-                    const aSampler = (a.sampler || "").toLowerCase();
-                    const bSampler = (b.sampler || "").toLowerCase();
-                    return aSampler.localeCompare(bSampler);
-                });
-                break;
-        }
+        runMultiSort(processedData);
     }
-    
-    console.log(`[Pipeline] Now have ${processedData.length} items`);
     
     updateJSONs(processedData);
     
-    // CRITICAL FIX: If prepended to top, force visible range recalc
     if (prependedToTop && typeof forceVisibleRangeUpdate === 'function') {
         forceVisibleRangeUpdate(filtered.length);
     } else if (typeof updateVisibleItems === 'function') {
@@ -289,65 +348,60 @@ function processNewData(newItems) {
     }
 }
 
-// Change Sort Order with dropdown
-function changeSort() {
-    const select = document.getElementById('sort-select');
-    if (!select) return;
-    
-    currentSort = select.value;
-    
-    // Save to localStorage
-    localStorage.setItem('ultimate_grid_sort', currentSort);
-    
-    console.log(`[Pipeline] Sort changed to: ${currentSort}`);
-    updateDataPipeline();
-}
-
 // Load sort order from localStorage
 function loadSortPreference() {
     const savedSort = localStorage.getItem('ultimate_grid_sort');
-    const select = document.getElementById('sort-select');
+    const savedSec = localStorage.getItem('ultimate_grid_sort_sec');
     
-    const validSortOptions = ['oldest', 'newest', 'fastest', 'favorited', 'model', 'prompt', 'cfg', 'denoise', 'lora', 'sampler'];
-    
+    const validSortOptions = sortOptionsList.map(o => o.id);
+
     if (savedSort && validSortOptions.includes(savedSort)) {
         currentSort = savedSort;
-        if (select) {
-            select.value = currentSort;
-        }
-        console.log(`[Pipeline] Loaded sort preference: ${currentSort}`);
     }
+    
+    if (savedSec) {
+        currentSecondarySort = savedSec;
+    }
+
+    console.log(`[loadSortPreference] Loaded sort: ${currentSort}, Secondary: ${currentSecondarySort}`);
+    
+    // Initialize the UI after a brief delay to ensure DOM is ready
+    setTimeout(() => {
+        console.log('[loadSortPreference] Initializing Sort UI after delay');
+        initSortUI();
+    }, 100);
 }
 
-// Update Filters when new data arrives
 function updateFiltersForNewData(newItems) {
     let changed = false;
-    
     ['model', 'sampler', 'scheduler', 'denoise', 'lora', 'positive', 'negative', 'size', 'seed'].forEach(key => {
         newItems.forEach(d => {
             let val;
-            
-            if (key === 'model') {
-                val = d.model || meta.model || "Default";
-            } else if (key === 'positive') {
-                val = d.positive || meta.positive || "";
-            } else if (key === 'negative') {
-                val = d.negative || meta.negative || "";
-            } else if (key === 'size') {
-                val = `${d.width}x${d.height}`;
-            } else {
-                val = d[key];
-            }
-            
-            if (!filters[key].has(val)) {
+            if (key === 'model') val = d.model || meta.model || "Default";
+            else if (key === 'positive') val = d.positive || meta.positive || "";
+            else if (key === 'negative') val = d.negative || meta.negative || "";
+            else if (key === 'size') val = `${d.width}x${d.height}`;
+            else val = d[key];
+
+            if (val && !filters[key].has(val)) {
                 changed = true;
-                filters[key].add(val); 
             }
         });
     });
     
     if (changed && typeof initFilters === 'function') {
-        console.log('[Pipeline] New filter options detected, rebuilding filter UI');
-        initFilters();
+        initFilters(); // Re-render filter buttons
     }
+}
+
+// --- 5. INITIALIZATION ---
+// Ensure init fires after DOM is ready
+if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', () => {
+        console.log('[Init] DOMContentLoaded - calling loadSession');
+        loadSession();
+    });
+} else {
+    console.log('[Init] DOM already loaded - calling loadSession');
+    loadSession();
 }
