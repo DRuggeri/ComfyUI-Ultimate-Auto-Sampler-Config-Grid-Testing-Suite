@@ -106,7 +106,6 @@ export function createSearchableSelect(options, currentValue, onChange, placehol
 }
 
 // --- SLIDER COMPONENT ---
-
 export function createSlider(label, value, min, max, step, onChange) {
     const container = document.createElement("div");
     container.className = "cb-slider-container";
@@ -130,28 +129,35 @@ export function createSlider(label, value, min, max, step, onChange) {
     const numberInput = document.createElement("input");
     numberInput.type = "number";
     numberInput.className = "cb-number-input";
-    numberInput.min = min;
-    numberInput.max = max;
-    numberInput.step = step;
+    
+    // FIX 1: Set step to "any" to allow any decimal precision without browser validation errors
+    numberInput.step = "any"; 
+    // FIX 2: Do NOT set min/max here, so the browser allows typing outside the range
     numberInput.value = value.toFixed(2);
 
     container.appendChild(numberInput);
 
-    // Sync Logic
+    // Sync Logic: Slider -> Number Input
     slider.oninput = () => {
         const val = parseFloat(slider.value);
         numberInput.value = val.toFixed(2);
         onChange(val);
     };
 
+    // Sync Logic: Number Input -> Slider
     numberInput.onchange = () => {
         let val = parseFloat(numberInput.value);
-        if (val < min) val = min;
-        if (val > max) val = max;
-        if (isNaN(val)) val = value;
 
-        slider.value = val;
-        numberInput.value = val.toFixed(2);
+        // Safety check for empty or invalid input
+        if (isNaN(val)) {
+            val = parseFloat(slider.value);
+        }
+
+        slider.value = val; 
+        
+        // Optional: formatting to 2 decimals, or remove to keep exact typed value
+        numberInput.value = val; 
+        
         onChange(val);
     };
 

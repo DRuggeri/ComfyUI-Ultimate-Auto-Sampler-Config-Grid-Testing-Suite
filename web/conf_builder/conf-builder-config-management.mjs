@@ -10,14 +10,14 @@ import {
     buildLoraString,
     getIterationCount,
     convertStateToConfigs
-} from './conf-builder-utilities.mjs'; // RELATIVE IMPORT
+} from './conf-builder-utilities.mjs?v=2'; // RELATIVE IMPORT
 
 import {
     createSearchableSelect,
     createSlider,
     createInputGroup,
     getStyles
-} from './conf-builder-ui-components.mjs'; // RELATIVE IMPORT
+} from './conf-builder-ui-components.mjs?v=2'; // RELATIVE IMPORT
 
 // --- SESSION SECTION RENDERER ---
 
