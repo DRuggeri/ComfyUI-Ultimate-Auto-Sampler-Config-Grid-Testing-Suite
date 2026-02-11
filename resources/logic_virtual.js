@@ -20,10 +20,10 @@ let panOffsetX = 0;
 let panOffsetY = 0;
 
 // --- GRID METRICS ---
-let itemHeight = 400;
+let itemHeight = 420;
 let itemWidth = 260;
 let columnsCount = 4;
-let rowHeight = 350;
+let rowHeight = 370;
 
 // --- LAZY LOADING ---
 const imageObserver = new IntersectionObserver((entries) => {
