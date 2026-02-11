@@ -13,8 +13,8 @@ Want to support development of this project? Buy me a coffee on Ko-fi:
 
 Stop guessing which Sampler, Scheduler, Prompt, Denoise, Model, Lora or CFG value works best. This custom node suite allows you to generate massive Cartesian product grids, view them in an interactive infinite-canvas dashboard, and refine your settings with a "Revise & Generate" workflow without ever leaving the interface.
 
+<img width="1845" height="896" alt="image" src="https://github.com/user-attachments/assets/8aad5049-fd53-4ca4-9fe9-75e51dbce79b" />
 
-<img width="1856" height="1030" alt="image" src="https://github.com/user-attachments/assets/e1d57553-80a8-4058-aea5-455e6bfbdf8a" />
 
 ---
 
