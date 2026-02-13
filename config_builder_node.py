@@ -235,7 +235,7 @@ class UltimateConfigBuilder:
                     "loras": ["None"],
                     "lora_omit_triggers": [],
                     "lora_triggerwords_append_settings": {},
-                    "combine": False
+                    "combine": True
                 }
             ]
         }
@@ -408,7 +408,12 @@ class UltimateConfigBuilder:
             List of lora strings for this config array
         """
         array_name = config_array.get("name", "Unnamed Config")
-        combine = config_array.get("combine", False)
+        
+        # FIX: Force combine to True. 
+        # The UI defaults new configs to 'combine: false' but the Preview 
+        # treats them as combined. We enforce True here to match the Preview/Stack behavior.
+        combine = True 
+        
         loras = config_array.get("loras", [])
         
         # Loras are already strings
@@ -421,11 +426,7 @@ class UltimateConfigBuilder:
                 # When combine is true, ONLY return the combined version
                 combined = " + ".join(stackable)
                 lora_strings = [combined]
-                print(f"[ConfigBuilder] {array_name}: Using combined version only")
-        
-        # Handle None option
-        # if include_none:
-        #     lora_strings.insert(0, "None")
+                print(f"[ConfigBuilder] {array_name}: Combined {len(stackable)} LoRAs into stack")
         
         # Remove duplicates while preserving order
         seen = set()
@@ -485,7 +486,7 @@ class UltimateConfigBuilder:
                 "loras": ["None"],
                 "lora_omit_triggers": [],
                 "lora_triggerwords_append_settings": {},
-                "combine": False
+                "combine": True
             }]
         
         configs_output = []
@@ -579,6 +580,97 @@ async def lookup_triggers_endpoint(request):
         }, status=500)
 
 
+# API endpoint for detailed LoRA metadata lookup
+@server.PromptServer.instance.routes.post("/configbuilder/lookup_lora_metadata")
+async def lookup_lora_metadata_endpoint(request):
+    """API endpoint to lookup full metadata for a specific LoRA from CivitAI"""
+    try:
+        data = await request.json()
+        lora_name = data.get("lora_name", "")
+        
+        if not lora_name:
+            return web.json_response({
+                "error": "No LoRA name provided"
+            }, status=400)
+        
+        print(f"[ConfigBuilder] 🔍 Full metadata lookup request for: {lora_name}")
+        
+        # Get the full path to the LoRA file
+        lora_path = folder_paths.get_full_path("loras", lora_name)
+        
+        if lora_path is None:
+            return web.json_response({
+                "error": f"LoRA file not found: {lora_name}"
+            }, status=404)
+        
+        # Calculate the hash
+        lora_hash = calculate_sha256(lora_path)
+        short_hash = lora_hash[:10]  # First 10 characters for short hash
+        
+        print(f"[ConfigBuilder] 📊 Hash calculated: {short_hash}")
+        
+        # Fetch metadata from CivitAI
+        model_info = get_model_version_info(lora_hash)
+        
+        if model_info is None:
+            return web.json_response({
+                "error": "No metadata found on CivitAI",
+                "hash": lora_hash,
+                "short_hash": short_hash
+            }, status=404)
+        
+        # Extract relevant information
+        metadata = {
+            "name": model_info.get("name", "Unknown"),
+            "model_name": model_info.get("model", {}).get("name", "Unknown") if isinstance(model_info.get("model"), dict) else "Unknown",
+            "trained_words": model_info.get("trainedWords", []),
+            "base_model": model_info.get("baseModel", "Unknown"),
+            "description": model_info.get("description", ""),
+            "tags": model_info.get("model", {}).get("tags", []) if isinstance(model_info.get("model"), dict) else [],
+            "images": [],
+            "url": f"https://civitai.com/models/{model_info.get('modelId', '')}" if model_info.get("modelId") else "",
+            "hash": lora_hash,
+            "short_hash": short_hash,
+            "file_path": lora_path,
+            "stats": model_info.get("stats", {}),
+            "creator": model_info.get("creator", {}).get("username", "Unknown") if isinstance(model_info.get("creator"), dict) else "Unknown"
+        }
+        
+        # Extract images
+        if "images" in model_info and isinstance(model_info["images"], list):
+            for img in model_info["images"][:5]:  # Limit to first 5 images
+                if isinstance(img, dict) and "url" in img:
+                    metadata["images"].append({
+                        "url": img["url"],
+                        "nsfw": img.get("nsfw", "None"),
+                        "width": img.get("width", 0),
+                        "height": img.get("height", 0)
+                    })
+        
+        # Save metadata to file
+        output_dir = folder_paths.get_output_directory()
+        model_data_dir = os.path.join(output_dir, "benchmarks", "model-data", lora_name.replace("/", "_").replace("\\", "_").replace(".safetensors", ""))
+        os.makedirs(model_data_dir, exist_ok=True)
+        
+        metadata_file = os.path.join(model_data_dir, "metadata.json")
+        save_dict_to_json(metadata, metadata_file)
+        
+        print(f"[ConfigBuilder] ✅ Metadata saved to: {metadata_file}")
+        
+        return web.json_response({
+            "metadata": metadata,
+            "saved_to": metadata_file
+        })
+        
+    except Exception as e:
+        print(f"[ConfigBuilder] ❌ Error in lookup_lora_metadata endpoint: {e}")
+        import traceback
+        traceback.print_exc()
+        return web.json_response({
+            "error": str(e)
+        }, status=500)
+
+
 # API endpoint to refresh model/lora lists (triggered by "Update Node Definitions")
 @server.PromptServer.instance.routes.post("/configbuilder/refresh_models")
 async def refresh_models_endpoint(request):
@@ -600,14 +692,3 @@ async def refresh_models_endpoint(request):
         return web.json_response({
             "error": str(e)
         }, status=500)
-
-
-NODE_CLASS_MAPPINGS = {
-    "UltimateConfigBuilder": UltimateConfigBuilder
-}
-
-NODE_DISPLAY_NAME_MAPPINGS = {
-    "UltimateConfigBuilder": "Ultimate Config Builder"
-}
-
-WEB_DIRECTORY = "./web"

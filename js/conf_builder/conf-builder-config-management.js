@@ -10,14 +10,14 @@ import {
     buildLoraString,
     getIterationCount,
     convertStateToConfigs
-} from './conf-builder-utilities.mjs?v=2'; // RELATIVE IMPORT
+} from '/ultimate_config_sampler/js/conf_builder/conf-builder-utilities.js';
 
 import {
     createSearchableSelect,
     createSlider,
     createInputGroup,
     getStyles
-} from './conf-builder-ui-components.mjs?v=2'; // RELATIVE IMPORT
+} from '/ultimate_config_sampler/js/conf_builder/conf-builder-ui-components.js';
 
 // --- SESSION SECTION RENDERER ---
 
@@ -106,7 +106,7 @@ export function renderConfigSection(node, container, availableConfigs) {
     saveBtn.style.width = "100%";
     saveBtn.onclick = async () => {
         await node.saveConfigToBackend();
-        const { getAvailableConfigs } = await import('./conf-builder-utilities.mjs');
+        const { getAvailableConfigs } = await import('/ultimate_config_sampler/js/conf_builder/conf-builder-utilities.js');
         await getAvailableConfigs();
         node.renderUI();
     };
@@ -231,14 +231,14 @@ export function createModelElement(node, modelStr, arrayIdx, modelIdx, available
     div.className = "cb-item-card model-card";
     const isFolder = modelStr.endsWith("/");
     const uid = `${arrayIdx}_${modelIdx}`;
-    
+
     // Initial State
     const isCollapsed = node.uiState.modelsCollapsed[uid] || false;
 
     // Header
     const header = document.createElement("div");
     header.className = "cb-header-bar";
-    
+
     const leftGroup = document.createElement("div");
     leftGroup.className = "cb-header-left";
 
@@ -285,11 +285,11 @@ export function createModelElement(node, modelStr, arrayIdx, modelIdx, available
     // --- TOGGLE LOGIC (INSTANT) ---
     header.onclick = (e) => {
         if (e.target.tagName === 'BUTTON') return; // Ignore delete button
-        
+
         const isNowCollapsed = contentDiv.style.display !== "none";
         contentDiv.style.display = isNowCollapsed ? "none" : "flex";
         toggleArrow.textContent = isNowCollapsed ? "▶" : "▼";
-        
+
         // Save state silently
         node.uiState.modelsCollapsed[uid] = isNowCollapsed;
     };
@@ -311,7 +311,7 @@ export function createModelElement(node, modelStr, arrayIdx, modelIdx, available
     // Searchable Select
     const options = isFolder ? modelFolders : availableModels;
     const currentVal = modelStr;
-    const optionsList = (options && options.includes(currentVal)) || currentVal === "None" || currentVal === "/" 
+    const optionsList = (options && options.includes(currentVal)) || currentVal === "None" || currentVal === "/"
         ? options || ["None"]
         : [currentVal, ...(options || ["None"])];
 
@@ -356,6 +356,7 @@ export function createModelElement(node, modelStr, arrayIdx, modelIdx, available
 
 // --- LORA ELEMENT CREATOR ---
 
+
 export function createLoraElement(node, loraStr, arrayIdx, loraIdx, availableLoras, loraFolders) {
     const div = document.createElement("div");
     div.className = "cb-item-card";
@@ -364,29 +365,68 @@ export function createLoraElement(node, loraStr, arrayIdx, loraIdx, availableLor
     const cleanName = parsed.name.replace(/\*$/, "");
     const isFolder = parsed.name.endsWith("/") || isCombined;
     const uid = `${arrayIdx}_${loraIdx}`;
-    
+
     const isCollapsed = node.uiState.lorasCollapsed[uid] || false;
     let currentModelStr = parsed.model_str;
     let currentClipStr = parsed.clip_str;
 
-    // Header
+    // Initialize state objects if they don't exist
+    if (!node.state.config_arrays[arrayIdx].lora_bypass_states) {
+        node.state.config_arrays[arrayIdx].lora_bypass_states = {};
+    }
+    if (!node.state.config_arrays[arrayIdx].lora_strength_lock) {
+        node.state.config_arrays[arrayIdx].lora_strength_lock = {};
+    }
+
+    // Get bypass state
+    const isBypassed = node.state.config_arrays[arrayIdx].lora_bypass_states[parsed.name] || false;
+
+    // Get strength lock state (default to true - locked by default)
+    const isStrengthLocked = node.state.config_arrays[arrayIdx].lora_strength_lock[parsed.name] !== false;
+
+    // Header with bypass toggle
     const header = document.createElement("div");
     header.className = "cb-header-bar";
 
     const leftGroup = document.createElement("div");
     leftGroup.className = "cb-header-left";
 
+    // Bypass Checkbox (in header, before toggle arrow)
+    const bypassLabel = document.createElement("label");
+    bypassLabel.style.cssText = "display: flex; align-items: center; gap: 4px; cursor: pointer; margin-right: 8px;";
+    bypassLabel.title = "Bypass (disable) this LoRA";
+
+    const bypassCheck = document.createElement("input");
+    bypassCheck.type = "checkbox";
+    bypassCheck.checked = !isBypassed; // Inverted: checked = enabled
+    bypassCheck.style.cssText = "cursor: pointer;";
+    bypassCheck.onclick = (e) => {
+        e.stopPropagation(); // Prevent header collapse
+        const newBypassState = !bypassCheck.checked;
+        node.state.config_arrays[arrayIdx].lora_bypass_states[parsed.name] = newBypassState;
+        node.saveState();
+        // Visual feedback
+        div.style.opacity = newBypassState ? "0.5" : "1.0";
+        div.style.filter = newBypassState ? "grayscale(0.7)" : "none";
+    };
+
+    bypassLabel.appendChild(bypassCheck);
+    const bypassText = document.createElement("span");
+    bypassText.textContent = "On";
+    bypassText.style.cssText = "font-size: 11px; color: #0cc;";
+    bypassLabel.appendChild(bypassText);
+    leftGroup.appendChild(bypassLabel);
+
     const toggleArrow = document.createElement("span");
     toggleArrow.textContent = isCollapsed ? "▶" : "▼";
-    toggleArrow.style.color = "#aaa";
-    toggleArrow.style.fontSize = "10px";
-    toggleArrow.style.width = "12px";
+    toggleArrow.style.cssText = "margin-right: 6px;";
     leftGroup.appendChild(toggleArrow);
 
     const label = document.createElement("span");
-    label.textContent = `LoRA #${loraIdx + 1}`;
-    label.style.color = "#aaa";
-    label.style.whiteSpace = "nowrap";
+    label.style.color = "#0066cc";
+    label.style.fontSize = "10px";
+    label.style.marginRight = "6px";
+    label.textContent = "LoRA:";
     leftGroup.appendChild(label);
 
     const nameSpan = document.createElement("span");
@@ -409,6 +449,12 @@ export function createLoraElement(node, loraStr, arrayIdx, loraIdx, availableLor
     header.appendChild(deleteBtn);
     div.appendChild(header);
 
+    // Apply bypass visual state
+    if (isBypassed) {
+        div.style.opacity = "0.5";
+        div.style.filter = "grayscale(0.7)";
+    }
+
     // Content
     const contentDiv = document.createElement("div");
     contentDiv.style.display = isCollapsed ? "none" : "flex";
@@ -418,12 +464,12 @@ export function createLoraElement(node, loraStr, arrayIdx, loraIdx, availableLor
 
     // --- TOGGLE LOGIC (INSTANT) ---
     header.onclick = (e) => {
-        if (e.target.tagName === 'BUTTON') return;
-        
+        if (e.target.tagName === 'BUTTON' || e.target.tagName === 'INPUT') return;
+
         const isNowCollapsed = contentDiv.style.display !== "none";
         contentDiv.style.display = isNowCollapsed ? "none" : "flex";
         toggleArrow.textContent = isNowCollapsed ? "▶" : "▼";
-        
+
         node.uiState.lorasCollapsed[uid] = isNowCollapsed;
     };
 
@@ -467,27 +513,107 @@ export function createLoraElement(node, loraStr, arrayIdx, loraIdx, availableLor
     const modelSlider = createSlider("Model Strength", currentModelStr, 0, 2, 0.05, (val) => {
         currentModelStr = val;
         const currentName = isCombined ? cleanName + "*" : parsed.name;
+
+        // If strength is locked, update both sliders
+        if (isStrengthLocked) {
+            currentClipStr = val;
+        }
+
         node.state.config_arrays[arrayIdx].loras[loraIdx] = buildLoraString(currentName, currentModelStr, currentClipStr);
         node.saveState();
+
+        // Update CLIP slider if locked
+        if (isStrengthLocked && clipSliderContainer) {
+            const clipSliderInput = clipSliderContainer.querySelector('input[type="range"]');
+            const clipNumberInput = clipSliderContainer.querySelector('input[type="number"]');
+            if (clipSliderInput) clipSliderInput.value = val;
+            if (clipNumberInput) clipNumberInput.value = val;
+        }
     });
     contentDiv.appendChild(modelSlider);
 
-    const clipSlider = createSlider("CLIP Strength", currentClipStr, 0, 2, 0.05, (val) => {
-        currentClipStr = val;
-        const currentName = isCombined ? cleanName + "*" : parsed.name;
-        node.state.config_arrays[arrayIdx].loras[loraIdx] = buildLoraString(currentName, currentModelStr, currentClipStr);
-        node.saveState();
-    });
-    contentDiv.appendChild(clipSlider);
+    // CLIP Slider - conditionally visible based on lock state
+    let clipSliderContainer = null;
+    if (!isStrengthLocked) {
+        clipSliderContainer = createSlider("CLIP Strength", currentClipStr, 0, 2, 0.05, (val) => {
+            currentClipStr = val;
+            const currentName = isCombined ? cleanName + "*" : parsed.name;
+            node.state.config_arrays[arrayIdx].loras[loraIdx] = buildLoraString(currentName, currentModelStr, currentClipStr);
+            node.saveState();
+        });
+        contentDiv.appendChild(clipSliderContainer);
+    }
 
+    // --- COLLAPSIBLE "MORE LORA OPTIONS" SECTION ---
     if (parsed.name !== "None") {
-        const triggerSection = document.createElement("div");
-        triggerSection.style.cssText = `background: #2a2a2a; border-radius: 4px; padding: 8px; margin-top: 6px; border-left: 3px solid #00aa88;`;
-        
+        const moreOptionsUid = `${uid}-moreoptions`;
+        const isMoreOptionsCollapsed = node.uiState.lorasCollapsed[moreOptionsUid] !== false; // Default collapsed
+
+        const moreOptionsSection = document.createElement("div");
+        moreOptionsSection.style.cssText = `background: #252525; border-radius: 4px; padding: 8px; margin-top: 6px; border-left: 3px solid #9966cc;`;
+
+        const moreOptionsHeader = document.createElement("div");
+        moreOptionsHeader.style.cssText = "display: flex; justify-content: space-between; align-items: center; cursor: pointer; user-select: none;";
+
+        const moreOptionsTitle = document.createElement("div");
+        moreOptionsTitle.textContent = "⚙️ More LoRA Options";
+        moreOptionsTitle.style.cssText = "font-size: 11px; font-weight: bold; color: #9966cc;";
+
+        const moreOptionsArrow = document.createElement("span");
+        moreOptionsArrow.textContent = isMoreOptionsCollapsed ? "▶" : "▼";
+        moreOptionsArrow.style.cssText = "font-size: 10px; color: #9966cc;";
+
+        moreOptionsHeader.appendChild(moreOptionsTitle);
+        moreOptionsHeader.appendChild(moreOptionsArrow);
+        moreOptionsSection.appendChild(moreOptionsHeader);
+
+        const moreOptionsContent = document.createElement("div");
+        moreOptionsContent.style.display = isMoreOptionsCollapsed ? "none" : "flex";
+        moreOptionsContent.style.flexDirection = "column";
+        moreOptionsContent.style.gap = "8px";
+        moreOptionsContent.style.marginTop = "8px";
+
+        // Toggle handler
+        moreOptionsHeader.onclick = () => {
+            const isNowCollapsed = moreOptionsContent.style.display !== "none";
+            moreOptionsContent.style.display = isNowCollapsed ? "none" : "flex";
+            moreOptionsArrow.textContent = isNowCollapsed ? "▶" : "▼";
+            node.uiState.lorasCollapsed[moreOptionsUid] = isNowCollapsed;
+        };
+
+        // 1. Strength Lock Checkbox
+        const strengthLockLabel = document.createElement("label");
+        strengthLockLabel.style.cssText = "display: flex; align-items: center; gap: 6px; font-size: 12px; cursor: pointer;";
+
+        const strengthLockCheck = document.createElement("input");
+        strengthLockCheck.type = "checkbox";
+        strengthLockCheck.checked = isStrengthLocked;
+        strengthLockCheck.onchange = () => {
+            node.state.config_arrays[arrayIdx].lora_strength_lock[parsed.name] = strengthLockCheck.checked;
+
+            // If locking, sync CLIP to Model strength
+            if (strengthLockCheck.checked) {
+                currentClipStr = currentModelStr;
+                const currentName = isCombined ? cleanName + "*" : parsed.name;
+                node.state.config_arrays[arrayIdx].loras[loraIdx] = buildLoraString(currentName, currentModelStr, currentClipStr);
+            }
+
+            node.saveState();
+            node.renderUI(); // Re-render to show/hide CLIP slider
+        };
+
+        strengthLockLabel.appendChild(strengthLockCheck);
+        strengthLockLabel.appendChild(document.createTextNode("🔒 Lock Model & CLIP Strength Together"));
+        moreOptionsContent.appendChild(strengthLockLabel);
+
+        // 2. Auto Append Trigger Words Section
+        const triggerSubSection = document.createElement("div");
+        triggerSubSection.style.cssText = `background: #2a2a2a; border-radius: 4px; padding: 8px; border-left: 3px solid #00aa88;`;
+
         const triggerTitle = document.createElement("div");
         triggerTitle.textContent = "🏷️ Auto Append LoRA Trigger Words To:";
         triggerTitle.style.cssText = "font-size: 11px; font-weight: bold; color: #00aa88; margin-bottom: 6px;";
-        triggerSection.appendChild(triggerTitle);
+        triggerSubSection.appendChild(triggerTitle);
 
         if (!node.state.config_arrays[arrayIdx].lora_triggerwords_append_settings) {
             node.state.config_arrays[arrayIdx].lora_triggerwords_append_settings = {};
@@ -495,7 +621,7 @@ export function createLoraElement(node, loraStr, arrayIdx, loraIdx, availableLor
         const currentPlacement = node.state.config_arrays[arrayIdx].lora_triggerwords_append_settings[parsed.name] || "none";
 
         const checkboxContainer = document.createElement("div");
-        checkboxContainer.style.cssText = "display: flex; gap: 12px; align-items: center;";
+        checkboxContainer.style.cssText = "display: flex; gap: 12px; align-items: center; flex-wrap: wrap;";
 
         const createCheck = (lbl, val) => {
             const label = document.createElement("label");
@@ -503,17 +629,31 @@ export function createLoraElement(node, loraStr, arrayIdx, loraIdx, availableLor
             const check = document.createElement("input");
             check.type = "checkbox";
             check.checked = currentPlacement === val;
-            check.onchange = () => {
-                 node.state.config_arrays[arrayIdx].lora_triggerwords_append_settings[parsed.name] = check.checked ? val : "none";
-                 node.saveState();
-                 // This one technically could just re-render or not, 
-                 // but since it affects checkbox state of "the other" box, we might want to re-render OR manual toggle.
-                 // For now, saveState is enough, UI will update next time or you can manipulate DOM.
-                 // To avoid lag, we manually uncheck the other one:
-                 if(check.checked) {
-                     const other = checkboxContainer.querySelectorAll('input');
-                     other.forEach(i => { if(i !== check) i.checked = false; });
-                 }
+            check.onchange = async () => {
+                // Special handling for "dont_append"
+                if (val === "dont_append" && check.checked) {
+                    // Fetch triggers and add them to omit list
+                    const triggers = await fetchLoraTriggersForOmit(node, arrayIdx, parsed.name);
+                    if (triggers && triggers.length > 0) {
+                        if (!node.state.config_arrays[arrayIdx].lora_omit_triggers) {
+                            node.state.config_arrays[arrayIdx].lora_omit_triggers = [];
+                        }
+                        triggers.forEach(trigger => {
+                            if (!node.state.config_arrays[arrayIdx].lora_omit_triggers.includes(trigger)) {
+                                node.state.config_arrays[arrayIdx].lora_omit_triggers.push(trigger);
+                            }
+                        });
+                    }
+                }
+
+                node.state.config_arrays[arrayIdx].lora_triggerwords_append_settings[parsed.name] = check.checked ? val : "none";
+                node.saveState();
+
+                // Manually uncheck the others
+                if (check.checked) {
+                    const other = checkboxContainer.querySelectorAll('input');
+                    other.forEach(i => { if (i !== check) i.checked = false; });
+                }
             };
             label.appendChild(check);
             label.appendChild(document.createTextNode(lbl));
@@ -522,10 +662,31 @@ export function createLoraElement(node, loraStr, arrayIdx, loraIdx, availableLor
 
         checkboxContainer.appendChild(createCheck("Start", "start"));
         checkboxContainer.appendChild(createCheck("End", "end"));
-        triggerSection.appendChild(checkboxContainer);
-        contentDiv.appendChild(triggerSection);
+        checkboxContainer.appendChild(createCheck("Don't Append", "dont_append"));
+
+        triggerSubSection.appendChild(checkboxContainer);
+
+        // Info text for Don't Append
+        const dontAppendInfo = document.createElement("div");
+        dontAppendInfo.style.cssText = "font-size: 10px; color: #888; font-style: italic; margin-top: 4px;";
+        dontAppendInfo.textContent = "ℹ️ 'Don't Append' adds all trigger words to the omit list";
+        triggerSubSection.appendChild(dontAppendInfo);
+
+        moreOptionsContent.appendChild(triggerSubSection);
+
+        // 3. LoRA Metadata Lookup Button
+        const metadataBtn = document.createElement("button");
+        metadataBtn.className = "cb-button";
+        metadataBtn.style.cssText = `width: 100%; background: linear-gradient(135deg, #cc6699, #9966cc); border-left: 4px solid #ff66cc; margin-top: 4px;`;
+        metadataBtn.textContent = "🔍 Lookup LoRA Metadata from CivitAI";
+        metadataBtn.onclick = async () => await showLoraMetadataModal(node, arrayIdx, parsed.name);
+        moreOptionsContent.appendChild(metadataBtn);
+
+        moreOptionsSection.appendChild(moreOptionsContent);
+        contentDiv.appendChild(moreOptionsSection);
     }
 
+    // Folder expand button (outside More Options)
     if (isFolder && parsed.name !== "None") {
         const expandBtn = document.createElement("button");
         expandBtn.className = "cb-button";
@@ -554,6 +715,184 @@ export function createLoraElement(node, loraStr, arrayIdx, loraIdx, availableLor
     div.appendChild(contentDiv);
     return div;
 }
+
+// Helper function to fetch triggers for "Don't Append" option
+async function fetchLoraTriggersForOmit(node, arrayIdx, loraName) {
+    try {
+        const resp = await fetch("/configbuilder/lookup_triggers", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ loras: [loraName] })
+        });
+
+        if (resp.ok) {
+            const data = await resp.json();
+            return data.triggers[loraName] || [];
+        }
+    } catch (e) {
+        console.error("[ConfigBuilder] Error fetching triggers for omit:", e);
+    }
+    return [];
+}
+
+// New modal for LoRA metadata lookup
+async function showLoraMetadataModal(node, arrayIdx, loraName) {
+    const overlay = document.createElement("div");
+    overlay.style.cssText = `position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0, 0, 0, 0.85); display: flex; align-items: center; justify-content: center; z-index: 10000;`;
+
+    const modal = document.createElement("div");
+    // Red X close button in top right
+    modal.classList.add("cb-modal-popup");
+    const closeX = document.createElement("button");
+    closeX.textContent = "✖";
+    closeX.style.cssText = "position: absolute; top: 10px; right: 10px; background: #cc3333; color: white; border: none; border-radius: 4px; width: 28px; height: 28px; font-size: 16px; cursor: pointer; display: flex; align-items: center; justify-content: center; z-index: 1;";
+    closeX.onmouseover = () => closeX.style.background = "#dd4444";
+    closeX.onmouseout = () => closeX.style.background = "#cc3333";
+    closeX.onclick = () => document.body.removeChild(overlay);
+    modal.appendChild(closeX);
+
+    const title = document.createElement("h3");
+    title.textContent = "🔍 LoRA Metadata Lookup";
+    title.style.cssText = "margin: 0 0 15px 0; color: #9966cc;";
+    modal.appendChild(title);
+
+    const status = document.createElement("div");
+    status.textContent = `🔄 Fetching metadata for: ${loraName.split('/').pop()}`;
+    status.style.cssText = "margin-bottom: 15px; color: #aaa;";
+    modal.appendChild(status);
+
+    const content = document.createElement("div");
+    modal.appendChild(content);
+
+    const closeBtn = document.createElement("button");
+    closeBtn.className = "cb-button";
+    closeBtn.textContent = "Close";
+    closeBtn.style.marginTop = "15px";
+    closeBtn.onclick = () => document.body.removeChild(overlay);
+
+    overlay.appendChild(modal);
+    document.body.appendChild(overlay);
+
+    // Fetch metadata
+    try {
+        const resp = await fetch("/configbuilder/lookup_lora_metadata", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ lora_name: loraName })
+        });
+
+        if (!resp.ok) {
+            const errorData = await resp.json();
+            status.textContent = "❌ Error: " + (errorData.error || "Failed to fetch metadata");
+            status.style.color = "#ff6666";
+            modal.appendChild(closeBtn);
+            return;
+        }
+
+        const data = await resp.json();
+        const metadata = data.metadata;
+
+        status.textContent = "✅ Metadata loaded successfully!";
+        status.style.color = "#66ff66";
+
+        // Display metadata
+        content.innerHTML = "";
+
+        // Model name and creator
+        const headerSection = document.createElement("div");
+        headerSection.style.cssText = "margin-bottom: 15px; padding-bottom: 10px; border-bottom: 2px solid #444;";
+        headerSection.innerHTML = `
+            <div style="font-size: 18px; font-weight: bold; color: #ff66cc; margin-bottom: 5px;">${metadata.model_name}</div>
+            <div style="font-size: 14px; color: #aaa;">Version: ${metadata.name}</div>
+            <div style="font-size: 12px; color: #888;">Creator: ${metadata.creator}</div>
+            <div style="font-size: 11px; color: #666; margin-top: 5px;">
+                Hash: <code style="background: #1a1a1a; padding: 2px 6px; border-radius: 3px;">${metadata.short_hash}</code>
+            </div>
+        `;
+        content.appendChild(headerSection);
+
+        // Base Model and Tags
+        const infoSection = document.createElement("div");
+        infoSection.style.cssText = "margin-bottom: 15px;";
+        infoSection.innerHTML = `
+            <div style="margin-bottom: 8px;"><strong style="color: #9966cc;">Base Model:</strong> ${metadata.base_model}</div>
+            <div style="margin-bottom: 8px;">
+                <strong style="color: #9966cc;">Tags:</strong> 
+                <div style="margin-top: 4px; display: flex; flex-wrap: wrap; gap: 4px;">
+                    ${metadata.tags.slice(0, 10).map(tag => `<span style="background: #444; padding: 2px 8px; border-radius: 10px; font-size: 11px;">${tag}</span>`).join('')}
+                </div>
+            </div>
+        `;
+        content.appendChild(infoSection);
+
+        // Trigger Words
+        if (metadata.trained_words && metadata.trained_words.length > 0) {
+            const triggerSection = document.createElement("div");
+            triggerSection.style.cssText = "margin-bottom: 15px; background: #252525; padding: 10px; border-radius: 4px; border-left: 3px solid #00aa88;";
+            triggerSection.innerHTML = `
+                <div style="font-weight: bold; color: #00aa88; margin-bottom: 6px;">🏷️ Trigger Words:</div>
+                <div style="display: flex; flex-wrap: wrap; gap: 6px;">
+                    ${metadata.trained_words.map(word => `<span style="background: #333; padding: 4px 8px; border-radius: 4px; font-size: 12px; font-family: monospace;">${word}</span>`).join('')}
+                </div>
+            `;
+            content.appendChild(triggerSection);
+        }
+
+        // Images
+        if (metadata.images && metadata.images.length > 0) {
+            const imagesSection = document.createElement("div");
+            imagesSection.style.cssText = "margin-bottom: 15px;";
+            imagesSection.innerHTML = `<div style="font-weight: bold; color: #9966cc; margin-bottom: 8px;">📸 Example Images:</div>`;
+
+            const imageGrid = document.createElement("div");
+            imageGrid.style.cssText = "display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 8px;";
+
+            metadata.images.forEach(img => {
+                const imgContainer = document.createElement("div");
+                imgContainer.style.cssText = "position: relative; aspect-ratio: 1; overflow: hidden; border-radius: 4px; border: 1px solid #444; cursor: pointer;";
+                imgContainer.title = "Click to open full size";
+
+                const imgElem = document.createElement("img");
+                imgElem.src = img.url;
+                imgElem.style.cssText = "width: 100%; height: 100%; object-fit: cover;";
+                imgElem.onclick = () => window.open(img.url, '_blank');
+
+                imgContainer.appendChild(imgElem);
+                imageGrid.appendChild(imgContainer);
+            });
+
+            imagesSection.appendChild(imageGrid);
+            content.appendChild(imagesSection);
+        }
+
+        // Links
+        const linksSection = document.createElement("div");
+        linksSection.style.cssText = "margin-top: 15px; padding-top: 10px; border-top: 2px solid #444;";
+
+        const civitaiLink = document.createElement("a");
+        civitaiLink.href = metadata.url;
+        civitaiLink.target = "_blank";
+        civitaiLink.textContent = "🌐 View on CivitAI";
+        civitaiLink.style.cssText = "display: inline-block; background: #0066cc; color: white; padding: 8px 16px; border-radius: 4px; text-decoration: none; margin-right: 10px;";
+
+        const savedPath = document.createElement("div");
+        savedPath.style.cssText = "margin-top: 8px; font-size: 11px; color: #666;";
+        savedPath.textContent = `💾 Metadata saved to: ${data.saved_to}`;
+
+        linksSection.appendChild(civitaiLink);
+        linksSection.appendChild(savedPath);
+        content.appendChild(linksSection);
+
+    } catch (e) {
+        status.textContent = "❌ Error: " + e.message;
+        status.style.color = "#ff6666";
+        console.error("[ConfigBuilder] Metadata lookup error:", e);
+    }
+
+    modal.appendChild(closeBtn);
+}
+
+
 
 // --- RENDER MODELS AND LORAS SECTIONS ---
 
@@ -594,19 +933,19 @@ export function renderModelsSection(node, div, configArray, arrayIdx, availableM
     const contentContainer = document.createElement("div");
     contentContainer.style.display = isSectionCollapsed ? "none" : "contents"; // 'contents' keeps the grid layout working!
     // Note: 'contents' acts as if the container isn't there, so children become grid items.
-    
+
     // --- HEADER CLICK (INSTANT) ---
     modelHeader.onclick = () => {
         const isNowCollapsed = contentContainer.style.display === "none";
         // Toggle
         if (isNowCollapsed) {
-             contentContainer.style.display = "contents";
-             arrowSpan.textContent = "▼";
-             node.uiState.modelsSectionCollapsed[arrayIdx] = false;
+            contentContainer.style.display = "contents";
+            arrowSpan.textContent = "▼";
+            node.uiState.modelsSectionCollapsed[arrayIdx] = false;
         } else {
-             contentContainer.style.display = "none";
-             arrowSpan.textContent = "▶";
-             node.uiState.modelsSectionCollapsed[arrayIdx] = true;
+            contentContainer.style.display = "none";
+            arrowSpan.textContent = "▶";
+            node.uiState.modelsSectionCollapsed[arrayIdx] = true;
         }
     };
 
@@ -679,18 +1018,18 @@ export function renderLorasSection(node, div, configArray, arrayIdx, availableLo
     const contentContainer = document.createElement("div");
     // Use 'contents' to allow grid/flex wrapping of children to work properly with parent
     contentContainer.style.display = isSectionCollapsed ? "none" : "contents";
-    
+
     // --- HEADER CLICK (INSTANT) ---
     loraHeader.onclick = () => {
         const isNowCollapsed = contentContainer.style.display === "none";
         if (isNowCollapsed) {
-             contentContainer.style.display = "contents";
-             arrowSpan.textContent = "▼";
-             node.uiState.lorasSectionCollapsed[arrayIdx] = false;
+            contentContainer.style.display = "contents";
+            arrowSpan.textContent = "▼";
+            node.uiState.lorasSectionCollapsed[arrayIdx] = false;
         } else {
-             contentContainer.style.display = "none";
-             arrowSpan.textContent = "▶";
-             node.uiState.lorasSectionCollapsed[arrayIdx] = true;
+            contentContainer.style.display = "none";
+            arrowSpan.textContent = "▶";
+            node.uiState.lorasSectionCollapsed[arrayIdx] = true;
         }
     };
 
@@ -714,14 +1053,14 @@ export function renderLorasSection(node, div, configArray, arrayIdx, availableLo
     };
     addRow.appendChild(addBtn);
     contentContainer.appendChild(addRow);
-    
+
     loraGrid.appendChild(contentContainer);
     div.appendChild(loraGrid);
 
     // OMIT TRIGGERS (Outside the flex grid loop to stay at bottom)
     const omitContainer = document.createElement("div");
     omitContainer.style.display = isSectionCollapsed ? "none" : "block"; // Separate container for omit, basic block
-    
+
     // Hack: Attach header click listener to this too? 
     // Easier way: The header click updates TWO containers?
     // Or simpler: put omitContainer inside contentContainer? 
@@ -729,7 +1068,7 @@ export function renderLorasSection(node, div, configArray, arrayIdx, availableLo
     // It should be full width.
     omitContainer.style.width = "100%";
     omitContainer.style.flexBasis = "100%"; // Force new line in flex wrap
-    
+
     renderOmitTriggersSection(node, omitContainer, configArray, arrayIdx);
     contentContainer.appendChild(omitContainer);
 }
@@ -787,12 +1126,12 @@ function renderOmitTriggersSection(node, div, configArray, arrayIdx) {
     triggerInput.placeholder = "Enter trigger to omit...";
     triggerInput.style.flex = "1";
     triggerInput.onkeydown = (e) => { if (e.key === "Enter" && triggerInput.value.trim()) addTrigger(); };
-    
+
     const addTriggerBtn = document.createElement("button");
     addTriggerBtn.className = "cb-button primary";
     addTriggerBtn.textContent = "Add";
     addTriggerBtn.style.padding = "4px 12px";
-    
+
     const addTrigger = () => {
         const val = triggerInput.value.trim();
         if (val && !configArray.lora_omit_triggers.includes(val)) {
@@ -979,14 +1318,14 @@ export async function renderUI(node, availableLoras, availableModels, loraFolder
 
     const arraysContainer = document.createElement("div");
     arraysContainer.className = "cb-arrays-container";
-    
+
     node.state.config_arrays.forEach((configArray, arrayIdx) => {
         const arrayElement = createConfigArrayElement(node, configArray, arrayIdx);
         renderModelsSection(node, arrayElement, configArray, arrayIdx, availableModels, modelFolders);
         renderLorasSection(node, arrayElement, configArray, arrayIdx, availableLoras, loraFolders);
         arraysContainer.appendChild(arrayElement);
     });
-    
+
     configSection.appendChild(arraysContainer);
     root.appendChild(configSection);
 

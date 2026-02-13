@@ -248,10 +248,18 @@ export function convertStateToConfigs(state) {
     const split = (str) => str.split(",").map(s => s.trim()).filter(s => s);
 
     state.config_arrays.forEach(configArray => {
-        // Process LoRAs
+        // Process LoRAs - FIXED VERSION
         let loras = configArray.loras.filter(l => l && l !== "None");
-        if (state.include_none || loras.length === 0) {
-            loras = [loras];
+        
+        // Convert loras array to proper format
+        let loraValue;
+        if (loras.length === 0) {
+            loraValue = "None";
+        } else if (loras.length === 1) {
+            loraValue = loras[0];
+        } else {
+            // Multiple loras: combine with " + " separator
+            loraValue = loras.join(" + ");
         }
 
         // Process Models
@@ -262,7 +270,7 @@ export function convertStateToConfigs(state) {
             scheduler: split(configArray.schedulers),
             steps: configArray.steps.split(",").map(s => parseInt(s)),
             cfg: configArray.cfg.split(",").map(s => parseFloat(s)),
-            lora: loras.length > 1 ? loras : loras[0] || "None",
+            lora: loraValue,
             model: finalModels.length > 1 ? finalModels : finalModels[0] || "None"
         };
 
@@ -284,6 +292,16 @@ export function convertStateToConfigs(state) {
             }
         }
 
+        // Add lora_bypass_states if any are set
+        if (configArray.lora_bypass_states && Object.keys(configArray.lora_bypass_states).length > 0) {
+            config.lora_bypass_states = configArray.lora_bypass_states;
+        }
+
+        // Add lora_strength_lock if any are set
+        if (configArray.lora_strength_lock && Object.keys(configArray.lora_strength_lock).length > 0) {
+            config.lora_strength_lock = configArray.lora_strength_lock;
+        }
+
         configs.push(config);
     });
     return configs;
@@ -301,6 +319,8 @@ export function convertConfigsToConfigArrays(configs) {
             loras: ["None"],
             lora_omit_triggers: [],
             lora_triggerwords_append_settings: {},
+            lora_bypass_states: {},
+            lora_strength_lock: {},
             combine: false
         }];
     }
@@ -351,6 +371,18 @@ export function convertConfigsToConfigArrays(configs) {
             triggerPlacements = { ...config.lora_triggerwords_append_settings };
         }
 
+        // Load lora_bypass_states
+        let bypassStates = {};
+        if (config.lora_bypass_states && typeof config.lora_bypass_states === 'object') {
+            bypassStates = { ...config.lora_bypass_states };
+        }
+
+        // Load lora_strength_lock
+        let strengthLock = {};
+        if (config.lora_strength_lock && typeof config.lora_strength_lock === 'object') {
+            strengthLock = { ...config.lora_strength_lock };
+        }
+
         configArrays.push({
             name: `Loaded Config ${idx + 1}`,
             samplers: toString(config.sampler || "euler"),
@@ -361,6 +393,8 @@ export function convertConfigsToConfigArrays(configs) {
             loras: loras,
             lora_omit_triggers: omitTriggers,
             lora_triggerwords_append_settings: triggerPlacements,
+            lora_bypass_states: bypassStates,
+            lora_strength_lock: strengthLock,
             combine: hasCombined
         });
     });
@@ -375,6 +409,8 @@ export function convertConfigsToConfigArrays(configs) {
         loras: ["None"],
         lora_omit_triggers: [],
         lora_triggerwords_append_settings: {},
+        lora_bypass_states: {},
+        lora_strength_lock: {},
         combine: false
     }];
 }

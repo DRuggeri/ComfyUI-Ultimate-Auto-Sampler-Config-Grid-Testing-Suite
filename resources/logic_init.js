@@ -7,7 +7,6 @@ function init() {
 
     try {
 
-
         // Bind Column Input
         const colInput = document.getElementById('col-count');
         if (colInput) {
@@ -54,7 +53,17 @@ function init() {
         // Initialize search filter UI
         if (typeof renderSearchFilters === 'function') renderSearchFilters();
 
+        // IMPORTANT: Calculate grid dimensions BEFORE running pipeline
+        if (typeof updateGridDimensions === 'function') {
+            updateGridDimensions();
+        }
+
         updateDataPipeline();
+
+        // Initialize the virtual scroller (pan/zoom/keyboard controls)
+        if (typeof initVirtualScroller === 'function') {
+            initVirtualScroller();
+        }
 
         // Try to restore saved viewport position BEFORE auto-fit
         let restoredPosition = false;

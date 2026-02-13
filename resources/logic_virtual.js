@@ -1,6 +1,6 @@
 /**
  * TRUE VIRTUAL SCROLL - ZERO FLICKER
- * With full keyboard navigation support
+ * With full keyboard navigation support and AUTO-CALCULATED DIMENSIONS
  */
 
 // --- VIRTUAL WINDOW STATE ---
@@ -19,11 +19,103 @@ let panStartY = 0;
 let panOffsetX = 0;
 let panOffsetY = 0;
 
-// --- GRID METRICS ---
-let itemHeight = 420;
-let itemWidth = 260;
+// --- GRID METRICS (Auto-calculated from image data) ---
+let itemHeight = 420;  // Will be auto-calculated
+let itemWidth = 260;   // Will be auto-calculated
 let columnsCount = 4;
-let rowHeight = 370;
+let rowHeight = 370;   // Will be auto-calculated
+
+// --- DIMENSION CALCULATION CONSTANTS ---
+const CARD_PADDING = 10;           // Space between cards
+const CARD_METADATA_HEIGHT = 50;   // Height of the metadata/button area below image
+const ASPECT_RATIO_FALLBACK = 2/3; // Default aspect ratio if no images loaded (portrait)
+const MIN_CARD_WIDTH = 150;        // Minimum card width
+const MAX_CARD_WIDTH = 500;        // Maximum card width
+
+/**
+ * Calculate optimal grid dimensions based on image aspect ratios
+ * This runs once when data is loaded or when images change
+ */
+function calculateGridDimensions() {
+    if (!processedData || processedData.length === 0) {
+        console.log('[Grid Dimensions] No data available, using defaults');
+        return;
+    }
+
+    // Sample first 20 images to determine average aspect ratio
+    const sampleSize = Math.min(20, processedData.length);
+    let totalAspectRatio = 0;
+    let validSamples = 0;
+
+    for (let i = 0; i < sampleSize; i++) {
+        const item = processedData[i];
+        if (item.width && item.height && item.width > 0 && item.height > 0) {
+            totalAspectRatio += item.width / item.height;
+            validSamples++;
+        }
+    }
+
+    // Calculate average aspect ratio
+    const avgAspectRatio = validSamples > 0 
+        ? totalAspectRatio / validSamples 
+        : ASPECT_RATIO_FALLBACK;
+
+    // Get viewport width to determine optimal card width
+    const viewport = document.getElementById('viewport');
+    const viewportWidth = viewport ? viewport.clientWidth : 1200;
+
+    // Calculate column count based on viewport and desired card size
+    const colInput = document.getElementById('col-count');
+    const manualCols = colInput ? parseInt(colInput.value) : 0;
+    
+    if (manualCols > 0) {
+        columnsCount = manualCols;
+        // Calculate card width to fit columns
+        itemWidth = Math.max(MIN_CARD_WIDTH, 
+            Math.min(MAX_CARD_WIDTH, 
+                Math.floor((viewportWidth - (columnsCount * CARD_PADDING)) / columnsCount)
+            )
+        );
+    } else {
+        // Auto-calculate optimal card width (aim for ~250px base width)
+        const targetCardWidth = 250;
+        columnsCount = Math.max(1, Math.floor(viewportWidth / (targetCardWidth + CARD_PADDING)));
+        itemWidth = Math.floor((viewportWidth - (columnsCount * CARD_PADDING)) / columnsCount);
+        itemWidth = Math.max(MIN_CARD_WIDTH, Math.min(MAX_CARD_WIDTH, itemWidth));
+    }
+
+    // Calculate item height based on aspect ratio and card width
+    const imageWidth = itemWidth - CARD_PADDING;
+    const imageHeight = Math.floor(imageWidth / avgAspectRatio);
+    itemHeight = imageHeight + CARD_METADATA_HEIGHT + CARD_PADDING;
+
+    // Row height is slightly less than item height for tighter packing
+    rowHeight = itemHeight - 50;
+
+    console.log(`[Grid Dimensions] Auto-calculated:`);
+    console.log(`  - Avg Aspect Ratio: ${avgAspectRatio.toFixed(3)} (from ${validSamples} samples)`);
+    console.log(`  - Columns: ${columnsCount}`);
+    console.log(`  - Item Width: ${itemWidth}px`);
+    console.log(`  - Item Height: ${itemHeight}px`);
+    console.log(`  - Row Height: ${rowHeight}px`);
+    console.log(`  - Image dimensions: ${imageWidth}x${imageHeight}px`);
+}
+
+/**
+ * Recalculate dimensions when data changes
+ * Call this after processedData is updated
+ */
+function updateGridDimensions() {
+    calculateGridDimensions();
+    
+    // Force a full re-render with new dimensions
+    if (processedData && processedData.length > 0) {
+        renderDOM();
+    }
+}
+
+// Expose for external use
+window.updateGridDimensions = updateGridDimensions;
 
 // --- LAZY LOADING ---
 const imageObserver = new IntersectionObserver((entries) => {
@@ -165,9 +257,6 @@ function renderVisibleItems(forcePositionUpdate = false) {
             fragment.appendChild(card);
             newCardsAdded++;
 
-            // const img = card.querySelector('img[data-src]');
-            // if (img) imageObserver.observe(img); // doesn't work in virtual canvas
-
             const img = card.querySelector('img[data-src]');
             if (img && !img.src) {
                 img.src = img.dataset.src;
@@ -207,17 +296,10 @@ function recalculateLayout() {
     const viewport = document.getElementById('viewport');
     if (!viewport) return;
 
-    const colInput = document.getElementById('col-count');
-    const manualCols = colInput ? parseInt(colInput.value) : 0;
-
     const oldColCount = columnsCount;
-
-    if (manualCols > 0) {
-        columnsCount = manualCols;
-    } else {
-        const viewportWidth = viewport.clientWidth;
-        columnsCount = Math.max(1, Math.floor(viewportWidth / itemWidth));
-    }
+    
+    // Recalculate dimensions based on current viewport and data
+    calculateGridDimensions();
 
     if (oldColCount !== columnsCount) {
         console.log(`[Grid] Column count changed: ${oldColCount} → ${columnsCount}, triggering re-render`);
@@ -251,78 +333,7 @@ const viewport = document.getElementById('viewport');
 function updateTransform() {
     if (!canvas) return;
     canvas.style.transform = `translate(${panOffsetX}px, ${panOffsetY}px) scale(${currentScale})`;
-
-    // Save viewport position to localStorage
-    saveViewportPosition();
-
     scheduleVisibleUpdate();
-}
-
-// Save current viewport position to localStorage
-function saveViewportPosition() {
-    try {
-        const viewportState = {
-            panOffsetX: panOffsetX,
-            panOffsetY: panOffsetY,
-            currentScale: currentScale,
-            timestamp: Date.now()
-        };
-
-        // Use session name if available for session-specific positions
-        const storageKey = (typeof fullManifest !== 'undefined' && fullManifest?.meta?.session_name)
-            ? `viewport_${fullManifest.meta.session_name}`
-            : 'viewport_global';
-
-        localStorage.setItem(storageKey, JSON.stringify(viewportState));
-    } catch (e) {
-        // Silent fail if localStorage is full
-        console.warn('[Grid] Could not save viewport position:', e);
-    }
-}
-
-// Restore viewport position from localStorage
-function restoreViewportPosition() {
-    try {
-        // Try session-specific position first
-        let storageKey = 'viewport_global';
-        if (typeof fullManifest !== 'undefined' && fullManifest?.meta?.session_name) {
-            storageKey = `viewport_${fullManifest.meta.session_name}`;
-        }
-
-        const saved = localStorage.getItem(storageKey);
-        if (!saved) {
-            console.log('[Grid] No saved viewport position found');
-            return false;
-        }
-
-        const viewportState = JSON.parse(saved);
-
-        // Check if saved state is not too old (optional - 30 days)
-        const age = Date.now() - (viewportState.timestamp || 0);
-        const maxAge = 30 * 24 * 60 * 60 * 1000; // 30 days
-
-        if (age > maxAge) {
-            console.log('[Grid] Saved viewport position too old, ignoring');
-            return false;
-        }
-
-        // Restore position
-        panOffsetX = viewportState.panOffsetX || 0;
-        panOffsetY = viewportState.panOffsetY || 0;
-        currentScale = viewportState.currentScale || 1;
-
-        // Clamp values to valid ranges
-        currentScale = Math.max(MIN_SCALE, Math.min(MAX_SCALE, currentScale));
-
-        console.log(`[Grid] ✅ Restored viewport position: X=${panOffsetX.toFixed(0)}, Y=${panOffsetY.toFixed(0)}, Scale=${currentScale.toFixed(2)}`);
-
-        updateTransform();
-        return true;
-
-    } catch (e) {
-        console.warn('[Grid] Could not restore viewport position:', e);
-        return false;
-    }
 }
 
 function getZoomDelta() {
@@ -372,42 +383,33 @@ function resetZoom() {
     autoFitZoom();
 }
 
-// --- AUTO-FIT ZOOM: Fit first row perfectly in viewport ---
 function autoFitZoom() {
     if (!canvas || !viewport || !processedData || processedData.length === 0) {
         console.log('[Grid] Cannot auto-fit: missing data or viewport');
         return;
     }
 
-    // Only fit the first row horizontally
     const totalWidth = columnsCount * itemWidth;
     const viewportWidth = viewport.clientWidth;
 
-    // Calculate scale to fit width
-    const targetScale = (viewportWidth / totalWidth) * 0.95; // 95% to add small padding
-
-    // Clamp to min/max
+    const targetScale = (viewportWidth / totalWidth) * 0.95;
     currentScale = Math.max(MIN_SCALE, Math.min(MAX_SCALE, targetScale));
 
-    // Center horizontally, position at top
     const scaledWidth = totalWidth * currentScale;
-
     panOffsetX = (viewportWidth - scaledWidth) / 2;
-    panOffsetY = 20; // Small top margin
+    panOffsetY = 20;
 
     updateTransform();
 
     console.log(`[Grid] 🎯 Auto-fit first row: ${columnsCount} columns, scale: ${currentScale.toFixed(2)}`);
 }
 
-// --- GO TO IMAGE: Navigate to specific image number ---
 function goToImage(imageNumber) {
     if (!processedData || processedData.length === 0) {
         console.log('[Grid] No data to navigate');
         return;
     }
 
-    // Find item by index number (not ID)
     let targetItem = null;
     let targetIndex = -1;
 
@@ -427,26 +429,19 @@ function goToImage(imageNumber) {
         return;
     }
 
-    // Calculate position in grid
     const row = Math.floor(targetIndex / columnsCount);
     const col = targetIndex % columnsCount;
     const x = col * itemWidth;
     const y = row * rowHeight;
 
-    // Center the image in viewport
     const viewportWidth = viewport.clientWidth;
     const viewportHeight = viewport.clientHeight;
 
-    // Calculate pan offsets to center this card
-    // panOffsetX = (viewportWidth / 2) - (x * currentScale) - ((itemWidth * currentScale) / 2);
     panOffsetY = (viewportHeight / 2) - (y * currentScale) - ((rowHeight * currentScale) / 2);
 
     updateTransform();
-
-    // Make sure the item is rendered
     updateVisibleItems();
 
-    // Highlight the card briefly
     setTimeout(() => {
         const card = document.getElementById(`card-${targetItem.id}`);
         if (card) {
@@ -511,28 +506,27 @@ if (viewport) {
     viewport.addEventListener('contextmenu', (e) => {
         if (e.button === 1) e.preventDefault();
     });
+
     // --- TOUCH CONTROLS FOR MOBILE ---
     let touchStartDistance = 0;
     let touchStartScale = 1;
     let isTouching = false;
     let touchStartX = 0;
     let touchStartY = 0;
-    let wasZooming = false; // NEW: Track if we were just zooming
+    let wasZooming = false;
 
     viewport.addEventListener('touchstart', (e) => {
         viewport.focus();
         viewport.setAttribute('tabindex', '0');
 
         if (e.touches.length === 1) {
-            // Single touch - pan
             isTouching = true;
             const touch = e.touches[0];
             touchStartX = touch.clientX - panOffsetX;
             touchStartY = touch.clientY - panOffsetY;
         } else if (e.touches.length === 2) {
-            // Two fingers - pinch to zoom
             e.preventDefault();
-            wasZooming = true; // NEW: Mark that we're zooming
+            wasZooming = true;
             const touch1 = e.touches[0];
             const touch2 = e.touches[1];
             touchStartDistance = Math.hypot(
@@ -545,38 +539,32 @@ if (viewport) {
 
     viewport.addEventListener('touchmove', (e) => {
         if (e.touches.length === 1 && isTouching) {
-            // NEW: If we just finished zooming, reset pan start position
             if (wasZooming) {
                 const touch = e.touches[0];
                 touchStartX = touch.clientX - panOffsetX;
                 touchStartY = touch.clientY - panOffsetY;
                 wasZooming = false;
-                return; // Skip this frame to avoid jump
+                return;
             }
 
-            // Single touch - pan
             e.preventDefault();
             const touch = e.touches[0];
             panOffsetX = touch.clientX - touchStartX;
             panOffsetY = touch.clientY - touchStartY;
             updateTransform();
         } else if (e.touches.length === 2) {
-            // Two fingers - pinch to zoom
             e.preventDefault();
             const touch1 = e.touches[0];
             const touch2 = e.touches[1];
 
-            // Calculate current distance between fingers
             const currentDistance = Math.hypot(
                 touch2.clientX - touch1.clientX,
                 touch2.clientY - touch1.clientY
             );
 
-            // Calculate center point between fingers
             const centerX = (touch1.clientX + touch2.clientX) / 2;
             const centerY = (touch1.clientY + touch2.clientY) / 2;
 
-            // Calculate new scale
             const scaleChange = currentDistance / touchStartDistance;
             const newScale = Math.max(MIN_SCALE, Math.min(MAX_SCALE, touchStartScale * scaleChange));
 
@@ -598,7 +586,7 @@ if (viewport) {
     viewport.addEventListener('touchend', (e) => {
         if (e.touches.length === 0) {
             isTouching = false;
-            wasZooming = false; // NEW: Reset zoom flag
+            wasZooming = false;
         }
         if (e.touches.length < 2) {
             touchStartDistance = 0;
@@ -633,49 +621,46 @@ function setupKeyboardShortcuts() {
                 break;
             case '0':
                 e.preventDefault();
-                // resetZoom();
                 autoFitZoom();
                 break;
-            case ' ': // Spacebar - scroll by one row
+            case ' ':
                 e.preventDefault();
                 const rowScroll = rowHeight * currentScale;
                 if (e.shiftKey) {
-                    // Shift+Space = scroll up
                     panOffsetY += rowScroll;
                 } else {
-                    // Space = scroll down
                     panOffsetY -= rowScroll;
                 }
                 updateTransform();
-                updateVisibleItems(); // IMMEDIATE update instead of scheduled
+                updateVisibleItems();
                 break;
             case 'ArrowUp':
                 e.preventDefault();
                 panOffsetY += 100;
                 updateTransform();
-                updateVisibleItems(); // IMMEDIATE update instead of scheduled
+                updateVisibleItems();
                 break;
             case 'ArrowDown':
                 e.preventDefault();
                 panOffsetY -= 100;
                 updateTransform();
-                updateVisibleItems(); // IMMEDIATE update instead of scheduled
+                updateVisibleItems();
                 break;
             case 'ArrowLeft':
                 e.preventDefault();
                 panOffsetX += 100;
                 updateTransform();
-                updateVisibleItems(); // IMMEDIATE update instead of scheduled
+                updateVisibleItems();
                 break;
             case 'ArrowRight':
                 e.preventDefault();
                 panOffsetX -= 100;
                 updateTransform();
-                updateVisibleItems(); // IMMEDIATE update instead of scheduled
+                updateVisibleItems();
                 break;
         }
     });
-};
+}
 
 // --- LEGACY COMPATIBILITY ---
 function measureGridItem() {
@@ -728,6 +713,7 @@ function scrollUpOneRow() {
 window.scrollDownOneRow = scrollDownOneRow;
 window.scrollUpOneRow = scrollUpOneRow;
 
+// Initialize keyboard shortcuts immediately
 setupKeyboardShortcuts();
 
 // Set up Go To Image input handler
@@ -744,14 +730,13 @@ function setupGoToInput() {
             const imageNum = parseInt(gotoInput.value);
             if (imageNum && imageNum > 0) {
                 goToImage(imageNum);
-                gotoInput.value = ''; // Clear after navigation
+                gotoInput.value = '';
             }
         });
 
-        // Still support Enter key for desktop users
         gotoInput.addEventListener('keydown', (e) => {
             if (e.key === 'Enter') {
-                gotoInput.blur(); // Trigger the blur event
+                gotoInput.blur();
             }
         });
     }

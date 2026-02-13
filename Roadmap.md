@@ -35,12 +35,16 @@ But seriously, after updating your code see if it works. If it didn't send the e
 
 ### **ComfyUI Ultimate Sampler Grid – Development Roadmap**
 
-### Implement Settings For Lookahead Async Model Cacher
 
-### Feature: LoRA Lookup From Builder UI. Get metadata, images, url, tags, & more to view quickly from builder in comfyui
+## Calculate diff - pack into manifest, read in card view at top of card stats, add to sort favorites by lora with lora diff name
 
-### Fix: Manifest doesn't need lora omit triggers list in every item
+## Implement Settings For Lookahead Async Model Cacher
 
+## Feature: LoRA Lookup From Builder UI. Get metadata, images, url, tags, & more to view quickly from builder in comfyui
+
+## Fix: Manifest doesn't need lora omit triggers list in every item
+
+## Add attention options, xformers, sdpa, sage, flash, etc, option for test all, test all should clear ram & vram between each test.
 
 
 #### **1. Skip Logic for Optional Inputs**

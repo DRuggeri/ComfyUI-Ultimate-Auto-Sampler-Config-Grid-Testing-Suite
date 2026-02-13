@@ -1,30 +1,36 @@
 /**
- * Config Builder Main Registration Module
- * Handles ComfyUI node registration and lifecycle
+ * Config Builder Main Entry Point
+ * Loads modules from /config_builder/js/ route (served with no-cache headers)
  */
 
 import { app } from "../../../scripts/app.js";
 
-import {
-    clearAllCaches,
-    refreshAllConfigBuilders,
-    getActiveConfigBuilderNodes,
-    normalizePath,
-    parseLoraString,
-    buildLoraString,
-    getAvailableLoras,
-    getAvailableModels,
-    getLoraFolders,
-    getModelFolders,
-    getAvailableSessions,
-    getAvailableConfigs,
-    convertConfigsToConfigArrays
-} from '/extensions/ComfyUI-Ultimate-Auto-Sampler-Config-Grid-Testing-Suite/conf_builder/conf-builder-utilities.mjs';
+// Cache-busting timestamp (regenerated on every page load)
+const CACHE_BUST = Date.now();
 
-import {
-    renderUI,
-    updatePreview
-} from '/extensions/ComfyUI-Ultimate-Auto-Sampler-Config-Grid-Testing-Suite/conf_builder/conf-builder-config-management.mjs';
+// Module storage
+let utilities, uiComponents, configManagement;
+
+// Singleton promise to ensure we only trigger the load once
+let moduleLoadPromise = null;
+
+function ensureModulesLoaded() {
+    if (moduleLoadPromise) return moduleLoadPromise;
+
+    console.log('[ConfigBuilder] Loading modules with cache-bust:', CACHE_BUST);
+    moduleLoadPromise = (async () => {
+        const utilitiesModule = await import(`/ultimate_config_sampler/js/conf_builder/conf-builder-utilities.js?v=${CACHE_BUST}`);
+        const uiComponentsModule = await import(`/ultimate_config_sampler/js/conf_builder/conf-builder-ui-components.js?v=${CACHE_BUST}`);
+        const configManagementModule = await import(`/ultimate_config_sampler/js/conf_builder/conf-builder-config-management.js?v=${CACHE_BUST}`);
+
+        utilities = utilitiesModule;
+        uiComponents = uiComponentsModule;
+        configManagement = configManagementModule;
+
+        return { utilities, uiComponents, configManagement };
+    })();
+    return moduleLoadPromise;
+}
 
 // --- NODE REGISTRATION ---
 
@@ -33,39 +39,37 @@ app.registerExtension({
 
     async beforeRegisterNodeDef(nodeType, nodeData, app) {
         if (nodeData.name === "UltimateConfigBuilder") {
+            
+            // Trigger module load immediately when we see our node definition
+            ensureModulesLoaded();
+
             const onNodeCreated = nodeType.prototype.onNodeCreated;
-            nodeType.prototype.onNodeCreated = async function () {
+            
+            // FIX: Removed 'async' keyword. This function must remain synchronous!
+            nodeType.prototype.onNodeCreated = function () {
                 const result = onNodeCreated?.apply(this, arguments);
 
                 const configWidget = this.widgets?.find(w => w.name === "lora_config");
                 if (!configWidget) return result;
 
+                // 1. Synchronous Setup (CRITICAL: Must happen immediately)
                 this.widgets.forEach(w => {
                     w.type = "converted-widget";
                     w.computeSize = () => [0, -4];
                 });
-
-                // Pre-fetch everything
-                await getAvailableLoras();
-                await getLoraFolders();
-                await getAvailableModels();
-                await getModelFolders();
-                await getAvailableSessions();
-                await getAvailableConfigs();
-
+                
+                // Assign the widget reference immediately so onConfigure can find it
                 this.configWidget = configWidget;
 
-                // Register this node for refresh tracking
-                getActiveConfigBuilderNodes().add(this);
-
-                // UI State to track collapsed items between renders
+                // Setup default state immediately
                 this.uiState = {
                     modelsSectionCollapsed: {},
                     lorasSectionCollapsed: {},
                     modelsCollapsed: {},
                     lorasCollapsed: {}
                 };
-
+                
+                // Initialize default state structure
                 this.state = {
                     session_name: "my_test_session",
                     config_name: "default_config",
@@ -81,62 +85,18 @@ app.registerExtension({
                         loras: ["None"],
                         lora_omit_triggers: [],
                         lora_triggerwords_append_settings: {},
+                        lora_bypass_states: {},
+                        lora_strength_lock: {},
                         combine: false
                     }]
                 };
 
-                // Load state
-                try {
-                    const existing = JSON.parse(configWidget.value);
-                    if (existing.config_arrays) {
-                        this.state = existing;
-                        if (!this.state.config_name) this.state.config_name = "default_config";
-                        if (this.state.auto_save === undefined) this.state.auto_save = false;
+                // Create HTML container immediately
+                this.htmlContainer = document.createElement("div");
+                this.htmlContainer.style.cssText = `width: 100%; height: 100%; background: #1a1a1a; display: flex; flex-direction: column;`;
+                this.addDOMWidget("config_ui", "div", this.htmlContainer, { serialize: false, hideOnZoom: false });
 
-                        // Migration: ensure models is an array and normalize
-                        this.state.config_arrays.forEach(arr => {
-                            if (arr.model && !arr.models) {
-                                arr.models = [arr.model];
-                                delete arr.model;
-                            }
-                            if (!arr.models) arr.models = ["None"];
-                            arr.models = arr.models.map(normalizePath);
-                            arr.loras = arr.loras ? arr.loras.map(l => {
-                                const p = parseLoraString(l);
-                                return buildLoraString(p.name, p.model_str, p.clip_str);
-                            }) : ["None"];
-
-                            if (!arr.lora_omit_triggers) arr.lora_omit_triggers = [];
-                        });
-                    } else if (existing.lora_config) {
-                        this.state = this.migrateOldFormat(existing);
-                    }
-                } catch (e) { }
-
-                this.migrateOldFormat = function (oldState) {
-                    const arrays = oldState.lora_config?.arrays || [];
-                    return {
-                        session_name: oldState.session_name || "my_test_session",
-                        config_name: "default_config",
-                        auto_save: false,
-                        include_none: oldState.include_none !== undefined ? oldState.include_none : false,
-                        config_arrays: arrays.map(arr => ({
-                            name: arr.name,
-                            samplers: oldState.samplers || "euler",
-                            schedulers: oldState.schedulers || "normal",
-                            steps: oldState.steps || "20",
-                            cfg: oldState.cfg || "7.0",
-                            models: oldState.model ? [normalizePath(oldState.model)] : ["None"],
-                            loras: arr.loras ? arr.loras.map(l => normalizePath(l)) : ["None"],
-                            lora_omit_triggers: [],
-                            lora_triggerwords_append_settings: {},
-                            combine: arr.combine || false
-                        }))
-                    };
-                };
-
-                this.autoSaveTimer = null;
-
+                // 2. Define methods (Synchronously attached)
                 this.triggerAutoSave = function () {
                     if (this.state.auto_save && this.state.config_name) {
                         if (this.autoSaveTimer) clearTimeout(this.autoSaveTimer);
@@ -147,25 +107,30 @@ app.registerExtension({
                 };
 
                 this.saveState = function () {
+                    // Guard: Ensure modules are loaded before trying to update preview
+                    if (!configWidget || !configManagement) return;
+                    
                     configWidget.value = JSON.stringify(this.state, null, 2);
                     this.updatePreview();
                     this.triggerAutoSave();
                 };
 
+                this.updatePreview = function () {
+                    if (configManagement) {
+                        configManagement.updatePreview(this);
+                    }
+                };
+
                 this.saveConfigToBackend = async function () {
                     const name = this.state.config_name;
                     if (!name) return;
-
                     try {
                         await fetch("/configbuilder/save_config", {
                             method: "POST",
                             headers: { "Content-Type": "application/json" },
-                            body: JSON.stringify({
-                                name: name,
-                                data: this.state
-                            })
+                            body: JSON.stringify({ name: name, data: this.state })
                         });
-                        await getAvailableConfigs();
+                        if (utilities) await utilities.getAvailableConfigs();
                     } catch (e) {
                         console.error("Save Failed", e);
                     }
@@ -191,24 +156,19 @@ app.registerExtension({
                         console.error("Load failed", e);
                     }
                 };
-
-                this.htmlContainer = document.createElement("div");
-                this.htmlContainer.style.cssText = `width: 100%; height: 100%; background: #1a1a1a; display: flex; flex-direction: column;`;
-                this.addDOMWidget("config_ui", "div", this.htmlContainer, { serialize: false, hideOnZoom: false });
-
-                this.updatePreview = function () {
-                    updatePreview(this);
-                };
-
+                
                 this.renderUI = async function () {
-                    const availableLoras = await getAvailableLoras();
-                    const availableModels = await getAvailableModels();
-                    const loraFolders = await getLoraFolders();
-                    const modelFolders = await getModelFolders();
-                    const availableSessions = await getAvailableSessions();
-                    const availableConfigs = await getAvailableConfigs();
+                    // Guard against running before modules are ready
+                    if (!utilities || !configManagement) return;
 
-                    await renderUI(
+                    const availableLoras = await utilities.getAvailableLoras();
+                    const availableModels = await utilities.getAvailableModels();
+                    const loraFolders = await utilities.getLoraFolders();
+                    const modelFolders = await utilities.getModelFolders();
+                    const availableSessions = await utilities.getAvailableSessions();
+                    const availableConfigs = await utilities.getAvailableConfigs();
+
+                    await configManagement.renderUI(
                         this,
                         availableLoras,
                         availableModels,
@@ -216,17 +176,16 @@ app.registerExtension({
                         modelFolders,
                         availableSessions,
                         availableConfigs,
-                        refreshAllConfigBuilders
+                        utilities.refreshAllConfigBuilders
                     );
                 };
 
                 this.loadSession = async function (sessionName) {
+                    if (!utilities) return; // Guard
                     console.log(`[ConfigBuilder] Loading session: ${sessionName}`);
 
-                    const availableLoras = await getAvailableLoras();
-                    const loraFolders = await getLoraFolders();
-                    const availableModels = await getAvailableModels();
-                    const modelFolders = await getModelFolders();
+                    const loraFolders = await utilities.getLoraFolders();
+                    const modelFolders = await utilities.getModelFolders();
 
                     try {
                         const manifestUrl = `/view?filename=manifest.json&type=output&subfolder=benchmarks/${sessionName}&t=${Date.now()}`;
@@ -238,28 +197,23 @@ app.registerExtension({
                         if (meta.configs_json) {
                             try {
                                 const configs = JSON.parse(meta.configs_json);
-                                let loadedArrays = convertConfigsToConfigArrays(configs);
-
+                                let loadedArrays = utilities.convertConfigsToConfigArrays(configs);
                                 const normalize = (str) => str.replace(/\\/g, "/");
 
                                 loadedArrays.forEach(arr => {
                                     arr.loras = arr.loras.map(loraStr => {
-                                        const parsed = parseLoraString(loraStr);
+                                        const parsed = utilities.parseLoraString(loraStr);
                                         const normName = normalize(parsed.name);
-
                                         if (normName.endsWith("/") || normName.endsWith("/*")) {
-                                            return buildLoraString(normName, parsed.model_str, parsed.clip_str);
+                                            return utilities.buildLoraString(normName, parsed.model_str, parsed.clip_str);
                                         }
-
                                         const potentialFolder = normName + "/";
-
                                         if (loraFolders && loraFolders.includes(potentialFolder)) {
-                                            return buildLoraString(potentialFolder, parsed.model_str, parsed.clip_str);
+                                            return utilities.buildLoraString(potentialFolder, parsed.model_str, parsed.clip_str);
                                         }
                                         if (loraFolders && loraFolders.includes(normName)) {
-                                            return buildLoraString(normName, parsed.model_str, parsed.clip_str);
+                                            return utilities.buildLoraString(normName, parsed.model_str, parsed.clip_str);
                                         }
-
                                         return loraStr;
                                     });
 
@@ -286,14 +240,94 @@ app.registerExtension({
                     }
                 };
 
-                this.renderUI();
+                this.migrateOldFormat = function (oldState) {
+                    if (!utilities) return this.state; // Fallback
+                    const arrays = oldState.lora_config?.arrays || [];
+                    return {
+                        session_name: oldState.session_name || "my_test_session",
+                        config_name: "default_config",
+                        auto_save: false,
+                        include_none: oldState.include_none !== undefined ? oldState.include_none : false,
+                        config_arrays: arrays.map(arr => ({
+                            name: arr.name,
+                            samplers: oldState.samplers || "euler",
+                            schedulers: oldState.schedulers || "normal",
+                            steps: oldState.steps || "20",
+                            cfg: oldState.cfg || "7.0",
+                            models: oldState.model ? [utilities.normalizePath(oldState.model)] : ["None"],
+                            loras: arr.loras ? arr.loras.map(l => utilities.normalizePath(l)) : ["None"],
+                            lora_omit_triggers: [],
+                            lora_triggerwords_append_settings: {},
+                            lora_bypass_states: {},
+                            lora_strength_lock: {},
+                            combine: arr.combine || false
+                        }))
+                    };
+                };
+
+                // 3. Asynchronous Initialization (Fire and Forget)
+                // This allows the node to be "Created" immediately, while data loads in background.
+                (async () => {
+                    await ensureModulesLoaded();
+                    
+                    // Register this node for refresh tracking
+                    utilities.getActiveConfigBuilderNodes().add(this);
+
+                    // Process existing state now that utilities are loaded
+                    try {
+                        const existing = JSON.parse(configWidget.value);
+                        if (existing.config_arrays) {
+                            this.state = existing;
+                            if (!this.state.config_name) this.state.config_name = "default_config";
+                            if (this.state.auto_save === undefined) this.state.auto_save = false;
+
+                            // Migration logic requiring utilities
+                            this.state.config_arrays.forEach(arr => {
+                                if (arr.model && !arr.models) {
+                                    arr.models = [arr.model];
+                                    delete arr.model;
+                                }
+                                if (!arr.models) arr.models = ["None"];
+                                arr.models = arr.models.map(utilities.normalizePath);
+                                arr.loras = arr.loras ? arr.loras.map(l => {
+                                    const p = utilities.parseLoraString(l);
+                                    return utilities.buildLoraString(p.name, p.model_str, p.clip_str);
+                                }) : ["None"];
+                                
+                                // Ensure keys exist
+                                if (!arr.lora_omit_triggers) arr.lora_omit_triggers = [];
+                                if (!arr.lora_triggerwords_append_settings) arr.lora_triggerwords_append_settings = {};
+                                if (!arr.lora_bypass_states) arr.lora_bypass_states = {};
+                                if (!arr.lora_strength_lock) arr.lora_strength_lock = {};
+                            });
+                        } else if (existing.lora_config) {
+                            this.state = this.migrateOldFormat(existing);
+                        }
+                    } catch (e) { }
+
+                    // Initial Data Fetch
+                    await Promise.all([
+                        utilities.getAvailableLoras(),
+                        utilities.getLoraFolders(),
+                        utilities.getAvailableModels(),
+                        utilities.getModelFolders(),
+                        utilities.getAvailableSessions(),
+                        utilities.getAvailableConfigs()
+                    ]);
+
+                    // Finally Render
+                    this.renderUI();
+                })();
+
                 return result;
             };
 
             // Add cleanup when node is removed
             const onRemoved = nodeType.prototype.onRemoved;
             nodeType.prototype.onRemoved = function () {
-                getActiveConfigBuilderNodes().delete(this);
+                if (utilities) {
+                    utilities.getActiveConfigBuilderNodes().delete(this);
+                }
                 if (onRemoved) {
                     onRemoved.apply(this, arguments);
                 }
@@ -305,6 +339,9 @@ app.registerExtension({
     async setup() {
         console.log("[ConfigBuilder] Setting up auto-refresh listener");
 
+        // Ensure modules are loaded at app setup time
+        await ensureModulesLoaded();
+
         let isRefreshing = false;
 
         // Hook into the app's refreshComboInNodes function if it exists
@@ -315,11 +352,11 @@ app.registerExtension({
 
                 const result = await originalRefresh.apply(this, arguments);
 
-                if (!isRefreshing) {
+                if (!isRefreshing && utilities) {
                     isRefreshing = true;
                     setTimeout(async () => {
                         console.log("[ConfigBuilder] Clearing caches and refreshing nodes");
-                        await refreshAllConfigBuilders();
+                        await utilities.refreshAllConfigBuilders();
                         isRefreshing = false;
                     }, 1000);
                 }
@@ -332,27 +369,23 @@ app.registerExtension({
         const originalFetch = window.fetch;
         let lastObjectInfoTime = 0;
         window.fetch = async function (...args) {
-            // 1. Check if this is an internal fetch from our own extension
             const options = args[1];
             if (options && options.headers && options.headers["X-Config-Builder-Internal"]) {
-                // This is US fetching data. Pass it through without triggering the listener.
                 return originalFetch.apply(this, args);
             }
 
-            // 2. Perform the fetch
             const result = await originalFetch.apply(this, args);
 
-            // 3. Check if it was an external /object_info call (e.g. ComfyUI Refresh button)
             if (args[0] && typeof args[0] === 'string' && args[0].includes('/object_info')) {
                 const now = Date.now();
-                if (now - lastObjectInfoTime > 2000 && !isRefreshing) {
+                if (now - lastObjectInfoTime > 2000 && !isRefreshing && utilities) {
                     lastObjectInfoTime = now;
                     console.log("[ConfigBuilder] 🔄 Detected EXTERNAL /object_info fetch");
 
                     isRefreshing = true;
                     setTimeout(async () => {
                         console.log("[ConfigBuilder] Clearing caches and refreshing nodes");
-                        await refreshAllConfigBuilders();
+                        await utilities.refreshAllConfigBuilders();
                         isRefreshing = false;
                     }, 1000);
                 }
@@ -364,3 +397,5 @@ app.registerExtension({
         console.log("[ConfigBuilder] Auto-refresh listener installed");
     }
 });
+
+console.log('[ConfigBuilder] ✅ Main entry point loaded');

@@ -131,6 +131,17 @@ def create_image_metadata(config, width, height, duration, seed, batch_idx, actu
         dict: Metadata dictionary
     """
     meta = config.copy()
+    
+    # Remove global settings that should only be in manifest.meta, not in individual items
+    # These are session-wide settings that don't change per-image
+    global_settings_to_remove = [
+        "lora_triggerwords_append_settings",
+        "lora_omit_triggers"
+    ]
+    
+    for key in global_settings_to_remove:
+        meta.pop(key, None)
+    
     meta.update({
         "width": width,
         "height": height,
@@ -194,7 +205,7 @@ def print_generation_progress(current_job, total_jobs, config, width, height, du
     """
     progress_pct = int((current_job / total_jobs) * 100)
     
-    print(f"\n{'='*80}")
+    print(f"{'='*80}")
     print(f"[GridTester] 📊 Job {current_job}/{total_jobs} ({progress_pct}%)")
     print(f"[GridTester] 🎨 {config['sampler']} @ {config['steps']} steps | {width}x{height}")
     print(f"[GridTester] ⏱️  {duration:.1f}s | Avg: {eta_info['avg_duration']:.1f}s/job")
@@ -206,7 +217,7 @@ def print_generation_progress(current_job, total_jobs, config, width, height, du
     else:
         print(f"[GridTester] 🕒 ETA: {eta_info['seconds']}s (finish ~{eta_info['finish_formatted']})")
     
-    print(f"{'='*80}\n")
+    print(f"{'='*80}")
 
 
 def flush_batch_with_vae(pending_batch, vae, img_dir, existing_data, session_name, manifest_path=None, unique_id=None):

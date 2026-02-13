@@ -17,7 +17,74 @@ from .metadata_packer import pack_metadata_into_image
 CONFIGS_DIR = os.path.join(folder_paths.get_output_directory(), "ultimate-configs")
 os.makedirs(CONFIGS_DIR, exist_ok=True)
 
-# --- API: CONFIG MANAGEMENT ---
+# --- CONFIG BUILDER JS DIRECTORY ---
+EXTENSION_DIR = os.path.dirname(os.path.abspath(__file__))
+CONFIG_BUILDER_JS_DIR = os.path.join(EXTENSION_DIR, "js")
+
+# =============================================================================
+# SERVE CONFIG BUILDER JS FILES (NOT AUTO-LOADED)
+# =============================================================================
+
+@server.PromptServer.instance.routes.get("/ultimate_config_sampler/js/{filename:.*}")
+async def serve_config_builder_js(request):
+    r"""
+    Serve JavaScript files from /js/ directory with cache-busting headers.
+    Supports subdirectories with both / and \ (e.g., config-builder/utilities.js)
+    """
+    try:
+        filename = request.match_info['filename']
+        print(f"[ConfigBuilder] Request for: {filename}")
+        
+        # Security: prevent directory traversal with ..
+        if '..' in filename or filename.startswith('/') or filename.startswith('\\'):
+            print(f"[ConfigBuilder] FORBIDDEN: {filename}")
+            return web.Response(status=403, text="Forbidden")
+        
+        # Normalize path separators (convert backslashes to forward slashes)
+        filename = filename.replace('\\', '/')
+        
+        # Build full path and normalize it
+        file_path = os.path.normpath(os.path.join(CONFIG_BUILDER_JS_DIR, filename))
+        
+        # Double-check the resolved path is still within our JS directory
+        normalized_base = os.path.normpath(CONFIG_BUILDER_JS_DIR)
+
+        if not file_path.startswith(normalized_base):
+            print(f"[ConfigBuilder] FORBIDDEN - Outside base dir: {file_path}")
+            return web.Response(status=403, text="Forbidden - path outside base directory")
+        
+        if not os.path.exists(file_path):
+            print(f"[ConfigBuilder] NOT FOUND: {file_path}")
+            return web.Response(status=404, text=f"File not found: {filename}")
+        
+        print(f"[ConfigBuilder] Reading file: {file_path}")
+        with open(file_path, 'r', encoding='utf-8') as f:
+            content = f.read()
+        
+        print(f"[ConfigBuilder] File read successfully, {len(content)} bytes")
+        
+        # Return with cache-busting headers
+        return web.Response(
+            text=content,
+            content_type='application/javascript',
+            headers={
+                'Cache-Control': 'no-cache, no-store, must-revalidate',
+                'Pragma': 'no-cache',
+                'Expires': '0'
+            }
+        )
+        
+    except Exception as e:
+        print(f"[ConfigBuilder] ERROR: {e}")
+        import traceback
+        traceback.print_exc()
+        return web.Response(status=500, text=f"Server error: {str(e)}")
+
+
+# =============================================================================
+# API: CONFIG MANAGEMENT
+# =============================================================================
+
 @server.PromptServer.instance.routes.get("/configbuilder/list_configs")
 async def list_configs(request):
     try:
@@ -82,7 +149,10 @@ async def load_config(request):
         return web.Response(status=500, text=str(e))
 
 
-# --- API: DELETE SESSION ---
+# =============================================================================
+# API: DELETE SESSION
+# =============================================================================
+
 @server.PromptServer.instance.routes.post("/config_tester/delete_session")
 async def delete_session(request):
     try:
@@ -108,7 +178,10 @@ async def delete_session(request):
     except Exception as e:
         return web.Response(status=500, text=str(e))
 
-# --- API: SAVE CHANGES (Optimized - Only Changed Items) ---
+# =============================================================================
+# API: SAVE CHANGES (Optimized - Only Changed Items)
+# =============================================================================
+
 @server.PromptServer.instance.routes.post("/config_tester/save_changes")
 async def save_changes(request):
     """
@@ -175,7 +248,10 @@ async def save_changes(request):
         traceback.print_exc()
         return web.Response(status=500, text=str(e))
     
-# --- API: SAVE MANIFEST (Legacy - Full Save) ---
+# =============================================================================
+# API: SAVE MANIFEST (Legacy - Full Save)
+# =============================================================================
+
 @server.PromptServer.instance.routes.post("/config_tester/save_manifest")
 async def save_manifest(request):
     """
@@ -197,72 +273,85 @@ async def save_manifest(request):
             return web.Response(status=400, text="Missing session_name or manifest")
 
         base_dir = os.path.join(folder_paths.get_output_directory(), "benchmarks", session_name)
-        os.makedirs(base_dir, exist_ok=True)
         manifest_path = os.path.join(base_dir, "manifest.json")
 
-        # CRITICAL FIX: Merge with disk version to preserve generation's new items
-        try:
-            if os.path.exists(manifest_path):
-                # Load what's currently on disk (may have new items from generation)
+        # --- MERGE STRATEGY: Preserve server data ---
+        # 1. Load server manifest (has newest images)
+        server_manifest = None
+        if os.path.exists(manifest_path):
+            try:
                 with open(manifest_path, "r") as f:
-                    disk_manifest = json.load(f)
-                
-                # Create lookup of dashboard items by ID
-                dashboard_items_dict = {
-                    item.get("id"): item 
-                    for item in manifest_data.get("items", []) 
-                    if "id" in item
-                }
-                
-                # Find items on disk that aren't in dashboard (newly generated)
-                new_items = []
-                for disk_item in disk_manifest.get("items", []):
-                    item_id = disk_item.get("id")
-                    if item_id and item_id not in dashboard_items_dict:
-                        # This item was generated after dashboard loaded
-                        new_items.append(disk_item)
-                
-                # Add new items to dashboard's manifest
-                if new_items:
-                    print(f"[ConfigTester] 📄 Preserving {len(new_items)} newly generated items not in dashboard")
-                    manifest_data["items"] = new_items + manifest_data.get("items", [])
-                
-                # Preserve meta from disk (has latest settings)
-                if "meta" in disk_manifest:
-                    # Keep user's changes but preserve generation settings
-                    manifest_data["meta"] = disk_manifest["meta"]
-                    
-        except Exception as e:
-            print(f"[ConfigTester] ⚠️ Could not merge with disk manifest: {e}")
-            # Continue with save anyway - dashboard data is more important than merge
+                    server_manifest = json.load(f)
+            except:
+                pass
 
-        # Save the merged manifest
+        if server_manifest:
+            # Build lookup of items by ID from dashboard
+            dashboard_items = {item.get("id"): item for item in manifest_data.get("items", [])}
+            
+            # Merge: Update existing items, keep new items
+            merged_items = []
+            for server_item in server_manifest.get("items", []):
+                item_id = server_item.get("id")
+                if item_id in dashboard_items:
+                    # Item exists in dashboard: merge updates
+                    dashboard_item = dashboard_items[item_id]
+                    # Preserve server's metadata but update user actions
+                    merged_item = server_item.copy()
+                    merged_item["favorited"] = dashboard_item.get("favorited", False)
+                    merged_item["rejected"] = dashboard_item.get("rejected", False)
+                    merged_item["note"] = dashboard_item.get("note", "")
+                    merged_items.append(merged_item)
+                else:
+                    # NEW item from server (generation added it): keep as-is
+                    merged_items.append(server_item)
+            
+            # Update manifest
+            manifest_data["items"] = merged_items
+            
+            # Preserve server's meta
+            if "meta" in server_manifest:
+                manifest_data["meta"] = server_manifest["meta"]
+
+        # Save merged manifest
+        os.makedirs(base_dir, exist_ok=True)
         with open(manifest_path, "w") as f:
             json.dump(manifest_data, f, indent=4)
-            
-        print("Save Manifest at init")
+
         return web.Response(status=200, text="Saved")
+
     except Exception as e:
         print(f"[ConfigTester] Error saving manifest: {e}")
+        import traceback
+        traceback.print_exc()
         return web.Response(status=500, text=str(e))
 
-# --- API: FETCH SESSION HTML ---
+# =============================================================================
+# API: GET SESSION HTML
+# =============================================================================
+
 @server.PromptServer.instance.routes.post("/config_tester/get_session_html")
 async def get_session_html(request):
+    """
+    Dynamically generate HTML for a session.
+    This allows the dashboard to load without triggering a workflow execution.
+    """
     try:
         data = await request.json()
         session_name = data.get("session_name")
-        node_id = data.get("node_id", "0") # Fallback ID
+        node_id = data.get("node_id")
 
-        # --- sanitize ---
         if session_name:
             session_name = re.sub(r'[^\w\-]', '', session_name)
-            
+
+        if not session_name:
+            return web.Response(status=400, text="Missing session_name")
+
         base_dir = os.path.join(folder_paths.get_output_directory(), "benchmarks", session_name)
         manifest_path = os.path.join(base_dir, "manifest.json")
 
         if not os.path.exists(manifest_path):
-             return web.Response(status=404, text=f"Session '{session_name}' not found.")
+            return web.Response(status=404, text=f"Session '{session_name}' not found")
 
         with open(manifest_path, "r") as f:
             manifest = json.load(f)
@@ -274,7 +363,10 @@ async def get_session_html(request):
     except Exception as e:
         return web.Response(status=500, text=str(e))
 
-# --- API: EXPORT FAVORITES ---
+# =============================================================================
+# API: EXPORT FAVORITES
+# =============================================================================
+
 @server.PromptServer.instance.routes.post("/config_tester/export_favorites")
 async def export_favorites(request):
     """
@@ -442,7 +534,10 @@ async def export_favorites(request):
         traceback.print_exc()
         return web.Response(status=500, text=str(e))
 
-# --- MAPPINGS ---
+# =============================================================================
+# NODE MAPPINGS
+# =============================================================================
+
 NODE_CLASS_MAPPINGS = {
     "UltimateSamplerGrid": SamplerGridTester,
     "UltimateGridDashboard": SamplerConfigDashboardViewer,
@@ -453,7 +548,7 @@ NODE_CLASS_MAPPINGS = {
 NODE_DISPLAY_NAME_MAPPINGS = {
     "UltimateSamplerGrid": "Ultimate Sampler Grid (Generator)",
     "UltimateGridDashboard": "Ultimate Grid Dashboard (Viewer)",
-    "UltimateConfigBuilder": "Ultimate Config Builder (WIP)",
+    "UltimateConfigBuilder": "Ultimate Config Builder",
     "SmartJSONText": "Smart JSON Text",
 }
 

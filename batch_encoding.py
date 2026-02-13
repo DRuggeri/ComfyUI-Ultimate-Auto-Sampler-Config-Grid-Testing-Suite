@@ -8,7 +8,7 @@ import gc
 import comfy.model_management
 
 
-def batch_encode_with_cache(clip_model, prompts, cond_cache, prompt_type="positive", batch_size=16, clip_skip=0):
+def batch_encode_with_cache(clip_model, prompts, cond_cache, prompt_type="positive", batch_size=64, clip_skip=0):
     """
     Batch encode prompts while checking persistent cache first.
     Only encodes prompts that aren't already cached.

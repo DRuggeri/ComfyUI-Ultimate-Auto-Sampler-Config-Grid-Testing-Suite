@@ -3,7 +3,7 @@
  * Reusable UI elements and component builders
  */
 
-import { normalizePath } from '/extensions/ComfyUI-Ultimate-Auto-Sampler-Config-Grid-Testing-Suite/conf_builder/conf-builder-utilities.mjs';
+import { normalizePath } from '/ultimate_config_sampler/js/conf_builder/conf-builder-utilities.js';
 
 // --- SEARCHABLE SELECT COMPONENT ---
 
@@ -129,9 +129,9 @@ export function createSlider(label, value, min, max, step, onChange) {
     const numberInput = document.createElement("input");
     numberInput.type = "number";
     numberInput.className = "cb-number-input";
-    
+
     // FIX 1: Set step to "any" to allow any decimal precision without browser validation errors
-    numberInput.step = "any"; 
+    numberInput.step = "any";
     // FIX 2: Do NOT set min/max here, so the browser allows typing outside the range
     numberInput.value = value.toFixed(2);
 
@@ -153,11 +153,11 @@ export function createSlider(label, value, min, max, step, onChange) {
             val = parseFloat(slider.value);
         }
 
-        slider.value = val; 
-        
+        slider.value = val;
+
         // Optional: formatting to 2 decimals, or remove to keep exact typed value
-        numberInput.value = val; 
-        
+        numberInput.value = val;
+
         onChange(val);
     };
 
@@ -220,6 +220,28 @@ export function getStyles() {
             .cb-header-left { display: flex; align-items: center; gap: 8px; overflow: hidden; flex: 1; }
             .cb-header-name { color: #fff; font-weight: bold; font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; margin-right: 10px; }
             .cb-section-toggle { cursor: pointer; display: flex; justify-content: space-between; align-items: center; width: 100%; user-select: none; }
-        </style>
+                    
+            .cb-modal-popup {
+                background: #2a2a2a;
+                border: 2px solid #9966cc;
+                border-radius: 8px;
+                padding: 20px;
+                max-width: 800px;
+                max-height: 85vh;
+                overflow-y: auto;
+                color: white;
+                position: relative;
+                width: 95%; /* Responsive width */
+                box-sizing: border-box;
+            }
+
+            @media (max-width: 600px) {
+                .cb-modal-popup {
+                    padding: 10px; /* Smaller padding on mobile */
+                    width: 98%;    /* Use more screen space on mobile */
+                }
+            }
+                
+            </style>
     `;
 }

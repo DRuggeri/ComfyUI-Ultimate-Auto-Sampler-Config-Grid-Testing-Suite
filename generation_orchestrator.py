@@ -212,10 +212,10 @@ def run_generation_loop(
     input_jobs = prepare_input_jobs(optional_latent, resolutions)
     total_jobs = len(expanded) * len(input_jobs)
     
-    print(f"\n{'='*80}")
+    print(f"{'='*80}")
     print(f"[GridTester] 🚀 GENERATION START")
     print(f"[GridTester] 📋 {len(expanded)} configs × {len(input_jobs)} resolutions = {total_jobs} total jobs")
-    print(f"{'='*80}\n")
+    print(f"{'='*80}")
     
     # ==== OPTIONAL CONDITIONING SETUP ====
     if optional_positive or optional_negative:
