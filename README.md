@@ -29,6 +29,7 @@ Stop guessing which Sampler, Scheduler, Prompt, Denoise, Model, Lora or CFG valu
     - [Session Management](#session-management)
     - [Config Management (Save/Load Presets)](#config-management-saveload-presets)
     - [Config Arrays](#config-arrays)
+    - [Fast CivitAI Info Lookup](#fast-civitai-info-lookup)
 - [Installation](#-installation)
 - [Getting Started](#getting-started)
   - [The Nodes](#1-the-nodes)
@@ -91,6 +92,10 @@ Stop guessing which Sampler, Scheduler, Prompt, Denoise, Model, Lora or CFG valu
 ## 🌟 Key Features
 
 ### 🚀 Powerful Grid Generation
+
+<img width="951" height="601" alt="image" src="https://github.com/user-attachments/assets/2e2c3253-7ab3-46e2-9b60-440de5077ee3" />
+
+
 * **Cartesian Product Engine:** Automatically generates every permutation of your input settings. Test unlimited Samplers, Schedulers, CFG scales, Sizes, Prompts, LoRA combinations all in one go.
 * **Visual Config Builder:** A point-and-click GUI for building complex sampler configurations — no JSON editing required. Searchable dropdowns, drag sliders, folder expansion, LoRA stacking, and trigger word management all built in.
 * **Non-Standard Model Support:** Full support for SD3, Flux, Z-Image, and other non-standard architectures with automatic latent channel detection.
@@ -339,6 +344,8 @@ The Generator node features built-in widgets for Model Selection and Prompts, bu
 
 ## 🔧 Config Builder Node (Visual UI)
 
+<img width="1408" height="867" alt="image" src="https://github.com/user-attachments/assets/7eb54f26-d098-4c80-8bb8-37e85a1ef1dc" />
+
 The Config Builder node replaces manual JSON editing with an intuitive visual interface. Instead of writing configuration arrays by hand, you can point and click to select models and LoRAs, drag sliders to adjust strengths, expand entire folders, stack multiple LoRAs, manage trigger words, and preview JSON output in real-time.
 
 All configuration data is automatically synchronized with the Ultimate Sampler Grid node.
@@ -398,6 +405,14 @@ Save and load configuration presets as JSON files for reuse across projects.
 ### Config Arrays
 
 Config Arrays are the building blocks of your testing grid. Each array defines a set of parameters that will be multiplied into all possible combinations.
+
+### Fast CivitAI Info Lookup
+
+<img width="1178" height="505" alt="image" src="https://github.com/user-attachments/assets/68146aae-c785-4e4b-bc5e-8a1962a14270" />
+
+<img width="1072" height="506" alt="image" src="https://github.com/user-attachments/assets/a11178e2-0745-4e56-a9b4-5225f968b051" />
+
+<img width="1074" height="271" alt="image" src="https://github.com/user-attachments/assets/7849d711-f939-47b5-be20-c44eb664fd19" />
 
 #### Basic Parameters
 
