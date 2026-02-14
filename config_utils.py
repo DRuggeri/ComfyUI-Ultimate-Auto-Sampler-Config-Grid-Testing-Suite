@@ -1,9 +1,9 @@
 import json
 import re
+import copy
 import itertools
 import folder_paths
 import comfy.samplers
-import itertools
 
  
 
@@ -374,15 +374,15 @@ def expand_configs(raw_configs, pos_prompts, neg_prompts, denoise_values, seed, 
                 "negative": combo[7][1],
                 "model": combo[8],
                 "seed": seed,
-                "lora_omit_triggers": lora_omit_triggers,
-                "lora_triggerwords_append_settings": lora_triggerwords_append_settings
+                "lora_omit_triggers": list(lora_omit_triggers),
+                "lora_triggerwords_append_settings": dict(lora_triggerwords_append_settings)
             })
 
         # Apply base seed and extra seeds
         for c in base_combos:
             expanded.append(c)
             for extra_seed in extra_seeds:
-                new_c = c.copy()
+                new_c = copy.deepcopy(c)
                 new_c["seed"] = extra_seed
                 expanded.append(new_c)
 
