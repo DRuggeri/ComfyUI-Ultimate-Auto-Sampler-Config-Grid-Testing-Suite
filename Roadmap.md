@@ -33,19 +33,37 @@ But seriously, after updating your code see if it works. If it didn't send the e
 
 ---
 
+
+Check Roadmap.md for some tasks and do them. don't do any marked as (low priority). If you think you can do the ones marked as New to-do items, needs more info/explaining/numbering those are good. There is some info on the project in README.md and info on the file structure and notes on each files functions in the ProjectStructure.md 
+
+
 ### **ComfyUI Ultimate Sampler Grid – Development Roadmap**
 
 
-## Calculate diff - pack into manifest, read in card view at top of card stats, add to sort favorites by lora with lora diff name
+# New to-do items, needs more info/explaining/numbering
 
-## Implement Settings For Lookahead Async Model Cacher
+## Easy Feature: Add Esc key close to Revise modal and add X to close in top right of modal in Dashboard and the Lookup LoRA Metadata from CivitAI, and omit lora triggerwords modals in the Builder UI. 
 
-## Feature: LoRA Lookup From Builder UI. Get metadata, images, url, tags, & more to view quickly from builder in comfyui
+## Bug Fix: Batch Encoding Runs Before Job Skip/Continue/Resume check and will encode everything again even if it's already been completed. Also Continue/Resume Should NOT run by default if optional inputs are connected because changes to the optional inputs are not currently being tracked. We need to track connected node changes from each of the optional inputs, we could also use this step to save the workflow to the benchmark/session folder and compare the last run workflow to the current to track node changes and determine changes and also integrate currenly missing from optional inputs such as model, loras, prompts, etc.
 
-## Fix: Manifest doesn't need lora omit triggers list in every item
+## Feature: Plug in any directory into the dashboard, view all the images in it, read from pnginfo meta-data, generate a manifest and be able to favorite/filter/sort images in directories that weren't generated with the node.
+
+## Feature: Test multiple vaes. VAE Selection could be added to the Builder UI & configs_json and integrated into the generation_orchestrator, image_generator, model_loader, saved manifest.json, filters, dashboard grid display card info, etc...
+
+## calculate height and width of card and row based on input dimension (sort of implemented but not working right with multiple size images in one run, needs fixing)
+
+## Replace revise button in dashboard with edit emoji 
+
+## Setup Diffusion_checkpoints and gguf loaders in config builder ui node, allow selection of them in model select, add text encoder selection options, pass to json_config and handle them in the sampler node, model loader and gen_orchestrator
+
+
+## Calculate diff - pack into manifest, read in card view at top of card stats, add to sort favorites by lora with lora diff name. easily view what makes that displayed card/item different
+
+## Implement Configurable Settings For Lookahead Async Model Cacher (low priority)
 
 ## Add attention options, xformers, sdpa, sage, flash, etc, option for test all, test all should clear ram & vram between each test.
 
+# Deeper explained items to-do list
 
 #### **1. Skip Logic for Optional Inputs**
 
@@ -64,19 +82,8 @@ But seriously, after updating your code see if it works. If it didn't send the e
 
 * **Target Files:** `sampler_node.py`, `generation_orchestrator.py`
 
-#### **3. Lora/Model Quick Toggle (Bypass)**
 
-* **Problem:** Users delete LoRAs to test without them, losing the config.
-* **Instruction:**
-1. **Frontend (`web/config_builder.js`):** In the LoRA list UI, add a small checkbox or "eye" icon next to each entry.
-2. **Data Handling:** When generating the JSON for `lora_config`, do **not** remove the entry if unchecked. Instead, prepend a specific marker (e.g., `#` or `OFF::`) to the string.
-3. **Backend (`config_utils.py`):** In `parse_lora_definition`, add a check: `if part.startswith("#") or part.startswith("OFF::"): continue`. This filters it out at expansion time while keeping it in the UI text.
-
-
-* **Target Files:** `web/config_builder.js`, `config_utils.py`
-
-
-#### **7. CivitAI Download Integration**
+#### **7. CivitAI Download Integration** (low priority)
 
 * **Problem:** Can fetch info but not download files.
 * **Instruction:**
@@ -87,17 +94,8 @@ But seriously, after updating your code see if it works. If it didn't send the e
 
 * **Target Files:** `__init__.py`, `lora_utils.py`, `web/config_builder.js`
 
-#### **8. Visualize Omitted Triggers**
 
-* **Problem:** Users don't know which triggers are being removed.
-* **Instruction:**
-1. **Modify `web/config_builder.js`:** In the function that renders the trigger tags list (e.g., `renderOmitTags` or similar), iterate through the current `omit_list`.
-2. **Style:** If a tag in the cloud matches an entry in `omit_list`, apply a specific CSS class (e.g., `style="text-decoration: line-through; opacity: 0.5;"`).
-
-
-* **Target Files:** `web/config_builder.js`
-
-#### **9. Token-Based Omit Logic**
+#### **9. Tag/Token-Based Omit Logic**
 
 * **Problem:** Current logic (`if word in tag`) is too broad or too strict.
 * **Instruction:**
@@ -108,7 +106,7 @@ But seriously, after updating your code see if it works. If it didn't send the e
 
 * **Target Files:** `trigger_words.py`
 
-#### **10. Validation Warning (Omit vs Lookup) - Warn user if omits are added but lookup is off**
+#### **10. Validation Warning (Omit vs Lookup) - Warn user if omits are added but lookup is off** (low priority)
 
 * **Problem:** User adds omit words but forgets to enable "Lookup & Append".
 * **Instruction:**
@@ -152,13 +150,12 @@ But seriously, after updating your code see if it works. If it didn't send the e
 
 * **Target Files:** `generation_orchestrator.py`, `resources/logic_events.js`, `resources/template.html`
 
-#### **14. Cache Trigger Word Placement**
+#### **14. Cache Trigger Word Placement** (low priority)
 
 * **Problem:** `trigger_words.py` logic runs every loop iteration.
 * **Instruction:**
-1. **Modify `trigger_words.py`:** Import `functools.lru_cache`.
-2. **Apply:** Decorate `get_filtered_lora_triggers` and `build_prompt_with_triggers` with `@lru_cache(maxsize=128)`. Note: You must ensure arguments are hashable (convert lists to tuples before passing).
-
+1. **Modify `trigger_words.py`:**  
+2. **Apply:** Decorate `get_filtered_lora_triggers`
 
 * **Target Files:** `trigger_words.py`
 
@@ -176,7 +173,7 @@ But seriously, after updating your code see if it works. If it didn't send the e
 
 * **Target Files:** `resources/template.html`, `resources/logic_ui.js`
 
-#### **18. Optionally Pack workflow into images **
+#### **18. Optionally Pack workflow into images ** (low priority)
 
 * **Problem:** Pack workflow into images optionally 
 * **Instruction:**
@@ -198,7 +195,7 @@ But seriously, after updating your code see if it works. If it didn't send the e
 
 * **Target Files:** `resources/logic_ui.js`
 
-#### **21. Virtual DOM Pan/Zoom (Canvas Builder)**
+#### **21. Virtual DOM Pan/Zoom (Canvas Builder)** (low priority)
 
 * **Problem:** The Config Builder UI (graph node) needs infinite canvas capabilities for large node graphs.
 * **Instruction:**
@@ -208,7 +205,7 @@ But seriously, after updating your code see if it works. If it didn't send the e
 
 * **Target Files:** `web/config_builder.js`
 
-#### **22. Import Configs (Merge)**
+#### **22. Import Configs (Merge)** (low priority)
 
 * **Problem:** Can only load full sessions, not merge snippets.
 * **Instruction:**
@@ -219,7 +216,7 @@ But seriously, after updating your code see if it works. If it didn't send the e
 
 * **Target Files:** `web/config_builder.js`
 
-#### **23. Pseudo-JSON Nodes (Recursion)**
+#### **23. Pseudo-JSON Nodes (Recursion)** (low priority)
 
 * **Problem:** Advanced. Running a raw JSON workflow as a sub-node.
 * **Instruction:**
@@ -229,7 +226,7 @@ But seriously, after updating your code see if it works. If it didn't send the e
 
 * **Target Files:** `json_text_node.py`, `sampler_node.py`
 
-#### **24. Combinatorial Randomization** - More Randomization tools - generate x configs from y possibilities and z prompts
+#### **24. Combinatorial Randomization** - More Randomization tools - generate x configs from y possibilities and z prompts - (low priority)
 
 * **Problem:**  Feature. Combinatorial generation logic. Combine random prompts with random loras, fun!
 * **Instruction:**
@@ -239,7 +236,7 @@ But seriously, after updating your code see if it works. If it didn't send the e
 
 * **Target Files:** `config_builder_node.py`
 
-#### **25. Double Click Filter (Isolate)**
+#### **25. Double Click Filter (Isolate)** - (low priority)
 
 * **Problem:** Tedious to uncheck all other filters.
 * **Instruction:**
@@ -250,7 +247,7 @@ But seriously, after updating your code see if it works. If it didn't send the e
 
 * **Target Files:** `resources/logic_ui.js`
 
-#### **26. Path Validation in Builder**
+#### **26. Path Validation in Builder** (low priority)
 
 * **Problem:** Add validation check to builder for lora and model paths
 * **Instruction:**
@@ -278,3 +275,20 @@ But seriously, after updating your code see if it works. If it didn't send the e
 #### **4. Fix Lora Trigger Append Position** COMPLETED
 
 #### **15/16. Lookahead Caching Switch & Debug** COMPLETED
+
+
+Add "Don't Append" option to Append Lora Triggerwords To: section. (Adds all triggerwords to omit lora triggerwords list. COMPLETED
+
+
+## Feature: LoRA Lookup From Builder UI. Get metadata, images, url, tags, & more to view quickly from builder in comfyui
+
+## Fix: Manifest doesn't need lora omit triggers list in every item. Save civitai lookup hashes when calculating lora short 256 and looking up lora trigger words. For use later with civit lookup lora / model info. Save all meta-data from lookup in a folder in output/benchmarks/model-data/{modelName} COMPLETED
+
+
+Prompts manager section in config builder, browse & combine past prompts, analyze favorited tags, auto generate tag tests, COMPLETED
+
+
+#### **3. Lora/Model Quick Toggle (Bypass)** COMPLETED
+
+
+#### **8. Visualize Omitted Triggers** COMPLETED
