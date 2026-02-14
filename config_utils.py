@@ -260,41 +260,78 @@ def expand_lora_stack(lora_input):
 def expand_configs(raw_configs, pos_prompts, neg_prompts, denoise_values, seed, extra_seeds, ckpt_name=None):
     """
     Expand raw config entries into full configuration combinations.
-    
+
+    Supports per-config prompts: if a config entry has "positive" and/or "negative" keys,
+    those override the external pos_prompts/neg_prompts for that entry. This allows each
+    config to define its own nested array prompts for Cartesian product expansion.
+
     Args:
         raw_configs: List of config dictionaries with potentially wildcarded values
-        pos_prompts: List of positive prompts
-        neg_prompts: List of negative prompts
+        pos_prompts: List of positive prompts (fallback when config doesn't define prompts)
+        neg_prompts: List of negative prompts (fallback when config doesn't define prompts)
         denoise_values: List of denoise values
         seed: Base seed value
         extra_seeds: List of additional random seeds
         ckpt_name: Checkpoint name from node input (used as default when model is "Default")
-        
+
     Returns:
         List of fully expanded config dictionaries
     """
     ALL_SCHEDULERS = comfy.samplers.KSampler.SCHEDULERS
     ALL_SAMPLERS = comfy.samplers.KSampler.SAMPLERS
     expanded = []
-    
-    # Determine prompt pairing strategy
+
+    # Default prompt pairing strategy (used when config doesn't define its own prompts)
     if len(pos_prompts) > 1 and len(neg_prompts) > 1 and len(pos_prompts) == len(neg_prompts):
         print("[GridTester] Detected matching prompt lists. Using 1-to-1 Pairing.")
-        prompt_pairs = list(zip(pos_prompts, neg_prompts))
+        default_prompt_pairs = list(zip(pos_prompts, neg_prompts))
     else:
-        prompt_pairs = list(itertools.product(pos_prompts, neg_prompts))
-    
+        default_prompt_pairs = list(itertools.product(pos_prompts, neg_prompts))
+
     def to_list(x):
         return x if isinstance(x, list) else [x]
-    
+
     for entry in raw_configs:
+        # ==== PER-CONFIG PROMPT HANDLING ====
+        # If this config defines its own prompts, parse them and use instead of defaults
+        if "positive" in entry or "negative" in entry:
+            raw_positive = entry.get("positive", "")
+            raw_negative = entry.get("negative", "")
+
+            # Handle both string and already-parsed list/nested-list formats
+            if isinstance(raw_positive, (list, tuple)):
+                # Already a list/nested structure - pass as JSON string for parse_prompt_input_nested
+                config_pos = parse_prompt_input_nested(json.dumps(raw_positive))
+            elif isinstance(raw_positive, str) and raw_positive.strip():
+                config_pos = parse_prompt_input_nested(raw_positive)
+            else:
+                config_pos = pos_prompts  # Fallback to external
+
+            if isinstance(raw_negative, (list, tuple)):
+                config_neg = parse_prompt_input_nested(json.dumps(raw_negative))
+            elif isinstance(raw_negative, str) and raw_negative.strip():
+                config_neg = parse_prompt_input_nested(raw_negative)
+            else:
+                config_neg = neg_prompts  # Fallback to external
+
+            # Build prompt pairs for this config entry
+            if len(config_pos) > 1 and len(config_neg) > 1 and len(config_pos) == len(config_neg):
+                entry_prompt_pairs = list(zip(config_pos, config_neg))
+            else:
+                entry_prompt_pairs = list(itertools.product(config_pos, config_neg))
+
+            if entry_prompt_pairs:
+                print(f"[GridTester] Config defines {len(entry_prompt_pairs)} prompt combinations (overriding node inputs)")
+        else:
+            entry_prompt_pairs = default_prompt_pairs
+
         # Expand wildcards
         samplers = ALL_SAMPLERS if entry.get("sampler") == "*" else to_list(entry.get("sampler", "euler"))
         schedulers = ALL_SCHEDULERS if entry.get("scheduler") == "*" else to_list(entry.get("scheduler", "normal"))
         steps_l = to_list(entry.get("steps", 20))
         cfgs = to_list(entry.get("cfg", 7.0))
         clip_skips = to_list(entry.get("clip_skip", 0))
-        
+
         # Expand model folders
         raw_models = to_list(entry.get("model", "Default"))
         expanded_models = []
@@ -307,24 +344,24 @@ def expand_configs(raw_configs, pos_prompts, neg_prompts, denoise_values, seed, 
                     expanded_models.append("Default")
             else:
                 expanded_models.extend(get_files_from_folder(m, "checkpoints"))
-        
+
         # Expand LoRA stacks (strengths are now in the lora string itself)
         expanded_loras = expand_lora_stack(entry.get("lora", "None"))
-        
+
         # Get LoRA trigger word omissions (if specified)
         lora_omit_triggers = entry.get("lora_omit_triggers", [])
         if not isinstance(lora_omit_triggers, list):
             lora_omit_triggers = [lora_omit_triggers]
-        
+
         # Get LoRA trigger word append settings (if specified)
         lora_triggerwords_append_settings = entry.get("lora_triggerwords_append_settings", {})
         if not isinstance(lora_triggerwords_append_settings, dict):
             lora_triggerwords_append_settings = {}
-        
+
         # Build all combinations
         base_combos = []
-        for combo in itertools.product(samplers, schedulers, steps_l, cfgs, clip_skips, expanded_loras, 
-                                      denoise_values, prompt_pairs, expanded_models):
+        for combo in itertools.product(samplers, schedulers, steps_l, cfgs, clip_skips, expanded_loras,
+                                      denoise_values, entry_prompt_pairs, expanded_models):
             base_combos.append({
                 "sampler": combo[0],
                 "scheduler": combo[1],
@@ -340,7 +377,7 @@ def expand_configs(raw_configs, pos_prompts, neg_prompts, denoise_values, seed, 
                 "lora_omit_triggers": lora_omit_triggers,
                 "lora_triggerwords_append_settings": lora_triggerwords_append_settings
             })
-        
+
         # Apply base seed and extra seeds
         for c in base_combos:
             expanded.append(c)
@@ -348,7 +385,7 @@ def expand_configs(raw_configs, pos_prompts, neg_prompts, denoise_values, seed, 
                 new_c = c.copy()
                 new_c["seed"] = extra_seed
                 expanded.append(new_c)
-    
+
     return expanded
 
 

@@ -9,7 +9,9 @@ import {
     parseLoraString,
     buildLoraString,
     getIterationCount,
-    convertStateToConfigs
+    convertStateToConfigs,
+    countPromptCombinations,
+    expandPromptPreview
 } from '/ultimate_config_sampler/js/conf_builder/conf-builder-utilities.js';
 
 import {
@@ -1254,6 +1256,494 @@ export async function showTriggerLookupModal(node, arrayIdx) {
     }
 }
 
+// =============================================================================
+// --- PROMPT BUILDER COMPONENTS ---
+// =============================================================================
+
+/**
+ * Creates a reusable prompt group editor.
+ * Supports visual chip/tag mode and raw JSON mode.
+ * Shows live preview of Cartesian product combinations.
+ *
+ * @param {Array} groups - Nested array of prompt groups: [["a", "b"], ["c", "d"]]
+ * @param {Function} onChange - Callback when groups change: (newGroups) => void
+ * @param {string} label - Label for this editor (e.g. "Positive Prompt" or "Negative Prompt")
+ * @param {string} borderColor - CSS color for left border accent
+ * @returns {HTMLElement}
+ */
+function createPromptGroupEditor(groups, onChange, label, borderColor = "#0066cc") {
+    const container = document.createElement("div");
+    container.style.cssText = `display: flex; flex-direction: column; gap: 8px; width: 100%;`;
+
+    // Track mode state locally (visual vs raw)
+    let isRawMode = false;
+
+    // --- HEADER ---
+    const header = document.createElement("div");
+    header.style.cssText = "display: flex; justify-content: space-between; align-items: center;";
+
+    const titleEl = document.createElement("div");
+    titleEl.style.cssText = `font-size: 12px; font-weight: bold; color: ${borderColor};`;
+    titleEl.textContent = label;
+    header.appendChild(titleEl);
+
+    const modeToggleContainer = document.createElement("div");
+    modeToggleContainer.style.cssText = "display: flex; gap: 4px;";
+
+    const visualBtn = document.createElement("button");
+    visualBtn.className = "cb-prompt-mode-toggle active";
+    visualBtn.textContent = "Visual";
+
+    const rawBtn = document.createElement("button");
+    rawBtn.className = "cb-prompt-mode-toggle";
+    rawBtn.textContent = "JSON";
+
+    modeToggleContainer.appendChild(visualBtn);
+    modeToggleContainer.appendChild(rawBtn);
+    header.appendChild(modeToggleContainer);
+    container.appendChild(header);
+
+    // --- VISUAL MODE CONTAINER ---
+    const visualContainer = document.createElement("div");
+    visualContainer.style.cssText = "display: flex; flex-direction: column; gap: 6px;";
+
+    // --- RAW MODE CONTAINER ---
+    const rawContainer = document.createElement("div");
+    rawContainer.style.display = "none";
+
+    const rawTextarea = document.createElement("textarea");
+    rawTextarea.className = "cb-prompt-raw-editor";
+    rawTextarea.placeholder = '[["variation1", "variation2"], ["subject1", "subject2"]]';
+    rawTextarea.value = groups.length > 0 ? JSON.stringify(groups, null, 2) : "";
+
+    rawTextarea.onchange = () => {
+        try {
+            const parsed = JSON.parse(rawTextarea.value);
+            if (Array.isArray(parsed)) {
+                // Normalize: ensure each item is an array
+                const normalized = parsed.map(item =>
+                    Array.isArray(item) ? item.map(String) : [String(item)]
+                );
+                onChange(normalized);
+                rawTextarea.style.borderColor = "#00aa44";
+                setTimeout(() => { rawTextarea.style.borderColor = "#3a3a3a"; }, 1000);
+                renderVisualGroups(normalized);
+                renderPreview(normalized);
+            }
+        } catch (e) {
+            rawTextarea.style.borderColor = "#cc3333";
+        }
+    };
+    rawContainer.appendChild(rawTextarea);
+
+    // --- MODE TOGGLE LOGIC ---
+    visualBtn.onclick = () => {
+        isRawMode = false;
+        visualContainer.style.display = "flex";
+        rawContainer.style.display = "none";
+        visualBtn.classList.add("active");
+        rawBtn.classList.remove("active");
+    };
+    rawBtn.onclick = () => {
+        isRawMode = true;
+        visualContainer.style.display = "none";
+        rawContainer.style.display = "block";
+        rawBtn.classList.add("active");
+        visualBtn.classList.remove("active");
+        // Sync raw editor with current groups
+        rawTextarea.value = groups.length > 0 ? JSON.stringify(groups, null, 2) : "";
+    };
+
+    container.appendChild(visualContainer);
+    container.appendChild(rawContainer);
+
+    // --- PREVIEW SECTION ---
+    const previewContainer = document.createElement("div");
+    container.appendChild(previewContainer);
+
+    function renderPreview(currentGroups) {
+        previewContainer.innerHTML = "";
+        const validGroups = (currentGroups || []).filter(g => Array.isArray(g) && g.length > 0);
+        if (validGroups.length === 0) return;
+
+        const count = countPromptCombinations(validGroups);
+        const previews = expandPromptPreview(validGroups, 20);
+
+        const previewDiv = document.createElement("div");
+        previewDiv.className = "cb-prompt-preview";
+
+        const countLabel = document.createElement("div");
+        countLabel.style.cssText = "font-weight: bold; margin-bottom: 4px; color: #00cc88;";
+        countLabel.textContent = `${count} combination${count !== 1 ? 's' : ''}${count > 20 ? ' (showing first 20)' : ''}:`;
+        previewDiv.appendChild(countLabel);
+
+        previews.forEach(preview => {
+            const item = document.createElement("div");
+            item.className = "cb-prompt-preview-item";
+            item.textContent = preview;
+            previewDiv.appendChild(item);
+        });
+
+        previewContainer.appendChild(previewDiv);
+    }
+
+    // --- VISUAL GROUP RENDERING ---
+    function renderVisualGroups(currentGroups) {
+        visualContainer.innerHTML = "";
+
+        (currentGroups || []).forEach((group, groupIdx) => {
+            const groupDiv = document.createElement("div");
+            groupDiv.className = "cb-prompt-group";
+
+            // Group header
+            const groupHeader = document.createElement("div");
+            groupHeader.className = "cb-prompt-group-header";
+
+            const groupLabel = document.createElement("span");
+            groupLabel.textContent = `Group ${groupIdx + 1} (${group.length} variation${group.length !== 1 ? 's' : ''})`;
+            groupHeader.appendChild(groupLabel);
+
+            const groupDeleteBtn = document.createElement("button");
+            groupDeleteBtn.className = "cb-button danger";
+            groupDeleteBtn.style.cssText = "padding: 1px 6px; font-size: 10px;";
+            groupDeleteBtn.textContent = "✖";
+            groupDeleteBtn.title = "Remove this group";
+            groupDeleteBtn.onclick = () => {
+                const newGroups = [...currentGroups];
+                newGroups.splice(groupIdx, 1);
+                onChange(newGroups);
+                renderVisualGroups(newGroups);
+                renderPreview(newGroups);
+                rawTextarea.value = newGroups.length > 0 ? JSON.stringify(newGroups, null, 2) : "";
+            };
+            groupHeader.appendChild(groupDeleteBtn);
+            groupDiv.appendChild(groupHeader);
+
+            // Chips container
+            const chipsDiv = document.createElement("div");
+            chipsDiv.className = "cb-prompt-chips";
+
+            group.forEach((variation, varIdx) => {
+                const chip = document.createElement("span");
+                chip.className = "cb-prompt-chip";
+
+                const chipText = document.createElement("span");
+                chipText.textContent = variation;
+                chipText.title = variation;
+                chip.appendChild(chipText);
+
+                const chipClose = document.createElement("span");
+                chipClose.className = "chip-close";
+                chipClose.textContent = "×";
+                chipClose.onclick = () => {
+                    const newGroups = currentGroups.map(g => [...g]);
+                    newGroups[groupIdx].splice(varIdx, 1);
+                    // Remove group if empty
+                    if (newGroups[groupIdx].length === 0) {
+                        newGroups.splice(groupIdx, 1);
+                    }
+                    onChange(newGroups);
+                    renderVisualGroups(newGroups);
+                    renderPreview(newGroups);
+                    rawTextarea.value = newGroups.length > 0 ? JSON.stringify(newGroups, null, 2) : "";
+                };
+                chip.appendChild(chipClose);
+                chipsDiv.appendChild(chip);
+            });
+
+            // Add variation input
+            const addVarBtn = document.createElement("button");
+            addVarBtn.className = "cb-prompt-add-variation";
+            addVarBtn.textContent = "+ variation";
+            addVarBtn.onclick = () => {
+                // Replace button with inline input
+                const inputContainer = document.createElement("div");
+                inputContainer.style.cssText = "display: inline-flex; gap: 2px;";
+
+                const input = document.createElement("input");
+                input.className = "cb-input";
+                input.style.cssText = "width: 180px; padding: 3px 6px; font-size: 12px;";
+                input.placeholder = "Enter prompt text...";
+
+                const confirmBtn = document.createElement("button");
+                confirmBtn.className = "cb-button primary";
+                confirmBtn.style.cssText = "padding: 2px 8px; font-size: 11px;";
+                confirmBtn.textContent = "Add";
+
+                const addVariation = () => {
+                    const val = input.value.trim();
+                    if (val) {
+                        const newGroups = currentGroups.map(g => [...g]);
+                        newGroups[groupIdx].push(val);
+                        onChange(newGroups);
+                        renderVisualGroups(newGroups);
+                        renderPreview(newGroups);
+                        rawTextarea.value = newGroups.length > 0 ? JSON.stringify(newGroups, null, 2) : "";
+                    }
+                };
+
+                input.onkeydown = (e) => {
+                    if (e.key === "Enter") addVariation();
+                    if (e.key === "Escape") {
+                        inputContainer.replaceWith(addVarBtn);
+                    }
+                };
+                confirmBtn.onclick = addVariation;
+
+                inputContainer.appendChild(input);
+                inputContainer.appendChild(confirmBtn);
+                addVarBtn.replaceWith(inputContainer);
+                input.focus();
+            };
+            chipsDiv.appendChild(addVarBtn);
+
+            groupDiv.appendChild(chipsDiv);
+            visualContainer.appendChild(groupDiv);
+        });
+
+        // Add Group button
+        const addGroupBtn = document.createElement("button");
+        addGroupBtn.className = "cb-prompt-add-group-btn";
+        addGroupBtn.textContent = "➕ Add Prompt Group";
+        addGroupBtn.onclick = () => {
+            // Create input for the first variation of the new group
+            const inputContainer = document.createElement("div");
+            inputContainer.style.cssText = "display: flex; gap: 4px; margin-top: 4px;";
+
+            const input = document.createElement("input");
+            input.className = "cb-input";
+            input.style.cssText = "flex: 1; padding: 6px 8px; font-size: 12px;";
+            input.placeholder = "Enter first variation for new group...";
+
+            const confirmBtn = document.createElement("button");
+            confirmBtn.className = "cb-button primary";
+            confirmBtn.style.padding = "4px 12px";
+            confirmBtn.textContent = "Add Group";
+
+            const addGroup = () => {
+                const val = input.value.trim();
+                if (val) {
+                    const newGroups = [...(currentGroups || []), [val]];
+                    onChange(newGroups);
+                    renderVisualGroups(newGroups);
+                    renderPreview(newGroups);
+                    rawTextarea.value = newGroups.length > 0 ? JSON.stringify(newGroups, null, 2) : "";
+                }
+            };
+
+            input.onkeydown = (e) => {
+                if (e.key === "Enter") addGroup();
+                if (e.key === "Escape") {
+                    inputContainer.replaceWith(addGroupBtn);
+                }
+            };
+            confirmBtn.onclick = addGroup;
+
+            inputContainer.appendChild(input);
+            inputContainer.appendChild(confirmBtn);
+            addGroupBtn.replaceWith(inputContainer);
+            input.focus();
+        };
+        visualContainer.appendChild(addGroupBtn);
+    }
+
+    // Initial render
+    renderVisualGroups(groups);
+    renderPreview(groups);
+
+    return container;
+}
+
+// --- GLOBAL PROMPTS SECTION ---
+
+export function renderGlobalPromptsSection(node, container) {
+    const isCollapsed = node.uiState.globalPromptsSectionCollapsed || false;
+
+    const section = document.createElement("div");
+    section.className = "cb-section full-width";
+
+    // Header (collapsible)
+    const header = document.createElement("div");
+    header.className = "cb-section-toggle";
+    header.style.cssText = "display: flex; justify-content: space-between; align-items: center; cursor: pointer; user-select: none; margin-bottom: 10px;";
+
+    const titleSpan = document.createElement("div");
+    titleSpan.className = "cb-section-title";
+    titleSpan.style.cssText = "margin-bottom: 0; border-bottom: none; padding-bottom: 0; color: #00aa44;";
+    titleSpan.textContent = "📝 Global Prompts (Override Node Inputs)";
+    header.appendChild(titleSpan);
+
+    const arrowSpan = document.createElement("span");
+    arrowSpan.textContent = isCollapsed ? "▶" : "▼";
+    arrowSpan.style.cssText = "color: #00aa44; font-size: 12px;";
+    header.appendChild(arrowSpan);
+
+    section.appendChild(header);
+
+    // Content container
+    const contentDiv = document.createElement("div");
+    contentDiv.style.display = isCollapsed ? "none" : "flex";
+    contentDiv.style.flexDirection = "column";
+    contentDiv.style.gap = "12px";
+
+    header.onclick = () => {
+        const isNowCollapsed = contentDiv.style.display !== "none";
+        contentDiv.style.display = isNowCollapsed ? "none" : "flex";
+        arrowSpan.textContent = isNowCollapsed ? "▶" : "▼";
+        node.uiState.globalPromptsSectionCollapsed = isNowCollapsed;
+    };
+
+    // Info text
+    const info = document.createElement("div");
+    info.style.cssText = "font-size: 11px; color: #888; font-style: italic;";
+    info.textContent = "These prompts override the sampler node's positive/negative text inputs for ALL config arrays. Per-config prompts (below) can further override these.";
+    contentDiv.appendChild(info);
+
+    // Positive Prompt Editor
+    const positiveSection = document.createElement("div");
+    positiveSection.className = "cb-prompt-section global";
+
+    const positiveEditor = createPromptGroupEditor(
+        node.state.global_positive_groups || [],
+        (newGroups) => {
+            node.state.global_positive_groups = newGroups;
+            node.saveState();
+        },
+        "✅ Positive Prompt Groups",
+        "#00aa44"
+    );
+    positiveSection.appendChild(positiveEditor);
+    contentDiv.appendChild(positiveSection);
+
+    // Negative Prompt (simple text area, not nested groups)
+    const negativeSection = document.createElement("div");
+    negativeSection.className = "cb-prompt-section global";
+
+    const negLabel = document.createElement("div");
+    negLabel.style.cssText = "font-size: 12px; font-weight: bold; color: #cc4444; margin-bottom: 6px;";
+    negLabel.textContent = "❌ Negative Prompt";
+    negativeSection.appendChild(negLabel);
+
+    const negInput = document.createElement("textarea");
+    negInput.className = "cb-prompt-raw-editor";
+    negInput.style.minHeight = "50px";
+    negInput.placeholder = "bad quality, worst quality, lowres";
+    negInput.value = node.state.global_negative || "";
+    negInput.onchange = () => {
+        node.state.global_negative = negInput.value;
+        node.saveState();
+    };
+    negativeSection.appendChild(negInput);
+    contentDiv.appendChild(negativeSection);
+
+    section.appendChild(contentDiv);
+    container.appendChild(section);
+}
+
+// --- PER-CONFIG PROMPTS SECTION ---
+
+export function renderConfigPromptsSection(node, div, configArray, arrayIdx) {
+    const uid = `prompts_${arrayIdx}`;
+    const isCollapsed = node.uiState.promptsSectionCollapsed[uid] !== false; // Default collapsed
+
+    const section = document.createElement("div");
+    section.style.cssText = "width: 100%; margin-top: 10px; padding-top: 10px; border-top: 1px dashed #444;";
+
+    // Header
+    const header = document.createElement("div");
+    header.className = "cb-section-toggle";
+    header.style.cssText = "padding: 8px; background: #3a3a3a; border-radius: 4px; margin-bottom: 8px; font-weight: bold; color: #9966cc;";
+
+    const promptCount = configArray.use_custom_prompts && configArray.positive_prompt_groups
+        ? countPromptCombinations(configArray.positive_prompt_groups)
+        : 0;
+
+    const titleSpan = document.createElement("span");
+    titleSpan.textContent = `Prompts${promptCount > 0 ? ` (${promptCount} combinations)` : ''}`;
+    header.appendChild(titleSpan);
+
+    const arrowSpan = document.createElement("span");
+    arrowSpan.textContent = isCollapsed ? "▶" : "▼";
+    header.appendChild(arrowSpan);
+
+    section.appendChild(header);
+
+    // Content
+    const contentDiv = document.createElement("div");
+    contentDiv.style.display = isCollapsed ? "none" : "block";
+
+    header.onclick = () => {
+        const isNowCollapsed = contentDiv.style.display !== "none";
+        contentDiv.style.display = isNowCollapsed ? "none" : "block";
+        arrowSpan.textContent = isNowCollapsed ? "▶" : "▼";
+        node.uiState.promptsSectionCollapsed[uid] = isNowCollapsed;
+    };
+
+    // Toggle: Use Custom Prompts
+    const toggleLabel = document.createElement("label");
+    toggleLabel.style.cssText = "display: flex; align-items: center; gap: 8px; cursor: pointer; margin-bottom: 10px; font-size: 13px;";
+
+    const toggleCheck = document.createElement("input");
+    toggleCheck.type = "checkbox";
+    toggleCheck.checked = configArray.use_custom_prompts || false;
+    toggleCheck.onchange = () => {
+        node.state.config_arrays[arrayIdx].use_custom_prompts = toggleCheck.checked;
+        node.saveState();
+        node.renderUI();
+    };
+    toggleLabel.appendChild(toggleCheck);
+    toggleLabel.appendChild(document.createTextNode("Use Custom Prompts (Override Global/Node)"));
+    contentDiv.appendChild(toggleLabel);
+
+    if (configArray.use_custom_prompts) {
+        // Positive Prompt Editor
+        const positiveSection = document.createElement("div");
+        positiveSection.className = "cb-prompt-section per-config";
+
+        const positiveEditor = createPromptGroupEditor(
+            configArray.positive_prompt_groups || [],
+            (newGroups) => {
+                node.state.config_arrays[arrayIdx].positive_prompt_groups = newGroups;
+                node.saveState();
+            },
+            "✅ Positive Prompt Groups",
+            "#9966cc"
+        );
+        positiveSection.appendChild(positiveEditor);
+        contentDiv.appendChild(positiveSection);
+
+        // Negative Prompt (simple text)
+        const negativeSection = document.createElement("div");
+        negativeSection.className = "cb-prompt-section per-config";
+        negativeSection.style.marginTop = "8px";
+
+        const negLabel = document.createElement("div");
+        negLabel.style.cssText = "font-size: 12px; font-weight: bold; color: #cc4444; margin-bottom: 6px;";
+        negLabel.textContent = "❌ Negative Prompt";
+        negativeSection.appendChild(negLabel);
+
+        const negInput = document.createElement("textarea");
+        negInput.className = "cb-prompt-raw-editor";
+        negInput.style.minHeight = "50px";
+        negInput.placeholder = "bad quality, worst quality, lowres";
+        negInput.value = configArray.negative_prompt || "";
+        negInput.onchange = () => {
+            node.state.config_arrays[arrayIdx].negative_prompt = negInput.value;
+            node.saveState();
+        };
+        negativeSection.appendChild(negInput);
+        contentDiv.appendChild(negativeSection);
+    } else {
+        const infoText = document.createElement("div");
+        infoText.style.cssText = "font-size: 11px; color: #666; font-style: italic; padding: 4px;";
+        infoText.textContent = "Using global prompts (or node inputs if no global prompts defined).";
+        contentDiv.appendChild(infoText);
+    }
+
+    section.appendChild(contentDiv);
+    div.appendChild(section);
+}
+
 // --- MAIN RENDER UI FUNCTION ---
 
 export function renderPreviewSection(container) {
@@ -1288,6 +1778,9 @@ export async function renderUI(node, availableLoras, availableModels, loraFolder
     renderConfigSection(node, topRow, availableConfigs);
     root.appendChild(topRow);
 
+    // Global Prompts Section (between session/config management and config arrays)
+    renderGlobalPromptsSection(node, root);
+
     const configSection = document.createElement("div");
     configSection.className = "cb-section full-width";
     configSection.innerHTML = '<div class="cb-section-title">⚙️ Config Arrays</div>';
@@ -1308,7 +1801,10 @@ export async function renderUI(node, availableLoras, availableModels, loraFolder
             loras: ["None"],
             lora_omit_triggers: [],
             lora_triggerwords_append_settings: {},
-            combine: false
+            combine: false,
+            positive_prompt_groups: [],
+            negative_prompt: "",
+            use_custom_prompts: false
         });
         node.saveState();
         node.renderUI();
@@ -1321,6 +1817,7 @@ export async function renderUI(node, availableLoras, availableModels, loraFolder
 
     node.state.config_arrays.forEach((configArray, arrayIdx) => {
         const arrayElement = createConfigArrayElement(node, configArray, arrayIdx);
+        renderConfigPromptsSection(node, arrayElement, configArray, arrayIdx);
         renderModelsSection(node, arrayElement, configArray, arrayIdx, availableModels, modelFolders);
         renderLorasSection(node, arrayElement, configArray, arrayIdx, availableLoras, loraFolders);
         arraysContainer.appendChild(arrayElement);

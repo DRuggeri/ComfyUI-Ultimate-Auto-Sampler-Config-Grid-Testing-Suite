@@ -66,7 +66,9 @@ app.registerExtension({
                     modelsSectionCollapsed: {},
                     lorasSectionCollapsed: {},
                     modelsCollapsed: {},
-                    lorasCollapsed: {}
+                    lorasCollapsed: {},
+                    promptsSectionCollapsed: {},
+                    globalPromptsSectionCollapsed: false
                 };
                 
                 // Initialize default state structure
@@ -75,6 +77,8 @@ app.registerExtension({
                     config_name: "default_config",
                     auto_save: false,
                     include_none: false,
+                    global_positive_groups: [],
+                    global_negative: "",
                     config_arrays: [{
                         name: "Config 1",
                         samplers: "euler, dpmpp_2m",
@@ -87,7 +91,10 @@ app.registerExtension({
                         lora_triggerwords_append_settings: {},
                         lora_bypass_states: {},
                         lora_strength_lock: {},
-                        combine: false
+                        combine: false,
+                        positive_prompt_groups: [],
+                        negative_prompt: "",
+                        use_custom_prompts: false
                     }]
                 };
 
@@ -248,6 +255,8 @@ app.registerExtension({
                         config_name: "default_config",
                         auto_save: false,
                         include_none: oldState.include_none !== undefined ? oldState.include_none : false,
+                        global_positive_groups: [],
+                        global_negative: "",
                         config_arrays: arrays.map(arr => ({
                             name: arr.name,
                             samplers: oldState.samplers || "euler",
@@ -260,7 +269,10 @@ app.registerExtension({
                             lora_triggerwords_append_settings: {},
                             lora_bypass_states: {},
                             lora_strength_lock: {},
-                            combine: arr.combine || false
+                            combine: arr.combine || false,
+                            positive_prompt_groups: [],
+                            negative_prompt: "",
+                            use_custom_prompts: false
                         }))
                     };
                 };
@@ -281,6 +293,10 @@ app.registerExtension({
                             if (!this.state.config_name) this.state.config_name = "default_config";
                             if (this.state.auto_save === undefined) this.state.auto_save = false;
 
+                            // Migration: ensure global prompt fields exist
+                            if (!this.state.global_positive_groups) this.state.global_positive_groups = [];
+                            if (this.state.global_negative === undefined) this.state.global_negative = "";
+
                             // Migration logic requiring utilities
                             this.state.config_arrays.forEach(arr => {
                                 if (arr.model && !arr.models) {
@@ -293,12 +309,17 @@ app.registerExtension({
                                     const p = utilities.parseLoraString(l);
                                     return utilities.buildLoraString(p.name, p.model_str, p.clip_str);
                                 }) : ["None"];
-                                
+
                                 // Ensure keys exist
                                 if (!arr.lora_omit_triggers) arr.lora_omit_triggers = [];
                                 if (!arr.lora_triggerwords_append_settings) arr.lora_triggerwords_append_settings = {};
                                 if (!arr.lora_bypass_states) arr.lora_bypass_states = {};
                                 if (!arr.lora_strength_lock) arr.lora_strength_lock = {};
+
+                                // Migration: ensure prompt fields exist
+                                if (!arr.positive_prompt_groups) arr.positive_prompt_groups = [];
+                                if (arr.negative_prompt === undefined) arr.negative_prompt = "";
+                                if (arr.use_custom_prompts === undefined) arr.use_custom_prompts = false;
                             });
                         } else if (existing.lora_config) {
                             this.state = this.migrateOldFormat(existing);

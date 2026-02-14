@@ -175,6 +175,48 @@ export function buildLoraString(name, modelStr, clipStr) {
     return `${norm}:${modelStr.toFixed(2)}:${clipStr.toFixed(2)}`;
 }
 
+// --- PROMPT HELPER FUNCTIONS ---
+
+/**
+ * Count the number of Cartesian product combinations from nested prompt groups.
+ * Each group is an array of variations. The total is the product of all group sizes.
+ * Example: [["a", "b"], ["c"]] = 2 * 1 = 2 combinations
+ */
+export function countPromptCombinations(groups) {
+    if (!groups || !Array.isArray(groups) || groups.length === 0) return 1;
+    // Filter out empty groups
+    const validGroups = groups.filter(g => Array.isArray(g) && g.length > 0);
+    if (validGroups.length === 0) return 1;
+    return validGroups.reduce((total, group) => total * group.length, 1);
+}
+
+/**
+ * Generate preview of expanded prompt combinations from nested groups.
+ * Returns array of strings, capped at `limit` entries.
+ * Example: [["a", "b"], ["1", "2"]] -> ["a, 1", "a, 2", "b, 1", "b, 2"]
+ */
+export function expandPromptPreview(groups, limit = 20) {
+    if (!groups || !Array.isArray(groups) || groups.length === 0) return [];
+    const validGroups = groups.filter(g => Array.isArray(g) && g.length > 0);
+    if (validGroups.length === 0) return [];
+
+    // Iterative Cartesian product with early cutoff
+    let combinations = [[]];
+    for (const group of validGroups) {
+        const newCombinations = [];
+        for (const existing of combinations) {
+            for (const item of group) {
+                newCombinations.push([...existing, item]);
+                if (newCombinations.length > limit) {
+                    return newCombinations.slice(0, limit).map(combo => combo.join(", "));
+                }
+            }
+        }
+        combinations = newCombinations;
+    }
+    return combinations.map(combo => combo.join(", "));
+}
+
 // --- ITERATION COUNT CALCULATION ---
 
 export function getIterationCount(configArray) {
@@ -238,7 +280,13 @@ export function getIterationCount(configArray) {
     }
     if (l_count === 0) l_count = 1;
 
-    return m_count * l_count * s_count * sch_count * st_count * c_count;
+    // 4. Prompts (per-config custom prompts multiply the iteration count)
+    let p_count = 1;
+    if (configArray.use_custom_prompts && configArray.positive_prompt_groups && configArray.positive_prompt_groups.length > 0) {
+        p_count = countPromptCombinations(configArray.positive_prompt_groups);
+    }
+
+    return m_count * l_count * s_count * sch_count * st_count * c_count * p_count;
 }
 
 // --- CONFIG CONVERSION ---
@@ -247,10 +295,14 @@ export function convertStateToConfigs(state) {
     const configs = [];
     const split = (str) => str.split(",").map(s => s.trim()).filter(s => s);
 
+    // Global prompts from state (used when per-config prompts not set)
+    const globalPositiveGroups = state.global_positive_groups || [];
+    const globalNegative = state.global_negative || "";
+
     state.config_arrays.forEach(configArray => {
         // Process LoRAs - FIXED VERSION
         let loras = configArray.loras.filter(l => l && l !== "None");
-        
+
         // Convert loras array to proper format
         let loraValue;
         if (loras.length === 0) {
@@ -302,6 +354,20 @@ export function convertStateToConfigs(state) {
             config.lora_strength_lock = configArray.lora_strength_lock;
         }
 
+        // ==== PROMPT HANDLING ====
+        // Priority: per-config > global > omit (node inputs used as fallback)
+        if (configArray.use_custom_prompts && configArray.positive_prompt_groups && configArray.positive_prompt_groups.length > 0) {
+            config.positive = configArray.positive_prompt_groups;
+            if (configArray.negative_prompt) {
+                config.negative = configArray.negative_prompt;
+            }
+        } else if (globalPositiveGroups.length > 0) {
+            config.positive = globalPositiveGroups;
+            if (globalNegative) {
+                config.negative = globalNegative;
+            }
+        }
+
         configs.push(config);
     });
     return configs;
@@ -321,7 +387,10 @@ export function convertConfigsToConfigArrays(configs) {
             lora_triggerwords_append_settings: {},
             lora_bypass_states: {},
             lora_strength_lock: {},
-            combine: false
+            combine: false,
+            positive_prompt_groups: [],
+            negative_prompt: "",
+            use_custom_prompts: false
         }];
     }
 
@@ -383,6 +452,37 @@ export function convertConfigsToConfigArrays(configs) {
             strengthLock = { ...config.lora_strength_lock };
         }
 
+        // Parse prompt fields from loaded config
+        let positivePromptGroups = [];
+        let negativePrompt = "";
+        let useCustomPrompts = false;
+
+        if (config.positive) {
+            // Config has per-config prompts
+            useCustomPrompts = true;
+            if (Array.isArray(config.positive)) {
+                // Could be nested array [["a", "b"], ["c"]] or simple array ["a", "b"]
+                if (config.positive.length > 0 && Array.isArray(config.positive[0])) {
+                    // Nested array format - use as-is
+                    positivePromptGroups = config.positive;
+                } else {
+                    // Simple array - wrap as single group
+                    positivePromptGroups = [config.positive];
+                }
+            } else if (typeof config.positive === 'string' && config.positive.trim()) {
+                // Plain string - wrap as single variation in single group
+                positivePromptGroups = [[config.positive]];
+            }
+        }
+
+        if (config.negative) {
+            if (typeof config.negative === 'string') {
+                negativePrompt = config.negative;
+            } else if (Array.isArray(config.negative)) {
+                negativePrompt = JSON.stringify(config.negative);
+            }
+        }
+
         configArrays.push({
             name: `Loaded Config ${idx + 1}`,
             samplers: toString(config.sampler || "euler"),
@@ -395,7 +495,10 @@ export function convertConfigsToConfigArrays(configs) {
             lora_triggerwords_append_settings: triggerPlacements,
             lora_bypass_states: bypassStates,
             lora_strength_lock: strengthLock,
-            combine: hasCombined
+            combine: hasCombined,
+            positive_prompt_groups: positivePromptGroups,
+            negative_prompt: negativePrompt,
+            use_custom_prompts: useCustomPrompts
         });
     });
 
@@ -411,6 +514,9 @@ export function convertConfigsToConfigArrays(configs) {
         lora_triggerwords_append_settings: {},
         lora_bypass_states: {},
         lora_strength_lock: {},
-        combine: false
+        combine: false,
+        positive_prompt_groups: [],
+        negative_prompt: "",
+        use_custom_prompts: false
     }];
 }

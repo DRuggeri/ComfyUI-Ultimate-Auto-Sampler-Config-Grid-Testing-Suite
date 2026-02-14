@@ -241,7 +241,155 @@ export function getStyles() {
                     width: 98%;    /* Use more screen space on mobile */
                 }
             }
-                
+
+            /* --- Prompt Builder Styles --- */
+            .cb-prompt-section {
+                background: #252525;
+                border-radius: 4px;
+                padding: 10px;
+                margin-top: 8px;
+                width: 100%;
+                box-sizing: border-box;
+            }
+            .cb-prompt-section.global {
+                border-left: 3px solid #00aa44;
+            }
+            .cb-prompt-section.per-config {
+                border-left: 3px solid #9966cc;
+            }
+            .cb-prompt-group {
+                background: #1a1a1a;
+                border: 1px solid #3a3a3a;
+                border-radius: 4px;
+                padding: 8px;
+                margin-bottom: 6px;
+                display: flex;
+                flex-direction: column;
+                gap: 6px;
+            }
+            .cb-prompt-group-header {
+                display: flex;
+                justify-content: space-between;
+                align-items: center;
+                font-size: 11px;
+                color: #888;
+            }
+            .cb-prompt-chips {
+                display: flex;
+                flex-wrap: wrap;
+                gap: 4px;
+                min-height: 28px;
+                align-items: center;
+            }
+            .cb-prompt-chip {
+                display: inline-flex;
+                align-items: center;
+                background: #0066cc33;
+                border: 1px solid #0066cc66;
+                color: #88ccff;
+                border-radius: 12px;
+                padding: 3px 8px;
+                font-size: 12px;
+                font-family: monospace;
+                gap: 4px;
+                max-width: 300px;
+                word-break: break-all;
+            }
+            .cb-prompt-chip .chip-close {
+                cursor: pointer;
+                color: #ff8888;
+                font-weight: bold;
+                font-size: 14px;
+                line-height: 1;
+                margin-left: 2px;
+            }
+            .cb-prompt-chip .chip-close:hover {
+                color: #ff4444;
+            }
+            .cb-prompt-preview {
+                background: #0a0a0a;
+                border: 1px solid #333;
+                border-radius: 4px;
+                padding: 8px;
+                margin-top: 8px;
+                max-height: 200px;
+                overflow-y: auto;
+                font-family: monospace;
+                font-size: 11px;
+                color: #00cc88;
+            }
+            .cb-prompt-preview-item {
+                padding: 2px 0;
+                border-bottom: 1px solid #1a1a1a;
+            }
+            .cb-prompt-preview-item:last-child {
+                border-bottom: none;
+            }
+            .cb-prompt-raw-editor {
+                width: 100%;
+                min-height: 80px;
+                background: #0a0a0a;
+                border: 1px solid #3a3a3a;
+                color: #0cc;
+                padding: 8px;
+                border-radius: 4px;
+                font-family: monospace;
+                font-size: 12px;
+                resize: vertical;
+                box-sizing: border-box;
+            }
+            .cb-prompt-raw-editor:focus {
+                outline: none;
+                border-color: #0066cc;
+            }
+            .cb-prompt-mode-toggle {
+                background: transparent;
+                border: 1px solid #555;
+                color: #aaa;
+                padding: 3px 8px;
+                border-radius: 3px;
+                cursor: pointer;
+                font-size: 10px;
+            }
+            .cb-prompt-mode-toggle:hover {
+                background: #333;
+                color: #fff;
+            }
+            .cb-prompt-mode-toggle.active {
+                background: #0066cc33;
+                border-color: #0066cc;
+                color: #88ccff;
+            }
+            .cb-prompt-add-group-btn {
+                width: 100%;
+                border: 1px dashed #555;
+                background: rgba(0,102,204,0.1);
+                color: #88ccff;
+                padding: 6px;
+                border-radius: 4px;
+                cursor: pointer;
+                font-size: 12px;
+                margin-top: 4px;
+            }
+            .cb-prompt-add-group-btn:hover {
+                background: rgba(0,102,204,0.2);
+                border-color: #0066cc;
+            }
+            .cb-prompt-add-variation {
+                background: transparent;
+                border: 1px dashed #444;
+                color: #888;
+                padding: 3px 8px;
+                border-radius: 12px;
+                cursor: pointer;
+                font-size: 11px;
+            }
+            .cb-prompt-add-variation:hover {
+                background: #333;
+                color: #ccc;
+                border-color: #666;
+            }
+
             </style>
     `;
 }

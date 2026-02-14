@@ -224,6 +224,8 @@ class UltimateConfigBuilder:
         config = {
             "session_name": "my_test_session",
             "include_none": False,
+            "global_positive_groups": [],
+            "global_negative": "",
             "config_arrays": [
                 {
                     "name": "Config 1",
@@ -235,7 +237,10 @@ class UltimateConfigBuilder:
                     "loras": ["None"],
                     "lora_omit_triggers": [],
                     "lora_triggerwords_append_settings": {},
-                    "combine": True
+                    "combine": True,
+                    "positive_prompt_groups": [],
+                    "negative_prompt": "",
+                    "use_custom_prompts": False
                 }
             ]
         }
@@ -474,7 +479,11 @@ class UltimateConfigBuilder:
         actual_session_name = state.get("session_name", session_name)
         actual_include_none = state.get("include_none", include_none)
         config_arrays = state.get("config_arrays", [])
-        
+
+        # Global prompts (used when per-config prompts are not defined)
+        global_positive_groups = state.get("global_positive_groups", [])
+        global_negative = state.get("global_negative", "")
+
         if not config_arrays:
             config_arrays = [{
                 "name": "Config 1",
@@ -486,7 +495,10 @@ class UltimateConfigBuilder:
                 "loras": ["None"],
                 "lora_omit_triggers": [],
                 "lora_triggerwords_append_settings": {},
-                "combine": True
+                "combine": True,
+                "positive_prompt_groups": [],
+                "negative_prompt": "",
+                "use_custom_prompts": False
             }]
         
         configs_output = []
@@ -522,12 +534,30 @@ class UltimateConfigBuilder:
             # Add omit triggers if present
             if omit_triggers:
                 config["lora_omit_triggers"] = omit_triggers
-                
+
             # Add trigger append settings if present
             if lora_triggerwords_append_settings and any(v != "none" for v in lora_triggerwords_append_settings.values()):
                 config["lora_triggerwords_append_settings"] = lora_triggerwords_append_settings
-                
-                    
+
+            # ==== PROMPT HANDLING ====
+            # Priority: per-config > global > node inputs (omitted = use node inputs)
+            use_custom = config_array.get("use_custom_prompts", False)
+            per_config_positive_groups = config_array.get("positive_prompt_groups", [])
+            per_config_negative = config_array.get("negative_prompt", "")
+
+            if use_custom and per_config_positive_groups:
+                # Per-config prompts override everything
+                # Store as nested array format for parse_prompt_input_nested() compatibility
+                config["positive"] = per_config_positive_groups
+                if per_config_negative:
+                    config["negative"] = per_config_negative
+            elif global_positive_groups:
+                # Global prompts override node inputs
+                config["positive"] = global_positive_groups
+                if global_negative:
+                    config["negative"] = global_negative
+            # If neither, omit "positive"/"negative" keys - node inputs will be used as fallback
+
             configs_output.append(config)
         
         json_output = json.dumps(configs_output, indent=2, ensure_ascii=False)
