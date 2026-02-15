@@ -528,7 +528,9 @@ async def scan_directory_route(request):
             None, scan_directory_for_images, directory_path
         )
 
-        print(f"[DirScanner] Found {stats['total']} images ({stats['with_metadata']} with metadata, {stats['skipped']} skipped)")
+        from_manifest = stats.get("from_manifest", 0)
+        manifest_info = f", {from_manifest} from existing manifest" if from_manifest > 0 else ""
+        print(f"[DirScanner] Found {stats['total']} images ({stats['with_metadata']} with metadata, {stats['skipped']} skipped{manifest_info})")
 
         # Build manifest
         manifest = {
@@ -576,14 +578,22 @@ async def scan_directory_route(request):
         # Whitelist the directory for the view_external route
         real_dir = os.path.realpath(directory_path)
         _whitelisted_directories.add(real_dir)
-        print(f"[DirScanner] Whitelisted directory: {real_dir}")
+        # Also whitelist images/ subdirectory if it exists (generated sessions store images there)
+        images_subdir = os.path.realpath(os.path.join(directory_path, "images"))
+        if os.path.isdir(images_subdir):
+            _whitelisted_directories.add(images_subdir)
+            print(f"[DirScanner] Whitelisted directory: {real_dir} (+ images/)")
+        else:
+            print(f"[DirScanner] Whitelisted directory: {real_dir}")
 
+        from_manifest = stats.get("from_manifest", 0)
         return web.json_response({
             "session_name": session_name,
             "item_count": len(items),
             "with_metadata": stats["with_metadata"],
             "without_metadata": len(items) - stats["with_metadata"],
             "skipped": stats["skipped"],
+            "from_manifest": from_manifest,
         })
 
     except ValueError as e:
