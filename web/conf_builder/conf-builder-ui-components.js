@@ -3,7 +3,7 @@
  * Reusable UI elements and component builders
  */
 
-import { normalizePath } from '/ultimate_config_sampler/js/conf_builder/conf-builder-utilities.js';
+import { normalizePath } from './conf-builder-utilities.js';
 
 // --- SEARCHABLE SELECT COMPONENT ---
 
@@ -200,7 +200,8 @@ export function getStyles() {
             .cb-button.primary:hover { background: #0077ee; }
             .cb-button.danger { background: #cc3333; }
             .cb-button.danger:hover { background: #dd4444; }
-            .cb-array { background: #333; border-radius: 4px; padding: 12px; margin: 8px 0; border: 1px solid #3a3a3a; width: 100%; }
+            .cb-array { background: #333; border-radius: 4px; padding: 12px; margin: 8px 0; border: 1px solid #3a3a3a; width: 100%; position: relative; }
+            .cb-config-label-overlay { position: absolute; bottom: 8px; left: 50%; transform: translateX(-50%); background: rgba(0, 102, 204, 0.85); color: #fff; padding: 4px 16px; border-radius: 12px; font-size: 13px; font-weight: bold; font-family: monospace; pointer-events: none; z-index: 10; white-space: nowrap; max-width: 80%; overflow: hidden; text-overflow: ellipsis; text-shadow: 0 1px 2px rgba(0,0,0,0.5); }
             .cb-arrays-container { display: flex; flex-direction: column; gap: 12px; }
             .cb-list-grid { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; padding-top: 10px; border-top: 1px dashed #444; }
             .cb-item-card { background: #2a2a2a; border-radius: 4px; padding: 10px; border-left: 3px solid #0066cc; flex: 1 1 300px; min-width: 250px; display: flex; flex-direction: column; gap: 6px; }

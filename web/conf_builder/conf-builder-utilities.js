@@ -8,6 +8,14 @@ let availableLoras = null;
 let loraFolders = null;
 let availableModels = null;
 let modelFolders = null;
+let availableDiffusionModels = null;
+let diffusionModelFolders = null;
+let availableGGUFModels = null;
+let ggufModelFolders = null;
+let availableTextEncoders = null;
+let textEncoderFolders = null;
+let clipTypes = [];
+let dualClipTypes = [];
 let availableSessions = ["None"];
 let availableConfigs = ["None"];
 
@@ -22,6 +30,14 @@ export function clearAllCaches() {
     loraFolders = null;
     availableModels = null;
     modelFolders = null;
+    availableDiffusionModels = null;
+    diffusionModelFolders = null;
+    availableGGUFModels = null;
+    ggufModelFolders = null;
+    availableTextEncoders = null;
+    textEncoderFolders = null;
+    clipTypes = [];
+    dualClipTypes = [];
 }
 
 export async function refreshAllConfigBuilders() {
@@ -129,6 +145,55 @@ export async function getModelFolders() {
     return modelFolders;
 }
 
+// --- UNIFIED MODEL LISTS (for GGUF, Diffusion Models, Text Encoders) ---
+
+export async function getModelLists() {
+    // Fetch all model lists from the unified endpoint
+    try {
+        const resp = await fetch("/configbuilder/model_lists", {
+            headers: { "X-Config-Builder-Internal": "true" }
+        });
+        const data = await resp.json();
+
+        if (data.checkpoints) {
+            availableModels = data.checkpoints.map(normalizePath);
+            modelFolders = extractFolders(availableModels);
+        }
+        availableDiffusionModels = (data.diffusion_models || []).map(normalizePath);
+        diffusionModelFolders = extractFolders(availableDiffusionModels);
+        availableGGUFModels = (data.unet_gguf || []).map(normalizePath);
+        ggufModelFolders = extractFolders(availableGGUFModels);
+
+        // Combine text_encoders and clip_gguf, deduplicate
+        const teSet = new Set([
+            ...(data.text_encoders || []).map(normalizePath),
+            ...(data.clip_gguf || []).map(normalizePath)
+        ]);
+        availableTextEncoders = Array.from(teSet).sort();
+        textEncoderFolders = extractFolders(availableTextEncoders);
+
+        clipTypes = data.clip_types || [];
+        dualClipTypes = data.dual_clip_types || [];
+
+        console.log(`[ConfigBuilder] Model lists: ${availableModels?.length || 0} checkpoints, ` +
+            `${availableDiffusionModels.length} diffusion, ${availableGGUFModels.length} GGUF, ` +
+            `${availableTextEncoders.length} text encoders`);
+        return data;
+    } catch (e) {
+        console.error("[ConfigBuilder] Error fetching model lists:", e);
+        return {};
+    }
+}
+
+export function getAvailableDiffusionModels() { return availableDiffusionModels || []; }
+export function getDiffusionModelFolders() { return diffusionModelFolders || ["/"]; }
+export function getAvailableGGUFModels() { return availableGGUFModels || []; }
+export function getGGUFModelFolders() { return ggufModelFolders || ["/"]; }
+export function getAvailableTextEncoders() { return availableTextEncoders || []; }
+export function getTextEncoderFolders() { return textEncoderFolders || ["/"]; }
+export function getClipTypes() { return clipTypes; }
+export function getDualClipTypes() { return dualClipTypes; }
+
 export async function getAvailableSessions() {
     try {
         const resp = await fetch("/object_info", { headers: { "X-Config-Builder-Internal": "true" } });
@@ -227,24 +292,31 @@ export function getIterationCount(configArray) {
     const st_count = countSplit(configArray.steps);
     const c_count = countSplit(configArray.cfg);
 
-    // 2. Models
+    // 2. Models (handles both string format and object format {path, type})
     let m_count = 0;
     if (!configArray.models || configArray.models.length === 0) {
         m_count = 1; // Defaults to None
     } else {
         configArray.models.forEach(m => {
-            if (m === "None") {
+            const modelPath = typeof m === 'string' ? m : (m?.path || "None");
+            const modelType = typeof m === 'string' ? 'checkpoint' : (m?.type || 'checkpoint');
+
+            // Pick the correct file list for folder expansion
+            let modelList;
+            if (modelType === 'gguf') modelList = availableGGUFModels;
+            else if (modelType === 'diffusion_model') modelList = availableDiffusionModels;
+            else modelList = availableModels;
+
+            if (modelPath === "None") {
                 m_count += 1;
-            } else if (m.endsWith("/")) {
-                // Folder
-                const norm = normalizePath(m);
+            } else if (modelPath.endsWith("/")) {
+                const norm = normalizePath(modelPath);
                 if (norm === "/" || norm === "") {
-                    m_count += availableModels ? availableModels.length : 1;
+                    m_count += modelList ? modelList.length : 1;
                 } else {
-                    m_count += availableModels ? availableModels.filter(am => normalizePath(am).startsWith(norm)).length : 1;
+                    m_count += modelList ? modelList.filter(am => normalizePath(am).startsWith(norm)).length : 1;
                 }
             } else {
-                // Single
                 m_count += 1;
             }
         });
@@ -314,8 +386,19 @@ export function convertStateToConfigs(state) {
             loraValue = loras.join(" + ");
         }
 
-        // Process Models
-        let finalModels = configArray.models?.filter(m => m && m !== "None") || [];
+        // Process Models - handle object format {path, type} and string format
+        let modelType = "checkpoint";
+        let finalModels = [];
+        (configArray.models || []).forEach(m => {
+            if (typeof m === 'object' && m !== null) {
+                if (m.path && m.path !== "None") {
+                    finalModels.push(m.path);
+                    modelType = m.type || "checkpoint";
+                }
+            } else if (typeof m === 'string' && m && m !== "None") {
+                finalModels.push(m);
+            }
+        });
 
         const config = {
             sampler: split(configArray.samplers),
@@ -325,6 +408,17 @@ export function convertStateToConfigs(state) {
             lora: loraValue,
             model: finalModels.length > 1 ? finalModels : finalModels[0] || "None"
         };
+
+        // Add model_type and related fields for non-checkpoint models
+        if (modelType !== "checkpoint") {
+            config.model_type = modelType;
+            const textEncoders = (configArray.text_encoders || []).filter(te => te && te !== "None");
+            if (textEncoders.length > 0) config.text_encoders = textEncoders;
+            if (configArray.clip_type) config.clip_type = configArray.clip_type;
+            if (modelType === "gguf" && configArray.gguf_options) {
+                config.gguf_options = configArray.gguf_options;
+            }
+        }
 
         // Add lora_omit_triggers if present
         if (configArray.lora_omit_triggers && configArray.lora_omit_triggers.length > 0) {
@@ -388,6 +482,9 @@ export function convertConfigsToConfigArrays(configs) {
             cfg: "7.0",
             seed_behavior: "fixed",
             models: ["None"],
+            text_encoders: [],
+            clip_type: "stable_diffusion",
+            gguf_options: {},
             loras: ["None"],
             lora_omit_triggers: [],
             lora_triggerwords_append_settings: {},
@@ -432,8 +529,16 @@ export function convertConfigsToConfigArrays(configs) {
         let models = config.model;
         if (!Array.isArray(models)) models = models ? [models] : ["None"];
 
-        // Normalize loaded models
-        models = models.map(normalizePath);
+        // Determine model type from config
+        const loadedModelType = config.model_type || "checkpoint";
+
+        // Convert models to object format if non-checkpoint, keep string for checkpoint
+        if (loadedModelType !== "checkpoint") {
+            models = models.map(m => ({ path: normalizePath(m), type: loadedModelType }));
+        } else {
+            models = models.map(normalizePath);
+        }
+
         // Normalize loaded loras
         loras = loras.map(normalizePath);
 
@@ -497,6 +602,9 @@ export function convertConfigsToConfigArrays(configs) {
             cfg: toString(config.cfg || "7.0"),
             seed_behavior: config.seed_behavior || "fixed",
             models: models,
+            text_encoders: config.text_encoders || [],
+            clip_type: config.clip_type || "stable_diffusion",
+            gguf_options: config.gguf_options || {},
             loras: loras,
             lora_omit_triggers: omitTriggers,
             lora_triggerwords_append_settings: triggerPlacements,
@@ -517,6 +625,9 @@ export function convertConfigsToConfigArrays(configs) {
         cfg: "7.0",
         seed_behavior: "fixed",
         models: ["None"],
+        text_encoders: [],
+        clip_type: "stable_diffusion",
+        gguf_options: {},
         loras: ["None"],
         lora_omit_triggers: [],
         lora_triggerwords_append_settings: {},

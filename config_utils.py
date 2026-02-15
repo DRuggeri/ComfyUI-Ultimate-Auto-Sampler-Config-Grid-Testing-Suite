@@ -332,9 +332,22 @@ def expand_configs(raw_configs, pos_prompts, neg_prompts, denoise_values, seed, 
         cfgs = to_list(entry.get("cfg", 7.0))
         clip_skips = to_list(entry.get("clip_skip", 0))
 
-        # Expand model folders
+        # Extract model type and related fields for non-checkpoint models
+        model_type = entry.get("model_type", "checkpoint")
+        clip_type_str = entry.get("clip_type", "stable_diffusion")
+        text_encoders = entry.get("text_encoders", [])
+        gguf_options = entry.get("gguf_options", {})
+
+        # Expand model folders (using correct folder type based on model_type)
         raw_models = to_list(entry.get("model", "Default"))
         expanded_models = []
+        if model_type == "gguf":
+            model_folder = "unet_gguf"
+        elif model_type == "diffusion_model":
+            model_folder = "diffusion_models"
+        else:
+            model_folder = "checkpoints"
+
         for m in raw_models:
             if m == "Default":
                 # Use the checkpoint name from node input instead of "Default"
@@ -343,7 +356,7 @@ def expand_configs(raw_configs, pos_prompts, neg_prompts, denoise_values, seed, 
                 else:
                     expanded_models.append("Default")
             else:
-                expanded_models.extend(get_files_from_folder(m, "checkpoints"))
+                expanded_models.extend(get_files_from_folder(m, model_folder))
 
         # Expand LoRA stacks (strengths are now in the lora string itself)
         expanded_loras = expand_lora_stack(entry.get("lora", "None"))
@@ -375,6 +388,10 @@ def expand_configs(raw_configs, pos_prompts, neg_prompts, denoise_values, seed, 
                 "model": combo[8],
                 "seed": seed,
                 "seed_behavior": entry.get("seed_behavior", "fixed"),
+                "model_type": model_type,
+                "clip_type": clip_type_str,
+                "text_encoders": list(text_encoders),
+                "gguf_options": dict(gguf_options) if gguf_options else {},
                 "lora_omit_triggers": list(lora_omit_triggers),
                 "lora_triggerwords_append_settings": dict(lora_triggerwords_append_settings)
             })

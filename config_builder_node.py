@@ -510,12 +510,21 @@ class UltimateConfigBuilder:
             scheduler_list = self.parse_comma_list(config_array.get("schedulers", "normal"))
             steps_list = self.parse_int_list(config_array.get("steps", "20"))
             cfg_list = self.parse_number_list(config_array.get("cfg", "7.0"))
-            models = config_array.get("models", ["None"])
+            models_raw = config_array.get("models", ["None"])
             omit_triggers = config_array.get("lora_omit_triggers", [])
             lora_triggerwords_append_settings = config_array.get("lora_triggerwords_append_settings", {})
-            
-            # Process models
-            model_strings = [str(m) for m in models if m and m != "None"]
+
+            # Process models - handle both object format {path, type} and legacy string format
+            model_strings = []
+            model_type = "checkpoint"  # default
+            for m in models_raw:
+                if isinstance(m, dict):
+                    path = m.get("path", "")
+                    if path and path != "None":
+                        model_strings.append(str(path))
+                        model_type = m.get("type", "checkpoint")
+                elif isinstance(m, str) and m and m != "None":
+                    model_strings.append(str(m))
             
             # Process loras for this config
             lora_strings = self.process_lora_array(config_array, actual_include_none)
@@ -535,6 +544,20 @@ class UltimateConfigBuilder:
             seed_behavior = config_array.get("seed_behavior", "fixed")
             if seed_behavior == "randomize":
                 config["seed_behavior"] = "randomize"
+
+            # Add model_type and related fields for non-checkpoint models
+            if model_type != "checkpoint":
+                config["model_type"] = model_type
+                text_encoders = config_array.get("text_encoders", [])
+                if text_encoders:
+                    config["text_encoders"] = [te for te in text_encoders if te and te != "None"]
+                clip_type = config_array.get("clip_type", "")
+                if clip_type:
+                    config["clip_type"] = clip_type
+                if model_type == "gguf":
+                    gguf_options = config_array.get("gguf_options", {})
+                    if gguf_options:
+                        config["gguf_options"] = gguf_options
 
             # Add omit triggers if present
             if omit_triggers:
@@ -704,6 +727,52 @@ async def lookup_lora_metadata_endpoint(request):
         return web.json_response({
             "error": str(e)
         }, status=500)
+
+
+# API endpoint to get all model lists for unified model selector
+@server.PromptServer.instance.routes.get("/configbuilder/model_lists")
+async def get_model_lists_endpoint(request):
+    """Return all model lists for the config builder's unified model selector."""
+    try:
+        checkpoints = folder_paths.get_filename_list("checkpoints")
+        diffusion_models = folder_paths.get_filename_list("diffusion_models")
+        text_encoders = folder_paths.get_filename_list("text_encoders")
+
+        # GGUF lists - may not exist if ComfyUI-GGUF is not installed
+        try:
+            unet_gguf = folder_paths.get_filename_list("unet_gguf")
+        except (KeyError, Exception):
+            unet_gguf = []
+        try:
+            clip_gguf = folder_paths.get_filename_list("clip_gguf")
+        except (KeyError, Exception):
+            clip_gguf = []
+
+        # CLIPType options (matching ComfyUI's CLIPLoader and DualCLIPLoader)
+        clip_types = [
+            "stable_diffusion", "stable_cascade", "sd3", "stable_audio",
+            "mochi", "ltxv", "pixart", "cosmos", "lumina2", "wan",
+            "hidream", "chroma", "ace", "flux"
+        ]
+        dual_clip_types = [
+            "sdxl", "sd3", "flux", "hunyuan_video", "hidream",
+            "hunyuan_image", "hunyuan_video_15"
+        ]
+
+        return web.json_response({
+            "checkpoints": checkpoints,
+            "diffusion_models": diffusion_models,
+            "unet_gguf": unet_gguf,
+            "text_encoders": text_encoders,
+            "clip_gguf": clip_gguf,
+            "clip_types": clip_types,
+            "dual_clip_types": dual_clip_types
+        })
+    except Exception as e:
+        print(f"[ConfigBuilder] Error in model_lists endpoint: {e}")
+        import traceback
+        traceback.print_exc()
+        return web.json_response({"error": str(e)}, status=500)
 
 
 # API endpoint to refresh model/lora lists (triggered by "Update Node Definitions")
