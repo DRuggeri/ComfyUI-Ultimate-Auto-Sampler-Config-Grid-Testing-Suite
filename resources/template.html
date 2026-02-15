@@ -167,6 +167,41 @@
                     <div id="filter-seed" class="filter-buttons-container"></div>
                 </div>
             </div>
+
+            <!-- Keyboard Shortcuts Reference -->
+            <div class="popup-section">
+                <div class="popup-section-title">KEYBOARD SHORTCUTS</div>
+                <table style="width: 100%; border-collapse: collapse; margin-top: 8px; font-size: 11px;">
+                    <tr style="border-bottom: 1px solid #333;">
+                        <td style="padding: 4px 8px; color: #0af; font-family: monospace;">Space</td>
+                        <td style="padding: 4px 8px; color: #ccc;">Scroll down one row</td>
+                    </tr>
+                    <tr style="border-bottom: 1px solid #333;">
+                        <td style="padding: 4px 8px; color: #0af; font-family: monospace;">Shift+Space</td>
+                        <td style="padding: 4px 8px; color: #ccc;">Scroll up one row</td>
+                    </tr>
+                    <tr style="border-bottom: 1px solid #333;">
+                        <td style="padding: 4px 8px; color: #0af; font-family: monospace;">Arrow Keys</td>
+                        <td style="padding: 4px 8px; color: #ccc;">Pan in any direction</td>
+                    </tr>
+                    <tr style="border-bottom: 1px solid #333;">
+                        <td style="padding: 4px 8px; color: #0af; font-family: monospace;">+ / -</td>
+                        <td style="padding: 4px 8px; color: #ccc;">Zoom in / out</td>
+                    </tr>
+                    <tr style="border-bottom: 1px solid #333;">
+                        <td style="padding: 4px 8px; color: #0af; font-family: monospace;">0</td>
+                        <td style="padding: 4px 8px; color: #ccc;">Reset zoom to 1:1</td>
+                    </tr>
+                    <tr style="border-bottom: 1px solid #333;">
+                        <td style="padding: 4px 8px; color: #0af; font-family: monospace;">F</td>
+                        <td style="padding: 4px 8px; color: #ccc;">Auto-fit first row to viewport</td>
+                    </tr>
+                    <tr>
+                        <td style="padding: 4px 8px; color: #0af; font-family: monospace;">Shift+Click</td>
+                        <td style="padding: 4px 8px; color: #ccc;">Isolate a single filter</td>
+                    </tr>
+                </table>
+            </div>
         </div>
     </div>
 
@@ -221,6 +256,29 @@
                 </div>
 
                 <div id="export-status" style="margin-top: 8px; font-size: 10px; color: #666; min-height: 16px;"></div>
+            </div>
+
+            <!-- SCAN EXTERNAL DIRECTORY Section -->
+            <div style="border-top: 1px solid #333; margin-top: 12px; padding-top: 12px;">
+                <div style="font-size: 10px; color: #888; margin-bottom: 6px; font-weight: bold; letter-spacing: 0.5px;">
+                    SCAN EXTERNAL DIRECTORY
+                </div>
+                <div style="font-size: 9px; color: #666; margin-bottom: 8px;">
+                    Load any folder of images into the dashboard. Reads PNG metadata for filtering/sorting.
+                </div>
+                <div style="display: flex; gap: 6px; align-items: center;">
+                    <input type="text" id="scan-directory-input"
+                        placeholder="Paste absolute directory path..."
+                        style="flex: 1; background: #000; border: 1px solid #333; color: #fff;
+                               padding: 8px; font-size: 11px; font-family: monospace; border-radius: 3px;"
+                        onkeydown="if(event.key==='Enter')scanDirectory()">
+                    <button class="session-action-btn" id="scan-directory-btn"
+                        style="background: #6366f1; white-space: nowrap; padding: 8px 16px; font-size: 11px; font-weight: bold;"
+                        onclick="scanDirectory()">
+                        SCAN
+                    </button>
+                </div>
+                <div id="scan-status" style="margin-top: 6px; font-size: 10px; color: #666; min-height: 16px;"></div>
             </div>
         </div>
     </div>

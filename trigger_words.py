@@ -3,34 +3,43 @@ LoRA Trigger Word Management
 Handles fetching, filtering, and processing of LoRA trigger words from Civitai
 """
 
+import re
+from functools import lru_cache
 from .lora_utils import load_and_save_tags
 from .config_utils import parse_lora_definition
 
 
-def get_filtered_lora_triggers(lora_string, omit_list, lookup_triggers=True):
+def _should_omit_trigger(trigger, omit_normalized):
     """
-    Get LoRA trigger words with filtering applied.
-    
+    Check if a trigger word should be omitted using token-based word boundary matching.
+    Uses regex word boundaries so "blue" omits "blue" but not "blueberry".
+    Falls back to exact match for multi-word omit terms.
+
     Args:
-        lora_string: LoRA definition string (e.g., "lora1.safetensors:0.8:0.6 + lora2.safetensors:1.0:1.0")
-        omit_list: List of trigger words to omit
-        lookup_triggers: Whether to lookup triggers from Civitai
-        
+        trigger: The cleaned trigger string (lowercase)
+        omit_normalized: List of normalized omit terms (lowercase, stripped)
+
     Returns:
-        List of filtered trigger words
+        True if the trigger should be omitted
     """
-    if not lookup_triggers or lora_string == "None":
-        return []
-    
+    for omit_term in omit_normalized:
+        # Use word boundary regex: ensures "blue" matches "blue" but not "blueberry"
+        if re.search(r'\b' + re.escape(omit_term) + r'\b', trigger, re.IGNORECASE):
+            return True
+    return False
+
+
+@lru_cache(maxsize=128)
+def _get_filtered_lora_triggers_cached(lora_string, omit_tuple):
+    """
+    Cached internal implementation. Takes hashable args (tuple instead of list).
+    """
     active_loras = parse_lora_definition(lora_string)
     trigger_list = []
-    
+
     # Normalize omit list: strip whitespace and trailing commas, lowercase
-    omit_normalized = []
-    for t in omit_list:
-        normalized = str(t).lower().strip().rstrip(',').strip()
-        omit_normalized.append(normalized)
-    
+    omit_normalized = [str(t).lower().strip().rstrip(',').strip() for t in omit_tuple]
+
     for lora_def in active_loras:
         lname, lstr_m, lstr_c = lora_def
         try:
@@ -39,14 +48,33 @@ def get_filtered_lora_triggers(lora_string, omit_list, lookup_triggers=True):
                 for tags in civitai_tags_list:
                     # Clean the trigger: strip whitespace and trailing commas
                     cleaned_tags = tags.strip().rstrip(',').strip()
-                    
-                    # Check if this trigger should be omitted (case-insensitive)
-                    if cleaned_tags.lower() not in omit_normalized:
+
+                    # Check if this trigger should be omitted (token-based word boundary matching)
+                    if not _should_omit_trigger(cleaned_tags.lower(), omit_normalized):
                         trigger_list.append(cleaned_tags)
         except Exception as e:
             pass
-    
+
     return trigger_list
+
+
+def get_filtered_lora_triggers(lora_string, omit_list, lookup_triggers=True):
+    """
+    Get LoRA trigger words with filtering applied.
+
+    Args:
+        lora_string: LoRA definition string (e.g., "lora1.safetensors:0.8:0.6 + lora2.safetensors:1.0:1.0")
+        omit_list: List of trigger words to omit
+        lookup_triggers: Whether to lookup triggers from Civitai
+
+    Returns:
+        List of filtered trigger words
+    """
+    if not lookup_triggers or lora_string == "None":
+        return []
+
+    # Convert list to tuple for hashable cache key
+    return list(_get_filtered_lora_triggers_cached(lora_string, tuple(omit_list)))
 
 
 def get_trigger_placement_for_lora(lora_name, config, lora_triggerwords_mode):
@@ -167,7 +195,7 @@ def collect_unique_prompts_with_triggers(expanded_configs, lora_triggerwords_mod
                         
                         for tag in lora_triggers:
                             cleaned_tag = tag.strip().rstrip(',').strip()
-                            if cleaned_tag.lower() not in omit_normalized:
+                            if not _should_omit_trigger(cleaned_tag.lower(), omit_normalized):
                                 if placement == "start":
                                     start_triggers.append(cleaned_tag)
                                 elif placement == "end":
@@ -207,22 +235,39 @@ def collect_unique_prompts_with_triggers(expanded_configs, lora_triggerwords_mod
     return unique_positives, unique_negatives
 
 
+_build_prompt_cache = {}
+
+
 def build_prompt_with_triggers(config, lora_triggerwords_mode):
     """
     Build final prompt with LoRA triggers applied.
-    
+    Results are cached based on relevant config fields to avoid redundant work.
+
     Args:
         config: Configuration dictionary
         lora_triggerwords_mode: Mode for trigger word placement
-        
+
     Returns:
         tuple: (final_prompt, trigger_string)
     """
     if config["lora"] == "None" or lora_triggerwords_mode == "None":
         return config["positive"], ""
-    
+
     omit_list = config.get("lora_omit_triggers", [])
-    
+    append_settings = config.get("lora_triggerwords_append_settings", {})
+
+    # Build a hashable cache key from relevant config fields
+    cache_key = (
+        config["lora"],
+        config["positive"],
+        tuple(omit_list),
+        tuple(sorted(append_settings.items())) if append_settings else (),
+        lora_triggerwords_mode
+    )
+
+    if cache_key in _build_prompt_cache:
+        return _build_prompt_cache[cache_key]
+
     # Parse the lora string to get individual loras
     active_loras = parse_lora_definition(config["lora"])
     
@@ -242,7 +287,7 @@ def build_prompt_with_triggers(config, lora_triggerwords_mode):
             
             for tag in lora_triggers:
                 cleaned_tag = tag.strip().rstrip(',').strip()
-                if cleaned_tag.lower() not in omit_normalized:
+                if not _should_omit_trigger(cleaned_tag.lower(), omit_normalized):
                     if placement == "start":
                         start_triggers.append(cleaned_tag)
                     elif placement == "end":
@@ -265,5 +310,12 @@ def build_prompt_with_triggers(config, lora_triggerwords_mode):
         parts.append(", ".join(end_triggers))
     
     final_prompt = ", ".join(parts)
-    
-    return final_prompt, trigger_string
+
+    result = (final_prompt, trigger_string)
+
+    # Store in cache (limit size to prevent memory issues)
+    if len(_build_prompt_cache) > 256:
+        _build_prompt_cache.clear()
+    _build_prompt_cache[cache_key] = result
+
+    return result

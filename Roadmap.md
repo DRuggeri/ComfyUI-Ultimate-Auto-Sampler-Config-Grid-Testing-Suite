@@ -46,20 +46,7 @@ Check Roadmap.md for some tasks and do them. don't do any marked as (low priorit
 
 ## Bug Fix: Batch Encoding Runs Before Job Skip/Continue/Resume check and will encode everything again even if it's already been completed. Also Continue/Resume Should NOT run by default if optional inputs are connected because changes to the optional inputs are not currently being tracked. We need to track connected node changes from each of the optional inputs, we could also use this step to save the workflow to the benchmark/session folder and compare the last run workflow to the current to track node changes and determine changes and also integrate currenly missing from optional inputs such as model, loras, prompts, etc.
 
-## Feature: Plug in any directory into the dashboard, view all the images in it, read from pnginfo meta-data, generate a manifest and be able to favorite/filter/sort images in directories that weren't generated with the node.
-
-## Feature: Test multiple vaes. VAE Selection could be added to the Builder UI & configs_json and integrated into the generation_orchestrator, image_generator, model_loader, saved manifest.json, filters, dashboard grid display card info, etc...
-
-## calculate height and width of card and row based on input dimension (sort of implemented but not working right with multiple size images in one run, needs fixing)
-
-## Replace revise button in dashboard with edit emoji 
-
-## Setup Diffusion_checkpoints and gguf loaders in config builder ui node, allow selection of them in model select, add text encoder selection options, pass to json_config and handle them in the sampler node, model loader and gen_orchestrator
-
-
-## Calculate diff - pack into manifest, read in card view at top of card stats, add to sort favorites by lora with lora diff name. easily view what makes that displayed card/item different
-
-## Implement Configurable Settings For Lookahead Async Model Cacher (low priority)
+## ~~Fix: Manifest doesn't need lora omit triggers list in every item~~ (DONE - already stripped in create_image_metadata via .pop())
 
 ## Add attention options, xformers, sdpa, sage, flash, etc, option for test all, test all should clear ram & vram between each test.
 

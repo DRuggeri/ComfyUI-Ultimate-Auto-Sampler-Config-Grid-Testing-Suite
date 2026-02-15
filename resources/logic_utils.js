@@ -91,6 +91,16 @@ async function loadSession() {
         activeData = fullManifest.items || [];
         meta = fullManifest.meta || {};
 
+        // Auto-whitelist source directory for scan-type sessions
+        // (images won't load after server restart without this)
+        if (meta.scan_type === 'directory' && meta.source_directory) {
+            fetch('/config_tester/whitelist_directory', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ directory_path: meta.source_directory })
+            }).catch(e => console.warn('[Load] Could not whitelist directory:', e));
+        }
+
         console.log(`[Load] 📦 activeData now has ${activeData.length} items`);
 
         // 5. Reset indices
@@ -288,4 +298,92 @@ async function triggerGen(btn) {
         }
     } catch (e) { alert("Error: " + e); }
 }
+
+// Scan an external directory and load it as a session
+async function scanDirectory() {
+    const pathInput = document.getElementById('scan-directory-input');
+    const statusEl = document.getElementById('scan-status');
+    const btn = document.getElementById('scan-directory-btn');
+
+    if (!pathInput || !pathInput.value.trim()) {
+        if (statusEl) {
+            statusEl.innerText = 'Please enter a directory path';
+            statusEl.style.color = '#ff3860';
+        }
+        return;
+    }
+
+    const directoryPath = pathInput.value.trim();
+
+    // Use session input value if set, otherwise auto-generate from dir name
+    const sessInput = document.getElementById('session-input');
+    let sessionName = '';
+    // Auto-generate from directory name
+    const dirParts = directoryPath.replace(/\\/g, '/').split('/').filter(Boolean);
+    sessionName = 'scan-' + (dirParts[dirParts.length - 1] || 'unnamed').replace(/[^\w-]/g, '');
+
+    // UI feedback - scanning
+    if (statusEl) {
+        statusEl.innerText = 'Scanning directory...';
+        statusEl.style.color = '#ffaa00';
+    }
+    if (btn) {
+        btn.disabled = true;
+        btn.style.opacity = '0.6';
+        btn.textContent = 'SCANNING...';
+    }
+
+    try {
+        const response = await fetch('/config_tester/scan_directory', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                directory_path: directoryPath,
+                session_name: sessionName
+            })
+        });
+
+        const result = await response.json();
+
+        if (response.ok) {
+            const metaInfo = result.with_metadata > 0
+                ? `${result.with_metadata} with metadata`
+                : 'no metadata found';
+
+            if (statusEl) {
+                statusEl.innerText = `Found ${result.item_count} images (${metaInfo}). Loading...`;
+                statusEl.style.color = '#4caf50';
+            }
+
+            // Update session input with the scan session name
+            if (sessInput) sessInput.value = result.session_name;
+
+            // Load the session into the dashboard using existing infrastructure
+            await loadSession();
+
+            if (statusEl) {
+                statusEl.innerText = `Loaded ${result.item_count} images (${metaInfo})`;
+                statusEl.style.color = '#4caf50';
+            }
+        } else {
+            if (statusEl) {
+                statusEl.innerText = 'Error: ' + (result.error || response.statusText);
+                statusEl.style.color = '#ff3860';
+            }
+        }
+    } catch (error) {
+        console.error('[Scan] Error:', error);
+        if (statusEl) {
+            statusEl.innerText = 'Network error: ' + error.message;
+            statusEl.style.color = '#ff3860';
+        }
+    } finally {
+        if (btn) {
+            btn.disabled = false;
+            btn.style.opacity = '1';
+            btn.textContent = 'SCAN';
+        }
+    }
+}
+
 setupKeyReloadFullscreen()

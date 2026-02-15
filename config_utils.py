@@ -374,6 +374,7 @@ def expand_configs(raw_configs, pos_prompts, neg_prompts, denoise_values, seed, 
                 "negative": combo[7][1],
                 "model": combo[8],
                 "seed": seed,
+                "seed_behavior": entry.get("seed_behavior", "fixed"),
                 "lora_omit_triggers": list(lora_omit_triggers),
                 "lora_triggerwords_append_settings": dict(lora_triggerwords_append_settings)
             })

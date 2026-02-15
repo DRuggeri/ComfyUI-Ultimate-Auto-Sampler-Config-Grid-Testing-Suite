@@ -354,6 +354,11 @@ export function convertStateToConfigs(state) {
             config.lora_strength_lock = configArray.lora_strength_lock;
         }
 
+        // Add seed_behavior if set to randomize
+        if (configArray.seed_behavior === "randomize") {
+            config.seed_behavior = "randomize";
+        }
+
         // ==== PROMPT HANDLING ====
         // Priority: per-config > global > omit (node inputs used as fallback)
         if (configArray.use_custom_prompts && configArray.positive_prompt_groups && configArray.positive_prompt_groups.length > 0) {
@@ -381,6 +386,7 @@ export function convertConfigsToConfigArrays(configs) {
             schedulers: "normal",
             steps: "20",
             cfg: "7.0",
+            seed_behavior: "fixed",
             models: ["None"],
             loras: ["None"],
             lora_omit_triggers: [],
@@ -489,6 +495,7 @@ export function convertConfigsToConfigArrays(configs) {
             schedulers: toString(config.scheduler || "normal"),
             steps: toString(config.steps || "20"),
             cfg: toString(config.cfg || "7.0"),
+            seed_behavior: config.seed_behavior || "fixed",
             models: models,
             loras: loras,
             lora_omit_triggers: omitTriggers,
@@ -508,6 +515,7 @@ export function convertConfigsToConfigArrays(configs) {
         schedulers: "normal",
         steps: "20",
         cfg: "7.0",
+        seed_behavior: "fixed",
         models: ["None"],
         loras: ["None"],
         lora_omit_triggers: [],
