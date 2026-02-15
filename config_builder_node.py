@@ -384,11 +384,13 @@ class UltimateConfigBuilder:
                 print(f"[ConfigBuilder] Warning: Could not parse integer '{item}'")
         return result
     
-    def parse_comma_list(self, value: str) -> List[str]:
-        """Parse comma-separated string"""
-        if not value or value.strip() == "":
+    def parse_comma_list(self, value) -> List[str]:
+        """Parse comma-separated string or pass through list"""
+        if isinstance(value, list):
+            return [str(item).strip() for item in value if str(item).strip()]
+        if not value or str(value).strip() == "":
             return []
-        return [item.strip() for item in value.split(",") if item.strip()]
+        return [item.strip() for item in str(value).split(",") if item.strip()]
     
     def parse_number_list(self, value: str) -> List[float]:
         """Parse comma-separated numbers"""
@@ -487,8 +489,8 @@ class UltimateConfigBuilder:
         if not config_arrays:
             config_arrays = [{
                 "name": "Config 1",
-                "samplers": "euler",
-                "schedulers": "normal",
+                "samplers": ["euler"],
+                "schedulers": ["normal"],
                 "steps": "20",
                 "cfg": "7.0",
                 "model": "",
@@ -768,6 +770,11 @@ async def get_model_lists_endpoint(request):
         # VAE list
         vae_list = folder_paths.get_filename_list("vae")
 
+        # Sampler and scheduler lists from ComfyUI core
+        import comfy.samplers
+        sampler_names = list(comfy.samplers.KSampler.SAMPLERS)
+        scheduler_names = list(comfy.samplers.KSampler.SCHEDULERS)
+
         return web.json_response({
             "checkpoints": checkpoints,
             "diffusion_models": diffusion_models,
@@ -776,7 +783,9 @@ async def get_model_lists_endpoint(request):
             "clip_gguf": clip_gguf,
             "clip_types": clip_types,
             "dual_clip_types": dual_clip_types,
-            "vae": vae_list
+            "vae": vae_list,
+            "samplers": sampler_names,
+            "schedulers": scheduler_names
         })
     except Exception as e:
         print(f"[ConfigBuilder] Error in model_lists endpoint: {e}")

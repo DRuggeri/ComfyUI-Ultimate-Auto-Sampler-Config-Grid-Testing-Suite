@@ -84,8 +84,8 @@ app.registerExtension({
                     global_negative: "",
                     config_arrays: [{
                         name: "Config 1",
-                        samplers: "euler, dpmpp_2m",
-                        schedulers: "normal, karras",
+                        samplers: ["euler", "dpmpp_2m"],
+                        schedulers: ["normal", "karras"],
                         steps: "20, 30",
                         cfg: "7.0",
                         models: ["None"],
@@ -297,8 +297,8 @@ app.registerExtension({
                         global_negative: "",
                         config_arrays: arrays.map(arr => ({
                             name: arr.name,
-                            samplers: oldState.samplers || "euler",
-                            schedulers: oldState.schedulers || "normal",
+                            samplers: Array.isArray(oldState.samplers) ? oldState.samplers : (oldState.samplers || "euler").split(",").map(s => s.trim()).filter(s => s),
+                            schedulers: Array.isArray(oldState.schedulers) ? oldState.schedulers : (oldState.schedulers || "normal").split(",").map(s => s.trim()).filter(s => s),
                             steps: oldState.steps || "20",
                             cfg: oldState.cfg || "7.0",
                             models: oldState.model ? [utilities.normalizePath(oldState.model)] : ["None"],

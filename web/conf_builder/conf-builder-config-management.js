@@ -13,7 +13,9 @@ import {
     countPromptCombinations,
     expandPromptPreview,
     getAvailableVAEs,
-    getVAEFolders
+    getVAEFolders,
+    getAvailableSamplers,
+    getAvailableSchedulers
 } from './conf-builder-utilities.js';
 
 import {
@@ -137,6 +139,138 @@ export function renderConfigSection(node, container, availableConfigs) {
     container.appendChild(section);
 }
 
+// --- CHIP LIST BUILDER (Reusable dropdown + chips component) ---
+
+/**
+ * Creates a dropdown + chip list UI for selecting items from a predefined list.
+ * Used for samplers, schedulers, and similar list-based selections.
+ *
+ * @param {object} params
+ * @param {string} params.label - Display label (e.g. "Samplers")
+ * @param {string} params.stateKey - Key in configArray (e.g. "samplers")
+ * @param {string[]} params.options - Available options for the dropdown
+ * @param {object} params.node - Node reference for saving state
+ * @param {number} params.arrayIdx - Config array index
+ * @param {object} params.configArray - The config array object
+ * @param {string} params.accentColor - Accent color for styling (default: "#0088ff")
+ * @param {string} params.placeholder - Empty state placeholder text
+ * @returns {HTMLElement} The complete chip list builder element
+ */
+function createChipListBuilder({ label, stateKey, options, node, arrayIdx, configArray, accentColor = "#0088ff", placeholder = "None selected" }) {
+    const container = document.createElement("div");
+    container.style.cssText = "width: 100%; margin-bottom: 2px;";
+
+    // Migrate from comma-separated string to array if needed
+    if (typeof configArray[stateKey] === "string") {
+        const arr = configArray[stateKey].split(",").map(s => s.trim()).filter(s => s);
+        configArray[stateKey] = arr;
+        node.state.config_arrays[arrayIdx][stateKey] = arr;
+    }
+    if (!Array.isArray(configArray[stateKey])) {
+        configArray[stateKey] = [];
+        node.state.config_arrays[arrayIdx][stateKey] = [];
+    }
+
+    // Chips container
+    const chipsContainer = document.createElement("div");
+    chipsContainer.style.cssText = "display: flex; flex-wrap: wrap; gap: 4px; margin-bottom: 6px; min-height: 24px;";
+
+    const renderChips = () => {
+        chipsContainer.innerHTML = "";
+        const items = configArray[stateKey];
+        if (!items || items.length === 0) {
+            const ph = document.createElement("div");
+            ph.textContent = placeholder;
+            ph.style.cssText = "color: #666; font-style: italic; padding: 2px 4px; font-size: 11px;";
+            chipsContainer.appendChild(ph);
+            return;
+        }
+        items.forEach((item, idx) => {
+            const chip = document.createElement("div");
+            chip.style.cssText = `display: flex; align-items: center; background: #444; color: #fff; border-radius: 12px; padding: 2px 8px; font-size: 11px;`;
+            const text = document.createElement("span");
+            text.textContent = item;
+            chip.appendChild(text);
+            const closeBtn = document.createElement("span");
+            closeBtn.textContent = "×";
+            closeBtn.style.cssText = "margin-left: 6px; cursor: pointer; color: #ff8888; font-weight: bold;";
+            closeBtn.onclick = () => {
+                node.state.config_arrays[arrayIdx][stateKey].splice(idx, 1);
+                node.saveState();
+                renderChips();
+            };
+            chip.appendChild(closeBtn);
+            chipsContainer.appendChild(chip);
+        });
+    };
+    renderChips();
+    container.appendChild(chipsContainer);
+
+    // Input row: dropdown + Add + Remove All
+    const inputRow = document.createElement("div");
+    inputRow.style.cssText = "display: flex; gap: 4px; align-items: center;";
+
+    const select = document.createElement("select");
+    select.className = "cb-select";
+    select.style.cssText = "flex: 1; font-size: 11px; padding: 3px 4px;";
+
+    const populateSelect = () => {
+        select.innerHTML = "";
+        const currentItems = configArray[stateKey] || [];
+        const available = options.filter(o => !currentItems.includes(o));
+        if (available.length === 0) {
+            const opt = document.createElement("option");
+            opt.textContent = "(all added)";
+            opt.disabled = true;
+            select.appendChild(opt);
+        } else {
+            available.forEach(name => {
+                const opt = document.createElement("option");
+                opt.value = name;
+                opt.textContent = name;
+                select.appendChild(opt);
+            });
+        }
+    };
+    populateSelect();
+
+    const addBtn = document.createElement("button");
+    addBtn.className = "cb-button primary";
+    addBtn.textContent = "+";
+    addBtn.title = "Add selected";
+    addBtn.style.cssText = "padding: 3px 8px; font-size: 11px; min-width: 28px;";
+    addBtn.onclick = () => {
+        const val = select.value;
+        if (val && !configArray[stateKey].includes(val)) {
+            node.state.config_arrays[arrayIdx][stateKey].push(val);
+            node.saveState();
+            renderChips();
+            populateSelect();
+        }
+    };
+
+    const removeAllBtn = document.createElement("button");
+    removeAllBtn.className = "cb-button";
+    removeAllBtn.textContent = "Clear";
+    removeAllBtn.title = "Remove all";
+    removeAllBtn.style.cssText = "padding: 3px 8px; font-size: 11px; min-width: 40px; color: #ff8888;";
+    removeAllBtn.onclick = () => {
+        node.state.config_arrays[arrayIdx][stateKey] = [];
+        configArray[stateKey] = [];
+        node.saveState();
+        renderChips();
+        populateSelect();
+    };
+
+    inputRow.appendChild(select);
+    inputRow.appendChild(addBtn);
+    inputRow.appendChild(removeAllBtn);
+    container.appendChild(inputRow);
+
+    return container;
+}
+
+
 // --- CONFIG ARRAY ELEMENT CREATOR ---
 
 export function createConfigArrayElement(node, configArray, arrayIdx) {
@@ -156,8 +290,21 @@ export function createConfigArrayElement(node, configArray, arrayIdx) {
     };
 
     addInput("Config Name", "name");
-    addInput("Samplers", "samplers");
-    addInput("Schedulers", "schedulers");
+
+    // Samplers - dropdown + chips list builder
+    const samplersBuilder = createChipListBuilder({
+        label: "Samplers", stateKey: "samplers", options: getAvailableSamplers(),
+        node, arrayIdx, configArray, accentColor: "#0088ff", placeholder: "No samplers selected"
+    });
+    settingsGrid.appendChild(createInputGroup("Samplers", samplersBuilder));
+
+    // Schedulers - dropdown + chips list builder
+    const schedulersBuilder = createChipListBuilder({
+        label: "Schedulers", stateKey: "schedulers", options: getAvailableSchedulers(),
+        node, arrayIdx, configArray, accentColor: "#00aa66", placeholder: "No schedulers selected"
+    });
+    settingsGrid.appendChild(createInputGroup("Schedulers", schedulersBuilder));
+
     addInput("Steps", "steps");
     addInput("CFG", "cfg");
 
@@ -1621,8 +1768,22 @@ function renderOmitTriggersSection(node, div, configArray, arrayIdx) {
         }
     };
     addTriggerBtn.onclick = addTrigger;
+
+    const removeAllBtn = document.createElement("button");
+    removeAllBtn.className = "cb-button";
+    removeAllBtn.textContent = "Clear";
+    removeAllBtn.title = "Remove all omitted triggers";
+    removeAllBtn.style.cssText = "padding: 4px 10px; font-size: 11px; min-width: 40px; color: #ff8888;";
+    removeAllBtn.onclick = () => {
+        node.state.config_arrays[arrayIdx].lora_omit_triggers = [];
+        configArray.lora_omit_triggers = [];
+        node.saveState();
+        renderChips();
+    };
+
     inputRow.appendChild(triggerInput);
     inputRow.appendChild(addTriggerBtn);
+    inputRow.appendChild(removeAllBtn);
     omitSection.appendChild(inputRow);
 
     const lookupBtn = document.createElement("button");
@@ -2285,8 +2446,8 @@ export async function renderUI(node, availableLoras, modelLists, loraFolders, av
     addConfigBtn.onclick = () => {
         node.state.config_arrays.push({
             name: `Config ${node.state.config_arrays.length + 1}`,
-            samplers: "euler",
-            schedulers: "normal",
+            samplers: ["euler"],
+            schedulers: ["normal"],
             steps: "20",
             cfg: "7.0",
             seed_behavior: "fixed",
