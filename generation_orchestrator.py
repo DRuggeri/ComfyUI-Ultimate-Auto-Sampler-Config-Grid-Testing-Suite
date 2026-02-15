@@ -12,7 +12,7 @@ import torch
 import hashlib
 import folder_paths
 import comfy.sd  # Required for async workers
-import comfy.model_management
+from comfy.model_management import InterruptProcessingException
 
 from .trigger_words import collect_unique_prompts_with_triggers, build_prompt_with_triggers
 from .batch_encoding import batch_encode_prompts
@@ -377,7 +377,7 @@ def run_generation_loop(
             conditioning_cache = batch_encode_prompts(
                 patched_clip, unique_positives, unique_negatives, cond_cache, clip_skip, enable_disk_cache=save_conditioning_cache_to_file
             )
-        except comfy.model_management.InterruptProcessingException:
+        except InterruptProcessingException:
             print(f"\n[GridTester] 🛑 INTERRUPTED during pre-encoding - Stopping all jobs")
             loaded_model, loaded_clip, loaded_vae = None, None, None
             patched_model, patched_clip = None, None
@@ -607,7 +607,7 @@ def run_generation_loop(
                                 # Check for interrupt before each prompt encoding
                                 if mm.processing_interrupted():
                                     print(f"\n[GridTester] 🛑 INTERRUPTED during positive encoding - Stopping all encoding")
-                                    raise comfy.model_management.InterruptProcessingException()
+                                    raise InterruptProcessingException()
 
                                 if prompt not in conditioning_cache["positive"]:
                                     original_layer = None
@@ -626,7 +626,7 @@ def run_generation_loop(
                                 # Check for interrupt before each prompt encoding
                                 if mm.processing_interrupted():
                                     print(f"\n[GridTester] 🛑 INTERRUPTED during negative encoding - Stopping all encoding")
-                                    raise comfy.model_management.InterruptProcessingException()
+                                    raise InterruptProcessingException()
 
                                 if prompt not in conditioning_cache["negative"]:
                                     original_layer = None
@@ -641,7 +641,7 @@ def run_generation_loop(
                                     if original_layer is not None:
                                         patched_clip.cond_stage_model.set_clip_options({"layer": original_layer})
 
-                        except comfy.model_management.InterruptProcessingException:
+                        except InterruptProcessingException:
                             print(f"\n[GridTester] 🛑 INTERRUPTED during encoding - Stopping all jobs")
 
                             if pending_batch:
@@ -804,7 +804,7 @@ def run_generation_loop(
             
             except Exception as e:
                 import comfy.model_management
-                if isinstance(e, comfy.model_management.InterruptProcessingException):
+                if isinstance(e, InterruptProcessingException):
                     print(f"\n[GridTester] 🛑 INTERRUPTED during generation - Stopping all jobs")
                     if result_latent is not None:
                         del result_latent
