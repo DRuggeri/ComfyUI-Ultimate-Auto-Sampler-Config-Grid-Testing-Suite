@@ -1240,15 +1240,11 @@ function renderGGUFOptionsSection(node, container, configArray, arrayIdx) {
 
 // --- VAE SECTION RENDERER ---
 
-export function renderVAEsSection(node, div, configArray, arrayIdx) {
+export function renderVAEsSection(node, div, configArray, arrayIdx, modelLists) {
     if (!configArray.vaes || configArray.vaes.length === 0) return; // Don't show section if no VAEs added
 
-    // Filter out "only None" case — if vaes is ["None"], don't show section unless explicitly added
-    const hasRealVAEs = configArray.vaes.some(v => v && v !== "None");
-    if (!hasRealVAEs && configArray.vaes.length <= 1) return;
-
-    const vaeList = getAvailableVAEs();
-    const vFolders = getVAEFolders();
+    const vaeList = modelLists?.vaeModels || getAvailableVAEs();
+    const vFolders = modelLists?.vaeFolders || getVAEFolders();
 
     const isSectionCollapsed = node.uiState.vaesSectionCollapsed?.[arrayIdx] || false;
 
@@ -2336,7 +2332,7 @@ export async function renderUI(node, availableLoras, modelLists, loraFolders, av
         const arrayElement = createConfigArrayElement(node, configArray, arrayIdx);
         renderConfigPromptsSection(node, arrayElement, configArray, arrayIdx);
         renderModelsSection(node, arrayElement, configArray, arrayIdx, modelLists);
-        renderVAEsSection(node, arrayElement, configArray, arrayIdx);
+        renderVAEsSection(node, arrayElement, configArray, arrayIdx, modelLists);
         renderLorasSection(node, arrayElement, configArray, arrayIdx, availableLoras, loraFolders);
         arraysContainer.appendChild(arrayElement);
     });

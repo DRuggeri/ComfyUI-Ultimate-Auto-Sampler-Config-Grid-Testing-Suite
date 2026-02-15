@@ -194,7 +194,9 @@ app.registerExtension({
                         textEncoders: utilities.getAvailableTextEncoders(),
                         textEncoderFolders: utilities.getTextEncoderFolders(),
                         clipTypes: utilities.getClipTypes(),
-                        dualClipTypes: utilities.getDualClipTypes()
+                        dualClipTypes: utilities.getDualClipTypes(),
+                        vaeModels: utilities.getAvailableVAEs(),
+                        vaeFolders: utilities.getVAEFolders()
                     };
 
                     await configManagement.renderUI(
