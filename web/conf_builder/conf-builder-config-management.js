@@ -148,7 +148,7 @@ export function renderConfigSection(node, container, availableConfigs) {
  * @param {object} params
  * @param {string} params.label - Display label (e.g. "Samplers")
  * @param {string} params.stateKey - Key in configArray (e.g. "samplers")
- * @param {string[]} params.options - Available options for the dropdown
+ * @param {string[]|Function} params.options - Available options array or getter function returning options
  * @param {object} params.node - Node reference for saving state
  * @param {number} params.arrayIdx - Config array index
  * @param {object} params.configArray - The config array object
@@ -217,7 +217,8 @@ function createChipListBuilder({ label, stateKey, options, node, arrayIdx, confi
     const populateSelect = () => {
         select.innerHTML = "";
         const currentItems = configArray[stateKey] || [];
-        const available = options.filter(o => !currentItems.includes(o));
+        const resolvedOptions = typeof options === "function" ? options() : options;
+        const available = (resolvedOptions || []).filter(o => !currentItems.includes(o));
         if (available.length === 0) {
             const opt = document.createElement("option");
             opt.textContent = "(all added)";
@@ -293,14 +294,14 @@ export function createConfigArrayElement(node, configArray, arrayIdx) {
 
     // Samplers - dropdown + chips list builder
     const samplersBuilder = createChipListBuilder({
-        label: "Samplers", stateKey: "samplers", options: getAvailableSamplers(),
+        label: "Samplers", stateKey: "samplers", options: getAvailableSamplers,
         node, arrayIdx, configArray, accentColor: "#0088ff", placeholder: "No samplers selected"
     });
     settingsGrid.appendChild(createInputGroup("Samplers", samplersBuilder));
 
     // Schedulers - dropdown + chips list builder
     const schedulersBuilder = createChipListBuilder({
-        label: "Schedulers", stateKey: "schedulers", options: getAvailableSchedulers(),
+        label: "Schedulers", stateKey: "schedulers", options: getAvailableSchedulers,
         node, arrayIdx, configArray, accentColor: "#00aa66", placeholder: "No schedulers selected"
     });
     settingsGrid.appendChild(createInputGroup("Schedulers", schedulersBuilder));
