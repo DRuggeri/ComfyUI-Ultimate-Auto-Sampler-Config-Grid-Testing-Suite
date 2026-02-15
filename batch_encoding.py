@@ -76,8 +76,11 @@ def batch_encode_with_cache(clip_model, prompts, cond_cache, prompt_type="positi
                             original_layer = clip_model.cond_stage_model.clip_layer
                             clip_model.cond_stage_model.set_clip_options({"layer": clip_skip})
 
-                        cond, pooled = clip_model.encode_from_tokens(tokens, return_pooled=True)
-                        conditioning = [[cond, {"pooled_output": pooled}]]
+                        # Use return_dict=True to preserve all extra conditioning keys
+                        # (e.g. t5xxl_ids/t5xxl_weights for Anima, attention_mask for Lumina, etc.)
+                        pooled_dict = clip_model.encode_from_tokens(tokens, return_pooled=True, return_dict=True)
+                        cond = pooled_dict.pop("cond")
+                        conditioning = [[cond, pooled_dict]]
                         results[prompt] = conditioning
                         cond_cache.set(prompt, conditioning, prompt_type)
 
