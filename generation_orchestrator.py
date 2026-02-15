@@ -19,7 +19,8 @@ from .manifest_utils import load_existing_manifest, save_manifest
 from .model_loader import (
     load_checkpoint, load_loras, cleanup_model_references,
     get_latent_channels, load_loras_for_preencoding,
-    print_incompatible_loras_summary, load_diffusion_model_and_clip
+    print_incompatible_loras_summary, load_diffusion_model_and_clip,
+    load_vae_by_name
 )
 from .lora_utils import expand_lora_folder
 from .image_generation import (
@@ -219,7 +220,7 @@ def run_generation_loop(
         extra_seeds = [random.randint(0, 2**32 - 1) for _ in range(add_random_seeds_to_gens)]
     
     expanded = expand_configs(raw_configs, pos_prompts, neg_prompts, denoise_values, seed, extra_seeds, ckpt_name)
-    expanded.sort(key=lambda x: (x.get('model_type', 'checkpoint'), x['model'], tuple(x.get('text_encoders', [])), x['lora'], x['positive'], x['negative']))
+    expanded.sort(key=lambda x: (x.get('model_type', 'checkpoint'), x['model'], tuple(x.get('text_encoders', [])), x.get('vae', 'Default'), x['lora'], x['positive'], x['negative']))
     
     # ==== EXPAND LORA FOLDERS ====
     print(f"[GridTester] 🎲 Expanding LoRA folders and random selections...")
@@ -245,13 +246,20 @@ def run_generation_loop(
     print(f"[GridTester] ✅ LoRA expansion complete")
 
     # ==== VAE VALIDATION FOR NON-CHECKPOINT MODELS ====
-    has_non_checkpoint = any(c.get("model_type", "checkpoint") != "checkpoint" for c in expanded)
-    if has_non_checkpoint and not use_remote_vae and optional_vae is None:
+    # Only error if non-checkpoint model has no VAE source (no optional_vae AND no per-config VAE)
+    use_remote_vae = remote_vae_endpoint and remote_vae_endpoint != "None"
+    needs_vae = any(
+        c.get("model_type", "checkpoint") != "checkpoint"
+        and c.get("vae", "Default") == "Default"
+        for c in expanded
+    )
+    if needs_vae and not use_remote_vae and optional_vae is None:
         raise ValueError(
             "GGUF and diffusion models do not include a bundled VAE.\n"
             "You must either:\n"
             "  1. Connect a VAE to the optional_vae input on the sampler node, or\n"
-            "  2. Enable remote VAE decoding via remote_vae_endpoint\n"
+            "  2. Enable remote VAE decoding via remote_vae_endpoint, or\n"
+            "  3. Set a specific VAE in the config builder for those configs\n"
         )
 
     # ==== REGISTER SMART CACHE SCHEDULE ====
@@ -273,9 +281,8 @@ def run_generation_loop(
     else:
         pos_hash, neg_hash = None, None
     
-    # ==== REMOTE VAE SETUP ====
-    use_remote_vae = remote_vae_endpoint and remote_vae_endpoint != "None"
-    
+    # ==== REMOTE VAE SETUP (use_remote_vae already defined above for VAE validation) ====
+
     try:
         if PromptServer is not None:
             pbar = PromptServer.instance.progress_bar_pool.get_progress_bar(unique_id)
@@ -290,6 +297,8 @@ def run_generation_loop(
     cached_model_key = None
     cached_lora_key = None
     cached_lora_cache_key = None
+    cached_vae_key = None  # Track which VAE is currently loaded
+    default_model_vae = None  # Track the model's bundled/default VAE for reverting
     conditioning_cache = {"positive": {}, "negative": {}}
     incompatible_loras = {}
     pending_batch = []
@@ -325,9 +334,21 @@ def run_generation_loop(
             optional_model, optional_clip, optional_vae,
             optional_positive, optional_negative, None, None, model_cache=model_cache
         )
+
         # VAE fallback for non-checkpoint models
         if loaded_vae is None and optional_vae is not None:
             loaded_vae = optional_vae
+        # Remember this model's default VAE for reverting later
+        default_model_vae = loaded_vae
+
+        # Per-config VAE: if first config specifies a VAE, load it
+        target_vae = first_conf.get("vae", "Default")
+        if target_vae != "Default":
+            print(f"[GridTester] 🎨 Loading per-config VAE: {target_vae}")
+            loaded_vae = load_vae_by_name(target_vae)
+            cached_vae_key = target_vae
+        else:
+            cached_vae_key = "Default"
         
         if first_conf["lora_expanded"] != "None":
             patched_model, patched_clip = load_loras_for_preencoding(
@@ -363,7 +384,7 @@ def run_generation_loop(
             cached_lora_cache_key = None
         latent_channels = get_latent_channels(loaded_model, optional_latent)
     elif len(unique_model_keys) > 1:
-        print(f"[GridTester] ⚠️ Multiple models detected ({len(unique_models)} different models) - pre-encoding DISABLED")
+        print(f"[GridTester] ⚠️ Multiple models detected ({len(unique_model_keys)} different models) - pre-encoding DISABLED")
         cond_cache = None
         latent_channels = 4
     else:
@@ -492,6 +513,9 @@ def run_generation_loop(
                 # VAE fallback for non-checkpoint models
                 if loaded_vae is None and optional_vae is not None:
                     loaded_vae = optional_vae
+                # Remember this model's default VAE for reverting later
+                default_model_vae = loaded_vae
+                cached_vae_key = "Default"
 
                 cached_model_key = target_model_key
                 cached_lora_key = None
@@ -500,7 +524,27 @@ def run_generation_loop(
                 model_switched = True
             else:
                 model_switched = False
-            
+
+            # ==== PER-CONFIG VAE SWITCHING ====
+            target_vae = conf.get("vae", "Default")
+            if target_vae != cached_vae_key:
+                # Flush pending batch before switching VAE (they need current VAE for decoding)
+                if pending_batch:
+                    if use_remote_vae:
+                        flush_batch_with_remote_vae(pending_batch, remote_vae_worker, existing_data, session_name)
+                    else:
+                        flush_batch_with_vae(pending_batch, loaded_vae, paths["images"], existing_data, session_name, paths["manifest"], unique_id)
+                    pending_batch = []
+
+                if target_vae == "Default":
+                    # Revert to model's bundled/default VAE
+                    loaded_vae = default_model_vae
+                    print(f"[GridTester] 🎨 Reverting to Default VAE")
+                else:
+                    print(f"[GridTester] 🎨 Loading per-config VAE: {target_vae}")
+                    loaded_vae = load_vae_by_name(target_vae)
+                cached_vae_key = target_vae
+
             # ==== LORA SWITCHING ====
             current_lora_string = conf["lora_expanded"]
             

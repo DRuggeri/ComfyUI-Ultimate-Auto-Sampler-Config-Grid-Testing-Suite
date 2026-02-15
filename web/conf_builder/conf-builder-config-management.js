@@ -11,7 +11,9 @@ import {
     getIterationCount,
     convertStateToConfigs,
     countPromptCombinations,
-    expandPromptPreview
+    expandPromptPreview,
+    getAvailableVAEs,
+    getVAEFolders
 } from './conf-builder-utilities.js';
 
 import {
@@ -198,6 +200,18 @@ export function createConfigArrayElement(node, configArray, arrayIdx) {
         node.renderUI();
     };
     controlsBar.appendChild(addModelBtn);
+
+    const addVaeBtn = document.createElement("button");
+    addVaeBtn.className = "cb-button";
+    addVaeBtn.style.borderLeft = "4px solid #9900cc";
+    addVaeBtn.textContent = `➕ Add VAE`;
+    addVaeBtn.onclick = () => {
+        if (!node.state.config_arrays[arrayIdx].vaes) node.state.config_arrays[arrayIdx].vaes = [];
+        node.state.config_arrays[arrayIdx].vaes.push("None");
+        node.saveState();
+        node.renderUI();
+    };
+    controlsBar.appendChild(addVaeBtn);
 
     const addLoraBtn = document.createElement("button");
     addLoraBtn.className = "cb-button";
@@ -1224,6 +1238,212 @@ function renderGGUFOptionsSection(node, container, configArray, arrayIdx) {
     container.appendChild(section);
 }
 
+// --- VAE SECTION RENDERER ---
+
+export function renderVAEsSection(node, div, configArray, arrayIdx) {
+    if (!configArray.vaes || configArray.vaes.length === 0) return; // Don't show section if no VAEs added
+
+    // Filter out "only None" case — if vaes is ["None"], don't show section unless explicitly added
+    const hasRealVAEs = configArray.vaes.some(v => v && v !== "None");
+    if (!hasRealVAEs && configArray.vaes.length <= 1) return;
+
+    const vaeList = getAvailableVAEs();
+    const vFolders = getVAEFolders();
+
+    const isSectionCollapsed = node.uiState.vaesSectionCollapsed?.[arrayIdx] || false;
+
+    const vaeGrid = document.createElement("div");
+    vaeGrid.className = "cb-list-grid";
+
+    const vaeHeader = document.createElement("div");
+    vaeHeader.className = "cb-section-toggle";
+    vaeHeader.style.cssText = "padding: 8px; background: #3a3a3a; border-radius: 4px; margin-bottom: 8px; font-weight: bold; color: #9900cc;";
+
+    const activeVaes = configArray.vaes.filter(v => v && v !== "None").length;
+    const titleSpan = document.createElement("span");
+    titleSpan.textContent = `VAEs (${configArray.vaes.length} Entries, ${activeVaes} Active)`;
+    vaeHeader.appendChild(titleSpan);
+
+    const arrowSpan = document.createElement("span");
+    arrowSpan.textContent = isSectionCollapsed ? "▶" : "▼";
+    vaeHeader.appendChild(arrowSpan);
+
+    vaeGrid.appendChild(vaeHeader);
+
+    const contentContainer = document.createElement("div");
+    contentContainer.style.display = isSectionCollapsed ? "none" : "contents";
+
+    vaeHeader.onclick = () => {
+        const isNowCollapsed = contentContainer.style.display === "none";
+        if (isNowCollapsed) {
+            contentContainer.style.display = "contents";
+            arrowSpan.textContent = "▼";
+            if (!node.uiState.vaesSectionCollapsed) node.uiState.vaesSectionCollapsed = {};
+            node.uiState.vaesSectionCollapsed[arrayIdx] = false;
+        } else {
+            contentContainer.style.display = "none";
+            arrowSpan.textContent = "▶";
+            if (!node.uiState.vaesSectionCollapsed) node.uiState.vaesSectionCollapsed = {};
+            node.uiState.vaesSectionCollapsed[arrayIdx] = true;
+        }
+    };
+
+    configArray.vaes.forEach((vae, vaeIdx) => {
+        contentContainer.appendChild(createVAEElement(node, vae, arrayIdx, vaeIdx, vaeList, vFolders));
+    });
+
+    const addRow = document.createElement("div");
+    addRow.style.width = "100%";
+    addRow.style.padding = "4px 0";
+    const addBtn = document.createElement("button");
+    addBtn.className = "cb-button";
+    addBtn.style.cssText = "width: 100%; border: 1px dashed #555; background: rgba(0,0,0,0.2); color: #aaa;";
+    addBtn.textContent = "➕ Add New VAE";
+    addBtn.onmouseover = () => addBtn.style.background = "rgba(255,255,255,0.1)";
+    addBtn.onmouseout = () => addBtn.style.background = "rgba(0,0,0,0.2)";
+    addBtn.onclick = () => {
+        node.state.config_arrays[arrayIdx].vaes.push("None");
+        node.saveState();
+        node.renderUI();
+    };
+    addRow.appendChild(addBtn);
+    contentContainer.appendChild(addRow);
+
+    vaeGrid.appendChild(contentContainer);
+    div.appendChild(vaeGrid);
+}
+
+// --- VAE ELEMENT CREATOR ---
+
+function createVAEElement(node, vaeName, arrayIdx, vaeIdx, vaeList, vFolders) {
+    const isFolder = vaeName && vaeName.endsWith("/");
+
+    const div = document.createElement("div");
+    div.className = "cb-item-card";
+    div.style.borderLeft = "3px solid #9900cc";
+    const uid = `vae_${arrayIdx}_${vaeIdx}`;
+
+    const isCollapsed = node.uiState.vaesCollapsed?.[uid] || false;
+
+    // Header
+    const header = document.createElement("div");
+    header.className = "cb-header-bar";
+
+    const leftGroup = document.createElement("div");
+    leftGroup.className = "cb-header-left";
+
+    const toggleArrow = document.createElement("span");
+    toggleArrow.textContent = isCollapsed ? "▶" : "▼";
+    toggleArrow.style.color = "#aaa";
+    toggleArrow.style.fontSize = "10px";
+    toggleArrow.style.width = "12px";
+    leftGroup.appendChild(toggleArrow);
+
+    const label = document.createElement("span");
+    label.textContent = `VAE #${vaeIdx + 1}`;
+    label.style.color = "#9900cc";
+    label.style.fontSize = "10px";
+    label.style.marginRight = "6px";
+    leftGroup.appendChild(label);
+
+    const nameSpan = document.createElement("span");
+    nameSpan.className = "cb-header-name";
+    nameSpan.textContent = getShortName(vaeName || "None");
+    leftGroup.appendChild(nameSpan);
+
+    header.appendChild(leftGroup);
+
+    const deleteBtn = document.createElement("button");
+    deleteBtn.className = "cb-button danger";
+    deleteBtn.style.padding = "2px 6px";
+    deleteBtn.style.fontSize = "10px";
+    deleteBtn.textContent = "✖";
+    deleteBtn.onclick = () => {
+        node.state.config_arrays[arrayIdx].vaes.splice(vaeIdx, 1);
+        if (node.state.config_arrays[arrayIdx].vaes.length === 0) {
+            node.state.config_arrays[arrayIdx].vaes = ["None"];
+        }
+        node.saveState();
+        node.renderUI();
+    };
+    header.appendChild(deleteBtn);
+    div.appendChild(header);
+
+    // Content container
+    const contentDiv = document.createElement("div");
+    contentDiv.style.display = isCollapsed ? "none" : "flex";
+    contentDiv.style.flexDirection = "column";
+    contentDiv.style.gap = "6px";
+    contentDiv.style.width = "100%";
+
+    header.onclick = (e) => {
+        if (e.target.tagName === 'BUTTON') return;
+        const isNowCollapsed = contentDiv.style.display !== "none";
+        contentDiv.style.display = isNowCollapsed ? "none" : "flex";
+        toggleArrow.textContent = isNowCollapsed ? "▶" : "▼";
+        if (!node.uiState.vaesCollapsed) node.uiState.vaesCollapsed = {};
+        node.uiState.vaesCollapsed[uid] = isNowCollapsed;
+    };
+
+    // File/Folder Type Select
+    const typeSelect = document.createElement("select");
+    typeSelect.className = "cb-select";
+    typeSelect.innerHTML = `
+        <option value="file" ${!isFolder ? 'selected' : ''}>VAE File</option>
+        <option value="folder" ${isFolder ? 'selected' : ''}>Folder</option>
+    `;
+    typeSelect.onchange = () => {
+        const newVal = typeSelect.value === "folder" ? "/" : "None";
+        node.state.config_arrays[arrayIdx].vaes[vaeIdx] = newVal;
+        node.saveState();
+        node.renderUI();
+    };
+    contentDiv.appendChild(typeSelect);
+
+    // Searchable Select for VAE
+    const options = isFolder ? vFolders : vaeList;
+    const currentVal = vaeName || "None";
+    const optionsList = (options && options.includes(currentVal)) || currentVal === "None" || currentVal === "/"
+        ? options || ["None"]
+        : [currentVal, ...(options || ["None"])];
+
+    const nameSearchable = createSearchableSelect(
+        optionsList,
+        currentVal,
+        (value) => {
+            node.state.config_arrays[arrayIdx].vaes[vaeIdx] = normalizePath(value);
+            node.saveState();
+            node.renderUI();
+        },
+        isFolder ? "Search folders..." : "Search VAEs..."
+    );
+    contentDiv.appendChild(nameSearchable);
+
+    // Folder expand button
+    if (isFolder && vaeName !== "None" && vaeName !== "/") {
+        const expandBtn = document.createElement("button");
+        expandBtn.className = "cb-button";
+        expandBtn.style.cssText = "width: 100%; border-left: 3px solid #9900cc; font-size: 11px; margin-top: 4px;";
+        expandBtn.textContent = "📂 Add all individually";
+        expandBtn.onclick = () => {
+            const normalize = (str) => str.replace(/\\/g, "/");
+            const folderPrefix = normalize(vaeName);
+            const matchingVAEs = vaeList ? vaeList.filter(v => normalize(v).startsWith(folderPrefix)) : [];
+            if (matchingVAEs.length > 0) {
+                node.state.config_arrays[arrayIdx].vaes.splice(vaeIdx, 1, ...matchingVAEs);
+                node.saveState();
+                node.renderUI();
+            } else {
+                alert(`No VAEs found in folder: ${folderPrefix}`);
+            }
+        };
+        contentDiv.appendChild(expandBtn);
+    }
+
+    div.appendChild(contentDiv);
+    return div;
+}
+
 export function renderLorasSection(node, div, configArray, arrayIdx, availableLoras, loraFolders) {
     if (!configArray.loras || configArray.loras.length === 0) configArray.loras = ["None"];
 
@@ -2075,6 +2295,7 @@ export async function renderUI(node, availableLoras, modelLists, loraFolders, av
             cfg: "7.0",
             seed_behavior: "fixed",
             models: ["None"],
+            vaes: ["None"],
             text_encoders: [],
             clip_type: "stable_diffusion",
             gguf_options: {},
@@ -2115,6 +2336,7 @@ export async function renderUI(node, availableLoras, modelLists, loraFolders, av
         const arrayElement = createConfigArrayElement(node, configArray, arrayIdx);
         renderConfigPromptsSection(node, arrayElement, configArray, arrayIdx);
         renderModelsSection(node, arrayElement, configArray, arrayIdx, modelLists);
+        renderVAEsSection(node, arrayElement, configArray, arrayIdx);
         renderLorasSection(node, arrayElement, configArray, arrayIdx, availableLoras, loraFolders);
         arraysContainer.appendChild(arrayElement);
     });

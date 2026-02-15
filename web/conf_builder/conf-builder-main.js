@@ -65,8 +65,10 @@ app.registerExtension({
                 this.uiState = {
                     modelsSectionCollapsed: {},
                     lorasSectionCollapsed: {},
+                    vaesSectionCollapsed: {},
                     modelsCollapsed: {},
                     lorasCollapsed: {},
+                    vaesCollapsed: {},
                     promptsSectionCollapsed: {},
                     globalPromptsSectionCollapsed: false
                 };
@@ -87,6 +89,7 @@ app.registerExtension({
                         steps: "20, 30",
                         cfg: "7.0",
                         models: ["None"],
+                        vaes: ["None"],
                         text_encoders: [],
                         clip_type: "stable_diffusion",
                         gguf_options: {},
@@ -262,6 +265,7 @@ app.registerExtension({
                                     if (!arr.text_encoders) arr.text_encoders = [];
                                     if (!arr.clip_type) arr.clip_type = "stable_diffusion";
                                     if (!arr.gguf_options) arr.gguf_options = {};
+                                    if (!arr.vaes) arr.vaes = ["None"];
                                 });
 
                                 this.state.config_arrays = loadedArrays;
@@ -296,6 +300,7 @@ app.registerExtension({
                             steps: oldState.steps || "20",
                             cfg: oldState.cfg || "7.0",
                             models: oldState.model ? [utilities.normalizePath(oldState.model)] : ["None"],
+                            vaes: ["None"],
                             text_encoders: [],
                             clip_type: "stable_diffusion",
                             gguf_options: {},
@@ -367,6 +372,9 @@ app.registerExtension({
                                 if (!arr.text_encoders) arr.text_encoders = [];
                                 if (!arr.clip_type) arr.clip_type = "stable_diffusion";
                                 if (!arr.gguf_options) arr.gguf_options = {};
+
+                                // Migration: ensure VAE field exists
+                                if (!arr.vaes) arr.vaes = ["None"];
                             });
                         } else if (existing.lora_config) {
                             this.state = this.migrateOldFormat(existing);
