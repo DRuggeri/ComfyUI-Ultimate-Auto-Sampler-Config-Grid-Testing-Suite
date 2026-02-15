@@ -545,6 +545,12 @@ class UltimateConfigBuilder:
             if seed_behavior == "randomize":
                 config["seed_behavior"] = "randomize"
 
+            # Process VAEs
+            vaes_raw = config_array.get("vaes", ["None"])
+            vae_strings = [str(v) for v in vaes_raw if v and v != "None"]
+            if vae_strings:
+                config["vae"] = vae_strings if len(vae_strings) > 1 else vae_strings[0]
+
             # Add model_type and related fields for non-checkpoint models
             if model_type != "checkpoint":
                 config["model_type"] = model_type
@@ -759,6 +765,9 @@ async def get_model_lists_endpoint(request):
             "hunyuan_image", "hunyuan_video_15"
         ]
 
+        # VAE list
+        vae_list = folder_paths.get_filename_list("vae")
+
         return web.json_response({
             "checkpoints": checkpoints,
             "diffusion_models": diffusion_models,
@@ -766,7 +775,8 @@ async def get_model_lists_endpoint(request):
             "text_encoders": text_encoders,
             "clip_gguf": clip_gguf,
             "clip_types": clip_types,
-            "dual_clip_types": dual_clip_types
+            "dual_clip_types": dual_clip_types,
+            "vae": vae_list
         })
     except Exception as e:
         print(f"[ConfigBuilder] Error in model_lists endpoint: {e}")

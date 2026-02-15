@@ -14,6 +14,24 @@ from .lora_utils import LoRAFileNotFoundError
 from .config_utils import parse_lora_definition
 
 
+def load_vae_by_name(vae_name):
+    """
+    Load a VAE by filename from the vae folder.
+    Follows the pattern of ComfyUI's VAELoader.load_vae().
+
+    Args:
+        vae_name: Filename of the VAE model
+
+    Returns:
+        comfy.sd.VAE: Loaded VAE instance
+    """
+    vae_path = folder_paths.get_full_path_or_raise("vae", vae_name)
+    sd, metadata = comfy.utils.load_torch_file(vae_path, return_metadata=True)
+    vae = comfy.sd.VAE(sd=sd, metadata=metadata)
+    vae.throw_exception_if_invalid()
+    return vae
+
+
 def load_checkpoint(
     target_model_name,
     ckpt_name,

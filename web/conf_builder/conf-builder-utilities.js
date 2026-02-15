@@ -14,6 +14,8 @@ let availableGGUFModels = null;
 let ggufModelFolders = null;
 let availableTextEncoders = null;
 let textEncoderFolders = null;
+let availableVAEs = null;
+let vaeFolders = null;
 let clipTypes = [];
 let dualClipTypes = [];
 let availableSessions = ["None"];
@@ -36,6 +38,8 @@ export function clearAllCaches() {
     ggufModelFolders = null;
     availableTextEncoders = null;
     textEncoderFolders = null;
+    availableVAEs = null;
+    vaeFolders = null;
     clipTypes = [];
     dualClipTypes = [];
 }
@@ -175,9 +179,19 @@ export async function getModelLists() {
         clipTypes = data.clip_types || [];
         dualClipTypes = data.dual_clip_types || [];
 
-        console.log(`[ConfigBuilder] Model lists: ${availableModels?.length || 0} checkpoints, ` +
-            `${availableDiffusionModels.length} diffusion, ${availableGGUFModels.length} GGUF, ` +
-            `${availableTextEncoders.length} text encoders`);
+        // VAE list
+        availableVAEs = (data.vae || []).map(normalizePath);
+        vaeFolders = extractFolders(availableVAEs);
+
+        console.log(`[ConfigBuilder] Model lists loaded: ${availableModels?.length || 0} checkpoints, ` +
+            `${availableDiffusionModels.length} diffusion models, ${availableGGUFModels.length} GGUFs, ` +
+            `${availableTextEncoders.length} text encoders, ${availableVAEs.length} VAEs`);
+        if (availableDiffusionModels.length === 0) {
+            console.log(`[ConfigBuilder] ℹ️ No diffusion models found. Place .safetensors files in ComfyUI/models/unet/ or ComfyUI/models/diffusion_models/`);
+        }
+        if (availableGGUFModels.length === 0) {
+            console.log(`[ConfigBuilder] ℹ️ No GGUF models found. Install ComfyUI-GGUF and place .gguf files in the unet_gguf folder.`);
+        }
         return data;
     } catch (e) {
         console.error("[ConfigBuilder] Error fetching model lists:", e);
@@ -191,6 +205,8 @@ export function getAvailableGGUFModels() { return availableGGUFModels || []; }
 export function getGGUFModelFolders() { return ggufModelFolders || ["/"]; }
 export function getAvailableTextEncoders() { return availableTextEncoders || []; }
 export function getTextEncoderFolders() { return textEncoderFolders || ["/"]; }
+export function getAvailableVAEs() { return availableVAEs || []; }
+export function getVAEFolders() { return vaeFolders || ["/"]; }
 export function getClipTypes() { return clipTypes; }
 export function getDualClipTypes() { return dualClipTypes; }
 
@@ -352,13 +368,28 @@ export function getIterationCount(configArray) {
     }
     if (l_count === 0) l_count = 1;
 
-    // 4. Prompts (per-config custom prompts multiply the iteration count)
+    // 4. VAEs
+    let v_count = 0;
+    if (!configArray.vaes || configArray.vaes.length === 0) {
+        v_count = 1; // Default VAE
+    } else {
+        configArray.vaes.forEach(v => {
+            if (!v || v === "None") {
+                v_count += 1; // "None" = use Default
+            } else {
+                v_count += 1;
+            }
+        });
+    }
+    if (v_count === 0) v_count = 1;
+
+    // 5. Prompts (per-config custom prompts multiply the iteration count)
     let p_count = 1;
     if (configArray.use_custom_prompts && configArray.positive_prompt_groups && configArray.positive_prompt_groups.length > 0) {
         p_count = countPromptCombinations(configArray.positive_prompt_groups);
     }
 
-    return m_count * l_count * s_count * sch_count * st_count * c_count * p_count;
+    return m_count * l_count * v_count * s_count * sch_count * st_count * c_count * p_count;
 }
 
 // --- CONFIG CONVERSION ---
@@ -400,6 +431,9 @@ export function convertStateToConfigs(state) {
             }
         });
 
+        // Process VAEs
+        const vaes = (configArray.vaes || []).filter(v => v && v !== "None");
+
         const config = {
             sampler: split(configArray.samplers),
             scheduler: split(configArray.schedulers),
@@ -408,6 +442,11 @@ export function convertStateToConfigs(state) {
             lora: loraValue,
             model: finalModels.length > 1 ? finalModels : finalModels[0] || "None"
         };
+
+        // Add VAE if any are selected (not "None")
+        if (vaes.length > 0) {
+            config.vae = vaes.length > 1 ? vaes : vaes[0];
+        }
 
         // Add model_type and related fields for non-checkpoint models
         if (modelType !== "checkpoint") {
@@ -563,6 +602,16 @@ export function convertConfigsToConfigArrays(configs) {
             strengthLock = { ...config.lora_strength_lock };
         }
 
+        // Parse VAE
+        let vaes = ["None"];
+        if (config.vae) {
+            if (Array.isArray(config.vae)) {
+                vaes = config.vae.map(v => normalizePath(String(v)));
+            } else {
+                vaes = [normalizePath(String(config.vae))];
+            }
+        }
+
         // Parse prompt fields from loaded config
         let positivePromptGroups = [];
         let negativePrompt = "";
@@ -602,6 +651,7 @@ export function convertConfigsToConfigArrays(configs) {
             cfg: toString(config.cfg || "7.0"),
             seed_behavior: config.seed_behavior || "fixed",
             models: models,
+            vaes: vaes,
             text_encoders: config.text_encoders || [],
             clip_type: config.clip_type || "stable_diffusion",
             gguf_options: config.gguf_options || {},
@@ -625,6 +675,7 @@ export function convertConfigsToConfigArrays(configs) {
         cfg: "7.0",
         seed_behavior: "fixed",
         models: ["None"],
+        vaes: ["None"],
         text_encoders: [],
         clip_type: "stable_diffusion",
         gguf_options: {},

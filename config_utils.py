@@ -358,6 +358,9 @@ def expand_configs(raw_configs, pos_prompts, neg_prompts, denoise_values, seed, 
             else:
                 expanded_models.extend(get_files_from_folder(m, model_folder))
 
+        # Expand VAE list
+        raw_vaes = to_list(entry.get("vae", "Default"))
+
         # Expand LoRA stacks (strengths are now in the lora string itself)
         expanded_loras = expand_lora_stack(entry.get("lora", "None"))
 
@@ -374,7 +377,7 @@ def expand_configs(raw_configs, pos_prompts, neg_prompts, denoise_values, seed, 
         # Build all combinations
         base_combos = []
         for combo in itertools.product(samplers, schedulers, steps_l, cfgs, clip_skips, expanded_loras,
-                                      denoise_values, entry_prompt_pairs, expanded_models):
+                                      denoise_values, entry_prompt_pairs, expanded_models, raw_vaes):
             base_combos.append({
                 "sampler": combo[0],
                 "scheduler": combo[1],
@@ -386,6 +389,7 @@ def expand_configs(raw_configs, pos_prompts, neg_prompts, denoise_values, seed, 
                 "positive": combo[7][0],
                 "negative": combo[7][1],
                 "model": combo[8],
+                "vae": combo[9],
                 "seed": seed,
                 "seed_behavior": entry.get("seed_behavior", "fixed"),
                 "model_type": model_type,
