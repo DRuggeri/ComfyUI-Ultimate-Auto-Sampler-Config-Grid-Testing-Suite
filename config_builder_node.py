@@ -531,6 +531,11 @@ class UltimateConfigBuilder:
                 "model": model_strings if len(model_strings) > 1 else model_strings[0] if model_strings else "None"
             }
             
+            # Add seed_behavior if set to randomize
+            seed_behavior = config_array.get("seed_behavior", "fixed")
+            if seed_behavior == "randomize":
+                config["seed_behavior"] = "randomize"
+
             # Add omit triggers if present
             if omit_triggers:
                 config["lora_omit_triggers"] = omit_triggers
