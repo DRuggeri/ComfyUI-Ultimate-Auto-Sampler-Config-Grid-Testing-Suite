@@ -5,7 +5,6 @@ from aiohttp import web
 import json
 import os
 import urllib.parse
-import mimetypes
 import folder_paths
 import shutil
 from .sampler_node import SamplerGridTester
@@ -23,69 +22,6 @@ _whitelisted_directories = set()
 # --- CONFIG MANAGEMENT PATH ---
 CONFIGS_DIR = os.path.join(folder_paths.get_output_directory(), "ultimate-configs")
 os.makedirs(CONFIGS_DIR, exist_ok=True)
-
-# --- CONFIG BUILDER JS DIRECTORY ---
-EXTENSION_DIR = os.path.dirname(os.path.abspath(__file__))
-CONFIG_BUILDER_JS_DIR = os.path.join(EXTENSION_DIR, "js")
-
-# =============================================================================
-# SERVE CONFIG BUILDER JS FILES (NOT AUTO-LOADED)
-# =============================================================================
-
-@server.PromptServer.instance.routes.get("/ultimate_config_sampler/js/{filename:.*}")
-async def serve_config_builder_js(request):
-    r"""
-    Serve JavaScript files from /js/ directory with cache-busting headers.
-    Supports subdirectories with both / and \ (e.g., config-builder/utilities.js)
-    """
-    try:
-        filename = request.match_info['filename']
-        print(f"[ConfigBuilder] Request for: {filename}")
-        
-        # Security: prevent directory traversal with ..
-        if '..' in filename or filename.startswith('/') or filename.startswith('\\'):
-            print(f"[ConfigBuilder] FORBIDDEN: {filename}")
-            return web.Response(status=403, text="Forbidden")
-        
-        # Normalize path separators (convert backslashes to forward slashes)
-        filename = filename.replace('\\', '/')
-        
-        # Build full path and normalize it
-        file_path = os.path.normpath(os.path.join(CONFIG_BUILDER_JS_DIR, filename))
-        
-        # Double-check the resolved path is still within our JS directory
-        normalized_base = os.path.normpath(CONFIG_BUILDER_JS_DIR)
-
-        if not file_path.startswith(normalized_base):
-            print(f"[ConfigBuilder] FORBIDDEN - Outside base dir: {file_path}")
-            return web.Response(status=403, text="Forbidden - path outside base directory")
-        
-        if not os.path.exists(file_path):
-            print(f"[ConfigBuilder] NOT FOUND: {file_path}")
-            return web.Response(status=404, text=f"File not found: {filename}")
-        
-        print(f"[ConfigBuilder] Reading file: {file_path}")
-        with open(file_path, 'r', encoding='utf-8') as f:
-            content = f.read()
-        
-        print(f"[ConfigBuilder] File read successfully, {len(content)} bytes")
-        
-        # Return with cache-busting headers
-        return web.Response(
-            text=content,
-            content_type='application/javascript',
-            headers={
-                'Cache-Control': 'no-cache, no-store, must-revalidate',
-                'Pragma': 'no-cache',
-                'Expires': '0'
-            }
-        )
-        
-    except Exception as e:
-        print(f"[ConfigBuilder] ERROR: {e}")
-        import traceback
-        traceback.print_exc()
-        return web.Response(status=500, text=f"Server error: {str(e)}")
 
 
 # =============================================================================

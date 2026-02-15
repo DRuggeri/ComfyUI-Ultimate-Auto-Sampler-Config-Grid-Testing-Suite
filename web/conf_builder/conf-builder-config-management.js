@@ -12,14 +12,14 @@ import {
     convertStateToConfigs,
     countPromptCombinations,
     expandPromptPreview
-} from '/ultimate_config_sampler/js/conf_builder/conf-builder-utilities.js';
+} from './conf-builder-utilities.js';
 
 import {
     createSearchableSelect,
     createSlider,
     createInputGroup,
     getStyles
-} from '/ultimate_config_sampler/js/conf_builder/conf-builder-ui-components.js';
+} from './conf-builder-ui-components.js';
 
 // --- SESSION SECTION RENDERER ---
 
@@ -108,7 +108,7 @@ export function renderConfigSection(node, container, availableConfigs) {
     saveBtn.style.width = "100%";
     saveBtn.onclick = async () => {
         await node.saveConfigToBackend();
-        const { getAvailableConfigs } = await import('/ultimate_config_sampler/js/conf_builder/conf-builder-utilities.js');
+        const { getAvailableConfigs } = await import('./conf-builder-utilities.js');
         await getAvailableConfigs();
         node.renderUI();
     };
@@ -236,15 +236,28 @@ export function createConfigArrayElement(node, configArray, arrayIdx) {
     controlsBar.appendChild(deleteBtn);
 
     div.appendChild(controlsBar);
+
+    // Label Mode overlay — shows config name at bottom center of card
+    if (node.state.label_mode && configArray.name) {
+        const labelOverlay = document.createElement("div");
+        labelOverlay.className = "cb-config-label-overlay";
+        labelOverlay.textContent = configArray.name;
+        div.appendChild(labelOverlay);
+    }
+
     return div;
 }
 
 // --- MODEL ELEMENT CREATOR ---
 
-export function createModelElement(node, modelStr, arrayIdx, modelIdx, availableModels, modelFolders) {
+export function createModelElement(node, modelEntry, arrayIdx, modelIdx, modelLists) {
+    // Handle both string format (legacy) and object format {path, type}
+    const modelPath = typeof modelEntry === 'string' ? modelEntry : (modelEntry?.path || "None");
+    const modelType = typeof modelEntry === 'string' ? 'checkpoint' : (modelEntry?.type || 'checkpoint');
+    const isFolder = modelPath.endsWith("/");
+
     const div = document.createElement("div");
     div.className = "cb-item-card model-card";
-    const isFolder = modelStr.endsWith("/");
     const uid = `${arrayIdx}_${modelIdx}`;
 
     // Initial State
@@ -258,7 +271,7 @@ export function createModelElement(node, modelStr, arrayIdx, modelIdx, available
     leftGroup.className = "cb-header-left";
 
     const toggleArrow = document.createElement("span");
-    toggleArrow.textContent = isCollapsed ? "▶" : "▼"; // Right arrow if collapsed, Down if open
+    toggleArrow.textContent = isCollapsed ? "▶" : "▼";
     toggleArrow.style.color = "#aaa";
     toggleArrow.style.fontSize = "10px";
     toggleArrow.style.width = "12px";
@@ -270,9 +283,17 @@ export function createModelElement(node, modelStr, arrayIdx, modelIdx, available
     label.style.whiteSpace = "nowrap";
     leftGroup.appendChild(label);
 
+    // Show model type badge
+    if (modelType !== "checkpoint") {
+        const typeBadge = document.createElement("span");
+        typeBadge.textContent = modelType === "gguf" ? "GGUF" : "DM";
+        typeBadge.style.cssText = "background: #553300; color: #ffaa44; padding: 1px 5px; border-radius: 3px; font-size: 9px; font-weight: bold;";
+        leftGroup.appendChild(typeBadge);
+    }
+
     const nameSpan = document.createElement("span");
     nameSpan.className = "cb-header-name";
-    nameSpan.textContent = getShortName(modelStr);
+    nameSpan.textContent = getShortName(modelPath);
     leftGroup.appendChild(nameSpan);
 
     header.appendChild(leftGroup);
@@ -290,42 +311,75 @@ export function createModelElement(node, modelStr, arrayIdx, modelIdx, available
     header.appendChild(deleteBtn);
     div.appendChild(header);
 
-    // Content Container (Rendered but hidden if collapsed)
+    // Content Container
     const contentDiv = document.createElement("div");
     contentDiv.style.display = isCollapsed ? "none" : "flex";
     contentDiv.style.flexDirection = "column";
     contentDiv.style.gap = "6px";
     contentDiv.style.width = "100%";
 
-    // --- TOGGLE LOGIC (INSTANT) ---
     header.onclick = (e) => {
-        if (e.target.tagName === 'BUTTON') return; // Ignore delete button
-
+        if (e.target.tagName === 'BUTTON') return;
         const isNowCollapsed = contentDiv.style.display !== "none";
         contentDiv.style.display = isNowCollapsed ? "none" : "flex";
         toggleArrow.textContent = isNowCollapsed ? "▶" : "▼";
-
-        // Save state silently
         node.uiState.modelsCollapsed[uid] = isNowCollapsed;
     };
 
-    // Type Select
+    // Model Type Select (Checkpoint / Diffusion Model / GGUF)
+    const modelTypeSelect = document.createElement("select");
+    modelTypeSelect.className = "cb-select";
+    modelTypeSelect.innerHTML = `
+        <option value="checkpoint" ${modelType === 'checkpoint' ? 'selected' : ''}>Checkpoint</option>
+        <option value="diffusion_model" ${modelType === 'diffusion_model' ? 'selected' : ''}>Diffusion Model</option>
+        <option value="gguf" ${modelType === 'gguf' ? 'selected' : ''}>GGUF</option>
+    `;
+    modelTypeSelect.onchange = () => {
+        const newType = modelTypeSelect.value;
+        node.state.config_arrays[arrayIdx].models[modelIdx] = newType === "checkpoint"
+            ? "None"
+            : { path: "None", type: newType };
+        node.saveState();
+        node.renderUI();
+    };
+    contentDiv.appendChild(modelTypeSelect);
+
+    // File/Folder Type Select
     const typeSelect = document.createElement("select");
     typeSelect.className = "cb-select";
+    const fileLabel = modelType === "gguf" ? "GGUF File" : modelType === "diffusion_model" ? "Diffusion File" : "Checkpoint File";
     typeSelect.innerHTML = `
-        <option value="file" ${!isFolder ? 'selected' : ''}>Checkpoint File</option>
+        <option value="file" ${!isFolder ? 'selected' : ''}>${fileLabel}</option>
         <option value="folder" ${isFolder ? 'selected' : ''}>Folder</option>
     `;
     typeSelect.onchange = () => {
-        node.state.config_arrays[arrayIdx].models[modelIdx] = typeSelect.value === "folder" ? "/" : "None";
+        const newVal = typeSelect.value === "folder" ? "/" : "None";
+        if (modelType === "checkpoint") {
+            node.state.config_arrays[arrayIdx].models[modelIdx] = newVal;
+        } else {
+            node.state.config_arrays[arrayIdx].models[modelIdx] = { path: newVal, type: modelType };
+        }
         node.saveState();
         node.renderUI();
     };
     contentDiv.appendChild(typeSelect);
 
+    // Pick the correct file list and folder list based on model type
+    let fileOptions, folderOptions;
+    if (modelType === 'gguf') {
+        fileOptions = modelLists.ggufModels || [];
+        folderOptions = modelLists.ggufFolders || ["/"];
+    } else if (modelType === 'diffusion_model') {
+        fileOptions = modelLists.diffusionModels || [];
+        folderOptions = modelLists.diffusionFolders || ["/"];
+    } else {
+        fileOptions = modelLists.checkpoints || [];
+        folderOptions = modelLists.checkpointFolders || ["/"];
+    }
+
     // Searchable Select
-    const options = isFolder ? modelFolders : availableModels;
-    const currentVal = modelStr;
+    const options = isFolder ? folderOptions : fileOptions;
+    const currentVal = modelPath;
     const optionsList = (options && options.includes(currentVal)) || currentVal === "None" || currentVal === "/"
         ? options || ["None"]
         : [currentVal, ...(options || ["None"])];
@@ -334,7 +388,12 @@ export function createModelElement(node, modelStr, arrayIdx, modelIdx, available
         optionsList,
         currentVal,
         (value) => {
-            node.state.config_arrays[arrayIdx].models[modelIdx] = normalizePath(value);
+            const normalized = normalizePath(value);
+            if (modelType === "checkpoint") {
+                node.state.config_arrays[arrayIdx].models[modelIdx] = normalized;
+            } else {
+                node.state.config_arrays[arrayIdx].models[modelIdx] = { path: normalized, type: modelType };
+            }
             node.saveState();
             node.renderUI();
         },
@@ -342,7 +401,8 @@ export function createModelElement(node, modelStr, arrayIdx, modelIdx, available
     );
     contentDiv.appendChild(nameSearchable);
 
-    if (isFolder && modelStr !== "None" && modelStr !== "/") {
+    // Folder expand button
+    if (isFolder && modelPath !== "None" && modelPath !== "/") {
         const expandBtn = document.createElement("button");
         expandBtn.className = "cb-button";
         expandBtn.style.borderLeft = "3px solid #cc6600";
@@ -352,14 +412,15 @@ export function createModelElement(node, modelStr, arrayIdx, modelIdx, available
         expandBtn.textContent = "📂 Add all individually";
         expandBtn.onclick = () => {
             const normalize = (str) => str.replace(/\\/g, "/");
-            const folderPrefix = normalize(modelStr);
-            const matchingModels = availableModels ? availableModels.filter(m => normalize(m).startsWith(folderPrefix)) : [];
+            const folderPrefix = normalize(modelPath);
+            const matchingModels = fileOptions ? fileOptions.filter(m => normalize(m).startsWith(folderPrefix)) : [];
             if (matchingModels.length > 0) {
-                node.state.config_arrays[arrayIdx].models.splice(modelIdx, 1, ...matchingModels);
+                const expanded = matchingModels.map(m => modelType === "checkpoint" ? m : { path: m, type: modelType });
+                node.state.config_arrays[arrayIdx].models.splice(modelIdx, 1, ...expanded);
                 node.saveState();
                 node.renderUI();
             } else {
-                alert(`No Checkpoints found in folder: ${folderPrefix}`);
+                alert(`No models found in folder: ${folderPrefix}`);
             }
         };
         contentDiv.appendChild(expandBtn);
@@ -911,12 +972,11 @@ async function showLoraMetadataModal(node, arrayIdx, loraName) {
 
 // --- RENDER MODELS AND LORAS SECTIONS ---
 
-export function renderModelsSection(node, div, configArray, arrayIdx, availableModels, modelFolders) {
+export function renderModelsSection(node, div, configArray, arrayIdx, modelLists) {
     if (!configArray.models || configArray.models.length === 0) configArray.models = ["None"];
 
     const isSectionCollapsed = node.uiState.modelsSectionCollapsed[arrayIdx] || false;
 
-    // FIX: Restore class for Grid Layout
     const modelGrid = document.createElement("div");
     modelGrid.className = "cb-list-grid";
 
@@ -924,13 +984,21 @@ export function renderModelsSection(node, div, configArray, arrayIdx, availableM
     modelHeader.className = "cb-section-toggle";
     modelHeader.style.cssText = "padding: 8px; background: #3a3a3a; border-radius: 4px; margin-bottom: 8px; font-weight: bold; color: #cc6600;";
 
+    // Count total models (handle both string and object format)
     let totalModels = 0;
     configArray.models.forEach(m => {
-        if (m === "None") totalModels++;
-        else if (m.endsWith("/")) {
-            const norm = normalizePath(m);
-            if (norm === "/") totalModels += availableModels ? availableModels.length : 1;
-            else totalModels += availableModels ? availableModels.filter(am => normalizePath(am).startsWith(norm)).length : 1;
+        const mPath = typeof m === 'string' ? m : (m?.path || "None");
+        const mType = typeof m === 'string' ? 'checkpoint' : (m?.type || 'checkpoint');
+        let list;
+        if (mType === 'gguf') list = modelLists.ggufModels;
+        else if (mType === 'diffusion_model') list = modelLists.diffusionModels;
+        else list = modelLists.checkpoints;
+
+        if (mPath === "None") totalModels++;
+        else if (mPath.endsWith("/")) {
+            const norm = normalizePath(mPath);
+            if (norm === "/") totalModels += list ? list.length : 1;
+            else totalModels += list ? list.filter(am => normalizePath(am).startsWith(norm)).length : 1;
         } else totalModels++;
     });
 
@@ -939,20 +1007,16 @@ export function renderModelsSection(node, div, configArray, arrayIdx, availableM
     modelHeader.appendChild(titleSpan);
 
     const arrowSpan = document.createElement("span");
-    arrowSpan.textContent = isSectionCollapsed ? "▶" : "▼"; // Initial icon
+    arrowSpan.textContent = isSectionCollapsed ? "▶" : "▼";
     modelHeader.appendChild(arrowSpan);
 
     modelGrid.appendChild(modelHeader);
 
-    // CONTENT CONTAINER (Always render, just toggle display)
     const contentContainer = document.createElement("div");
-    contentContainer.style.display = isSectionCollapsed ? "none" : "contents"; // 'contents' keeps the grid layout working!
-    // Note: 'contents' acts as if the container isn't there, so children become grid items.
+    contentContainer.style.display = isSectionCollapsed ? "none" : "contents";
 
-    // --- HEADER CLICK (INSTANT) ---
     modelHeader.onclick = () => {
         const isNowCollapsed = contentContainer.style.display === "none";
-        // Toggle
         if (isNowCollapsed) {
             contentContainer.style.display = "contents";
             arrowSpan.textContent = "▼";
@@ -964,12 +1028,10 @@ export function renderModelsSection(node, div, configArray, arrayIdx, availableM
         }
     };
 
-    // Always render items
     configArray.models.forEach((model, modelIdx) => {
-        contentContainer.appendChild(createModelElement(node, model, arrayIdx, modelIdx, availableModels, modelFolders));
+        contentContainer.appendChild(createModelElement(node, model, arrayIdx, modelIdx, modelLists));
     });
 
-    // FIX: Add Model Button (Bottom)
     const addRow = document.createElement("div");
     addRow.style.width = "100%";
     addRow.style.padding = "4px 0";
@@ -987,8 +1049,179 @@ export function renderModelsSection(node, div, configArray, arrayIdx, availableM
     addRow.appendChild(addBtn);
     contentContainer.appendChild(addRow);
 
+    // --- TEXT ENCODERS SECTION (shown when any model is non-checkpoint) ---
+    const hasNonCheckpoint = configArray.models.some(m =>
+        typeof m === 'object' && m !== null && m.type && m.type !== 'checkpoint'
+    );
+
+    if (hasNonCheckpoint) {
+        renderTextEncodersSection(node, contentContainer, configArray, arrayIdx, modelLists);
+    }
+
+    // --- GGUF OPTIONS SECTION (shown when any model is GGUF) ---
+    const hasGGUF = configArray.models.some(m =>
+        typeof m === 'object' && m !== null && m.type === 'gguf'
+    );
+
+    if (hasGGUF) {
+        renderGGUFOptionsSection(node, contentContainer, configArray, arrayIdx);
+    }
+
     modelGrid.appendChild(contentContainer);
     div.appendChild(modelGrid);
+}
+
+// --- TEXT ENCODERS SECTION ---
+function renderTextEncodersSection(node, container, configArray, arrayIdx, modelLists) {
+    const section = document.createElement("div");
+    section.style.cssText = "width: 100%; border-top: 1px solid #444; margin-top: 8px; padding-top: 8px;";
+
+    const header = document.createElement("div");
+    header.style.cssText = "font-size: 11px; font-weight: bold; color: #44aaff; margin-bottom: 6px;";
+    header.textContent = "TEXT ENCODERS (CLIP)";
+    section.appendChild(header);
+
+    // Clip Type selector
+    const clipRow = document.createElement("div");
+    clipRow.style.cssText = "display: flex; gap: 6px; align-items: center; margin-bottom: 6px;";
+    const clipLabel = document.createElement("label");
+    clipLabel.textContent = "CLIP Type:";
+    clipLabel.style.cssText = "color: #aaa; font-size: 11px; white-space: nowrap;";
+    clipRow.appendChild(clipLabel);
+
+    const clipSelect = document.createElement("select");
+    clipSelect.className = "cb-select";
+    // Combine single and dual clip types
+    const allClipTypes = [...new Set([...(modelLists.clipTypes || []), ...(modelLists.dualClipTypes || [])])];
+    allClipTypes.forEach(ct => {
+        const opt = document.createElement("option");
+        opt.value = ct;
+        opt.textContent = ct;
+        if (ct === (configArray.clip_type || "stable_diffusion")) opt.selected = true;
+        clipSelect.appendChild(opt);
+    });
+    clipSelect.onchange = () => {
+        node.state.config_arrays[arrayIdx].clip_type = clipSelect.value;
+        node.saveState();
+    };
+    clipRow.appendChild(clipSelect);
+    section.appendChild(clipRow);
+
+    // Text encoder entries
+    const teList = configArray.text_encoders || [];
+    teList.forEach((te, teIdx) => {
+        const teRow = document.createElement("div");
+        teRow.style.cssText = "display: flex; gap: 4px; align-items: center; margin-bottom: 4px;";
+
+        const teSearchable = createSearchableSelect(
+            modelLists.textEncoders || ["None"],
+            te || "None",
+            (value) => {
+                node.state.config_arrays[arrayIdx].text_encoders[teIdx] = normalizePath(value);
+                node.saveState();
+            },
+            "Search text encoders..."
+        );
+        teSearchable.style.flex = "1";
+        teRow.appendChild(teSearchable);
+
+        const delBtn = document.createElement("button");
+        delBtn.className = "cb-button danger";
+        delBtn.style.cssText = "padding: 2px 6px; font-size: 10px;";
+        delBtn.textContent = "✖";
+        delBtn.onclick = () => {
+            node.state.config_arrays[arrayIdx].text_encoders.splice(teIdx, 1);
+            node.saveState();
+            node.renderUI();
+        };
+        teRow.appendChild(delBtn);
+        section.appendChild(teRow);
+    });
+
+    // Add text encoder button
+    const addTeBtn = document.createElement("button");
+    addTeBtn.className = "cb-button";
+    addTeBtn.style.cssText = "width: 100%; border: 1px dashed #446; background: rgba(0,50,100,0.2); color: #88bbff; font-size: 11px;";
+    addTeBtn.textContent = "+ Add Text Encoder";
+    addTeBtn.onclick = () => {
+        if (!node.state.config_arrays[arrayIdx].text_encoders) {
+            node.state.config_arrays[arrayIdx].text_encoders = [];
+        }
+        node.state.config_arrays[arrayIdx].text_encoders.push("None");
+        node.saveState();
+        node.renderUI();
+    };
+    section.appendChild(addTeBtn);
+
+    container.appendChild(section);
+}
+
+// --- GGUF OPTIONS SECTION ---
+function renderGGUFOptionsSection(node, container, configArray, arrayIdx) {
+    const section = document.createElement("details");
+    section.style.cssText = "width: 100%; border-top: 1px solid #444; margin-top: 8px; padding-top: 8px;";
+
+    const summary = document.createElement("summary");
+    summary.textContent = "GGUF Options";
+    summary.style.cssText = "cursor: pointer; color: #aaa; font-size: 11px; font-weight: bold;";
+    section.appendChild(summary);
+
+    const opts = configArray.gguf_options || {};
+    const grid = document.createElement("div");
+    grid.style.cssText = "display: grid; grid-template-columns: 1fr 1fr; gap: 6px; margin-top: 6px;";
+
+    // Helper for select rows
+    const addSelectRow = (label, options, currentVal, onChange) => {
+        const lbl = document.createElement("label");
+        lbl.textContent = label;
+        lbl.style.cssText = "color: #aaa; font-size: 11px; display: flex; align-items: center;";
+        grid.appendChild(lbl);
+
+        const sel = document.createElement("select");
+        sel.className = "cb-select";
+        options.forEach(o => {
+            const opt = document.createElement("option");
+            opt.value = o;
+            opt.textContent = o;
+            if (o === currentVal) opt.selected = true;
+            sel.appendChild(opt);
+        });
+        sel.onchange = () => onChange(sel.value);
+        grid.appendChild(sel);
+    };
+
+    const dtypeOptions = ["default", "target", "float32", "float16", "bfloat16"];
+
+    addSelectRow("Dequant dtype:", dtypeOptions, opts.dequant_dtype || "default", (val) => {
+        if (!node.state.config_arrays[arrayIdx].gguf_options) node.state.config_arrays[arrayIdx].gguf_options = {};
+        node.state.config_arrays[arrayIdx].gguf_options.dequant_dtype = val;
+        node.saveState();
+    });
+
+    addSelectRow("Patch dtype:", dtypeOptions, opts.patch_dtype || "default", (val) => {
+        if (!node.state.config_arrays[arrayIdx].gguf_options) node.state.config_arrays[arrayIdx].gguf_options = {};
+        node.state.config_arrays[arrayIdx].gguf_options.patch_dtype = val;
+        node.saveState();
+    });
+
+    // Patch on device checkbox
+    const podLabel = document.createElement("label");
+    podLabel.textContent = "Patch on device:";
+    podLabel.style.cssText = "color: #aaa; font-size: 11px; display: flex; align-items: center;";
+    grid.appendChild(podLabel);
+
+    const podCheck = document.createElement("input");
+    podCheck.type = "checkbox";
+    podCheck.checked = opts.patch_on_device || false;
+    podCheck.onchange = () => {
+        if (!node.state.config_arrays[arrayIdx].gguf_options) node.state.config_arrays[arrayIdx].gguf_options = {};
+        node.state.config_arrays[arrayIdx].gguf_options.patch_on_device = podCheck.checked;
+        node.saveState();
+    };
+    grid.appendChild(podCheck);
+
+    section.appendChild(grid);
+    container.appendChild(section);
 }
 
 export function renderLorasSection(node, div, configArray, arrayIdx, availableLoras, loraFolders) {
@@ -1807,7 +2040,7 @@ export function updatePreview(node) {
     preview.textContent = JSON.stringify(configs, null, 2);
 }
 
-export async function renderUI(node, availableLoras, availableModels, loraFolders, modelFolders, availableSessions, availableConfigs, refreshAllConfigBuilders) {
+export async function renderUI(node, availableLoras, modelLists, loraFolders, availableSessions, availableConfigs, refreshAllConfigBuilders) {
     const scrollContainer = node.htmlContainer.querySelector(".cb-container");
     const savedScrollTop = scrollContainer ? scrollContainer.scrollTop : 0;
 
@@ -1829,7 +2062,7 @@ export async function renderUI(node, availableLoras, availableModels, loraFolder
     configSection.innerHTML = '<div class="cb-section-title">⚙️ Config Arrays</div>';
 
     const headerBar = document.createElement("div");
-    headerBar.style.marginBottom = "10px";
+    headerBar.style.cssText = "margin-bottom: 10px; display: flex; align-items: center; gap: 12px;";
     const addConfigBtn = document.createElement("button");
     addConfigBtn.className = "cb-button primary";
     addConfigBtn.textContent = "➕ Add Config Array";
@@ -1842,6 +2075,9 @@ export async function renderUI(node, availableLoras, availableModels, loraFolder
             cfg: "7.0",
             seed_behavior: "fixed",
             models: ["None"],
+            text_encoders: [],
+            clip_type: "stable_diffusion",
+            gguf_options: {},
             loras: ["None"],
             lora_omit_triggers: [],
             lora_triggerwords_append_settings: {},
@@ -1854,6 +2090,22 @@ export async function renderUI(node, availableLoras, availableModels, loraFolder
         node.renderUI();
     };
     headerBar.appendChild(addConfigBtn);
+
+    const labelModeLabel = document.createElement("label");
+    labelModeLabel.className = "cb-toggle";
+    labelModeLabel.style.fontSize = "12px";
+    const labelModeCheckbox = document.createElement("input");
+    labelModeCheckbox.type = "checkbox";
+    labelModeCheckbox.checked = node.state.label_mode || false;
+    labelModeCheckbox.onchange = () => {
+        node.state.label_mode = labelModeCheckbox.checked;
+        node.saveState();
+        node.renderUI();
+    };
+    labelModeLabel.appendChild(labelModeCheckbox);
+    labelModeLabel.appendChild(document.createTextNode(" \u{1F3F7}\uFE0F Label Mode"));
+    headerBar.appendChild(labelModeLabel);
+
     configSection.appendChild(headerBar);
 
     const arraysContainer = document.createElement("div");
@@ -1862,7 +2114,7 @@ export async function renderUI(node, availableLoras, availableModels, loraFolder
     node.state.config_arrays.forEach((configArray, arrayIdx) => {
         const arrayElement = createConfigArrayElement(node, configArray, arrayIdx);
         renderConfigPromptsSection(node, arrayElement, configArray, arrayIdx);
-        renderModelsSection(node, arrayElement, configArray, arrayIdx, availableModels, modelFolders);
+        renderModelsSection(node, arrayElement, configArray, arrayIdx, modelLists);
         renderLorasSection(node, arrayElement, configArray, arrayIdx, availableLoras, loraFolders);
         arraysContainer.appendChild(arrayElement);
     });

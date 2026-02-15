@@ -19,7 +19,7 @@ from .manifest_utils import load_existing_manifest, save_manifest
 from .model_loader import (
     load_checkpoint, load_loras, cleanup_model_references,
     get_latent_channels, load_loras_for_preencoding,
-    print_incompatible_loras_summary
+    print_incompatible_loras_summary, load_diffusion_model_and_clip
 )
 from .lora_utils import expand_lora_folder
 from .image_generation import (
@@ -127,6 +127,45 @@ def check_if_job_completed(existing_items, conf, seed, width, height, batch_idx,
     return -1
 
 
+def get_model_cache_key(conf):
+    """Generate a cache key that uniquely identifies the model+clip combination."""
+    model_type = conf.get("model_type", "checkpoint")
+    if model_type == "checkpoint":
+        return conf["model"]
+    else:
+        te_key = "|".join(sorted(conf.get("text_encoders", [])))
+        return f"{conf['model']}::{model_type}::{te_key}"
+
+
+def load_model_by_type(conf, ckpt_name, use_remote_vae, optional_model, optional_clip, optional_vae,
+                       optional_positive, optional_negative, loaded_clip, loaded_vae, model_cache):
+    """Dispatch to correct loader based on model_type in config."""
+    model_type = conf.get("model_type", "checkpoint")
+    target = conf["model"]
+
+    if model_type == "checkpoint":
+        return load_checkpoint(
+            target, ckpt_name, use_remote_vae,
+            optional_model, optional_clip, optional_vae,
+            optional_positive, optional_negative,
+            loaded_clip, loaded_vae, model_cache=model_cache
+        )
+    else:
+        # diffusion_model or gguf
+        return load_diffusion_model_and_clip(
+            model_name=target,
+            model_type=model_type,
+            text_encoder_paths=conf.get("text_encoders", []),
+            clip_type_str=conf.get("clip_type", "stable_diffusion"),
+            gguf_options=conf.get("gguf_options"),
+            use_remote_vae=use_remote_vae,
+            optional_model=optional_model,
+            optional_clip=optional_clip,
+            optional_vae=optional_vae,
+            model_cache=model_cache
+        )
+
+
 def run_generation_loop(
     self,
     ckpt_name, positive_text, negative_text, seed, denoise, vae_batch_size,
@@ -180,7 +219,7 @@ def run_generation_loop(
         extra_seeds = [random.randint(0, 2**32 - 1) for _ in range(add_random_seeds_to_gens)]
     
     expanded = expand_configs(raw_configs, pos_prompts, neg_prompts, denoise_values, seed, extra_seeds, ckpt_name)
-    expanded.sort(key=lambda x: (x['model'], x['lora'], x['positive'], x['negative']))
+    expanded.sort(key=lambda x: (x.get('model_type', 'checkpoint'), x['model'], tuple(x.get('text_encoders', [])), x['lora'], x['positive'], x['negative']))
     
     # ==== EXPAND LORA FOLDERS ====
     print(f"[GridTester] 🎲 Expanding LoRA folders and random selections...")
@@ -204,6 +243,16 @@ def run_generation_loop(
         else:
             conf["lora_expanded"] = "None"
     print(f"[GridTester] ✅ LoRA expansion complete")
+
+    # ==== VAE VALIDATION FOR NON-CHECKPOINT MODELS ====
+    has_non_checkpoint = any(c.get("model_type", "checkpoint") != "checkpoint" for c in expanded)
+    if has_non_checkpoint and not use_remote_vae and optional_vae is None:
+        raise ValueError(
+            "GGUF and diffusion models do not include a bundled VAE.\n"
+            "You must either:\n"
+            "  1. Connect a VAE to the optional_vae input on the sampler node, or\n"
+            "  2. Enable remote VAE decoding via remote_vae_endpoint\n"
+        )
 
     # ==== REGISTER SMART CACHE SCHEDULE ====
     if model_cache:
@@ -263,19 +312,22 @@ def run_generation_loop(
         )
     
     # ==== PRE-ENCODING STAGE ====
-    unique_models = set(conf["model"] for conf in expanded)
-    
-    if not (optional_positive and optional_negative) and expanded and len(unique_models) == 1:
+    unique_model_keys = set(get_model_cache_key(conf) for conf in expanded)
+
+    if not (optional_positive and optional_negative) and expanded and len(unique_model_keys) == 1:
         first_conf = expanded[0]
         target_model_name = first_conf["model"]
-        
+
         print(f"[GridTester] ✅ Single model detected ({target_model_name}) - enabling pre-encoding")
-        
-        loaded_model, loaded_clip, loaded_vae = load_checkpoint(
-            target_model_name, ckpt_name, use_remote_vae,
+
+        loaded_model, loaded_clip, loaded_vae = load_model_by_type(
+            first_conf, ckpt_name, use_remote_vae,
             optional_model, optional_clip, optional_vae,
             optional_positive, optional_negative, None, None, model_cache=model_cache
         )
+        # VAE fallback for non-checkpoint models
+        if loaded_vae is None and optional_vae is not None:
+            loaded_vae = optional_vae
         
         if first_conf["lora_expanded"] != "None":
             patched_model, patched_clip = load_loras_for_preencoding(
@@ -303,14 +355,14 @@ def run_generation_loop(
             patched_clip, unique_positives, unique_negatives, cond_cache, clip_skip, enable_disk_cache=save_conditioning_cache_to_file
         )
         
-        cached_model_key = target_model_name
+        cached_model_key = get_model_cache_key(first_conf)
         cached_lora_key = first_conf["lora_expanded"]
         if model_cache:
-            cached_lora_cache_key = model_cache._get_lora_cache_key(target_model_name, first_conf["lora_expanded"])
+            cached_lora_cache_key = model_cache._get_lora_cache_key(cached_model_key, first_conf["lora_expanded"])
         else:
             cached_lora_cache_key = None
         latent_channels = get_latent_channels(loaded_model, optional_latent)
-    elif len(unique_models) > 1:
+    elif len(unique_model_keys) > 1:
         print(f"[GridTester] ⚠️ Multiple models detected ({len(unique_models)} different models) - pre-encoding DISABLED")
         cond_cache = None
         latent_channels = 4
@@ -422,7 +474,8 @@ def run_generation_loop(
             
             # ==== MODEL SWITCHING ====
             target_model_name = conf["model"]
-            if target_model_name != cached_model_key:
+            target_model_key = get_model_cache_key(conf)
+            if target_model_key != cached_model_key:
                 if cached_model_key is not None:
                     patched_model, patched_clip = cleanup_model_references(
                         patched_model, patched_clip, conditioning_cache
@@ -430,14 +483,17 @@ def run_generation_loop(
                     # CRITICAL FIX: Restore dict structure after clear
                     conditioning_cache["positive"] = {}
                     conditioning_cache["negative"] = {}
-                
-                loaded_model, loaded_clip, loaded_vae = load_checkpoint(
-                    target_model_name, ckpt_name, use_remote_vae,
+
+                loaded_model, loaded_clip, loaded_vae = load_model_by_type(
+                    conf, ckpt_name, use_remote_vae,
                     optional_model, optional_clip, optional_vae,
                     optional_positive, optional_negative, loaded_clip, loaded_vae, model_cache=model_cache
                 )
-                
-                cached_model_key = target_model_name
+                # VAE fallback for non-checkpoint models
+                if loaded_vae is None and optional_vae is not None:
+                    loaded_vae = optional_vae
+
+                cached_model_key = target_model_key
                 cached_lora_key = None
                 cached_lora_cache_key = None
                 latent_channels = get_latent_channels(loaded_model, optional_latent)
@@ -449,7 +505,7 @@ def run_generation_loop(
             current_lora_string = conf["lora_expanded"]
             
             if model_cache:
-                current_cache_key = model_cache._get_lora_cache_key(target_model_name, current_lora_string)
+                current_cache_key = model_cache._get_lora_cache_key(target_model_key, current_lora_string)
                 need_to_load = (current_cache_key != cached_lora_cache_key) or patched_model is None
             else:
                 need_to_load = (current_lora_string != cached_lora_key) or patched_model is None
@@ -477,7 +533,7 @@ def run_generation_loop(
                     
                     for future_idx in range(conf_idx, len(expanded)):
                         future_conf = expanded[future_idx]
-                        if future_conf["model"] == target_model_name:
+                        if get_model_cache_key(future_conf) == target_model_key:
                             future_positive, _ = build_prompt_with_triggers(
                                 future_conf, lora_triggerwords_mode
                             )
@@ -557,45 +613,63 @@ def run_generation_loop(
                     if next_job_idx < len(input_jobs):
                         next_conf = expanded[next_conf_idx]
                         
-                        # RESOLVE "Default" to actual ckpt name
-                        next_model_raw = next_conf["model"]
-                        next_model_resolved = ckpt_name if next_model_raw == "Default" else next_model_raw
+                        # RESOLVE cache keys for next conf
+                        next_model_key = get_model_cache_key(next_conf)
                         next_lora = next_conf["lora_expanded"]
-                        
+
                         # CASE 1: Same Base, Different LoRA
-                        if next_model_resolved == target_model_name and next_lora != current_lora_string:
+                        if next_model_key == target_model_key and next_lora != current_lora_string:
                             def _preload_lora_worker():
                                 return load_loras(
                                     loaded_model, loaded_clip, next_lora,
-                                    next_model_resolved, {}, model_cache=None 
+                                    target_model_name, {}, model_cache=None
                                 )
-                            model_cache.preload_lora_model(next_model_resolved, next_lora, _preload_lora_worker)
-                            
+                            model_cache.preload_lora_model(target_model_key, next_lora, _preload_lora_worker)
+
                         # CASE 2: Different Base Model
-                        elif next_model_resolved != target_model_name:
-                            print(f"[GridTester] 🔮 Pre-loading Base Model: {next_model_resolved}")
-                            
-                            def _preload_base_worker(path_to_load=next_model_resolved):
-                                try:
-                                    import comfy.sd # Re-import locally to be safe in thread
-                                    ckpt_path = folder_paths.get_full_path("checkpoints", path_to_load)
-                                    if use_remote_vae:
-                                        out = comfy.sd.load_checkpoint_guess_config(
-                                            ckpt_path, output_vae=False, output_clip=True,
-                                            embedding_directory=folder_paths.get_folder_paths("embeddings")
+                        elif next_model_key != target_model_key:
+                            next_model_type = next_conf.get("model_type", "checkpoint")
+                            next_model_name = next_conf["model"]
+                            print(f"[GridTester] 🔮 Pre-loading Base Model: {next_model_name} ({next_model_type})")
+
+                            if next_model_type == "checkpoint":
+                                next_model_resolved = ckpt_name if next_model_name == "Default" else next_model_name
+                                def _preload_base_worker(path_to_load=next_model_resolved):
+                                    try:
+                                        import comfy.sd
+                                        ckpt_path = folder_paths.get_full_path("checkpoints", path_to_load)
+                                        if use_remote_vae:
+                                            out = comfy.sd.load_checkpoint_guess_config(
+                                                ckpt_path, output_vae=False, output_clip=True,
+                                                embedding_directory=folder_paths.get_folder_paths("embeddings")
+                                            )
+                                            return out[0], out[1], None
+                                        else:
+                                            out = comfy.sd.load_checkpoint_guess_config(
+                                                ckpt_path, output_vae=True, output_clip=True,
+                                                embedding_directory=folder_paths.get_folder_paths("embeddings")
+                                            )
+                                            return out[0], out[1], out[2]
+                                    except Exception as e:
+                                        print(f"[GridTester] ❌ Async Worker Error: {e}")
+                                        return None, None, None
+                                model_cache.preload_base_model(next_model_key, _preload_base_worker)
+                            else:
+                                # GGUF/diffusion model preload
+                                def _preload_diff_worker(conf_to_load=next_conf):
+                                    try:
+                                        return load_diffusion_model_and_clip(
+                                            model_name=conf_to_load["model"],
+                                            model_type=conf_to_load.get("model_type"),
+                                            text_encoder_paths=conf_to_load.get("text_encoders", []),
+                                            clip_type_str=conf_to_load.get("clip_type", "stable_diffusion"),
+                                            gguf_options=conf_to_load.get("gguf_options"),
+                                            use_remote_vae=use_remote_vae,
                                         )
-                                        return out[0], out[1], None
-                                    else:
-                                        out = comfy.sd.load_checkpoint_guess_config(
-                                            ckpt_path, output_vae=True, output_clip=True,
-                                            embedding_directory=folder_paths.get_folder_paths("embeddings")
-                                        )
-                                        return out[0], out[1], out[2]
-                                except Exception as e:
-                                    print(f"[GridTester] ❌ Async Worker Error: {e}")
-                                    return None, None, None
-                            
-                            model_cache.preload_base_model(next_model_resolved, _preload_base_worker)
+                                    except Exception as e:
+                                        print(f"[GridTester] ❌ Async Worker Error: {e}")
+                                        return None, None, None
+                                model_cache.preload_base_model(next_model_key, _preload_diff_worker)
             # =========================================================
 
             # Generate image

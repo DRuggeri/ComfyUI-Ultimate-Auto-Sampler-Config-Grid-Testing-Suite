@@ -19,9 +19,9 @@ function ensureModulesLoaded() {
 
     console.log('[ConfigBuilder] Loading modules with cache-bust:', CACHE_BUST);
     moduleLoadPromise = (async () => {
-        const utilitiesModule = await import(`/ultimate_config_sampler/js/conf_builder/conf-builder-utilities.js?v=${CACHE_BUST}`);
-        const uiComponentsModule = await import(`/ultimate_config_sampler/js/conf_builder/conf-builder-ui-components.js?v=${CACHE_BUST}`);
-        const configManagementModule = await import(`/ultimate_config_sampler/js/conf_builder/conf-builder-config-management.js?v=${CACHE_BUST}`);
+        const utilitiesModule = await import(`./conf-builder-utilities.js?v=${CACHE_BUST}`);
+        const uiComponentsModule = await import(`./conf-builder-ui-components.js?v=${CACHE_BUST}`);
+        const configManagementModule = await import(`./conf-builder-config-management.js?v=${CACHE_BUST}`);
 
         utilities = utilitiesModule;
         uiComponents = uiComponentsModule;
@@ -77,6 +77,7 @@ app.registerExtension({
                     config_name: "default_config",
                     auto_save: false,
                     include_none: false,
+                    label_mode: false,
                     global_positive_groups: [],
                     global_negative: "",
                     config_arrays: [{
@@ -86,6 +87,9 @@ app.registerExtension({
                         steps: "20, 30",
                         cfg: "7.0",
                         models: ["None"],
+                        text_encoders: [],
+                        clip_type: "stable_diffusion",
+                        gguf_options: {},
                         loras: ["None"],
                         lora_omit_triggers: [],
                         lora_triggerwords_append_settings: {},
@@ -169,18 +173,32 @@ app.registerExtension({
                     if (!utilities || !configManagement) return;
 
                     const availableLoras = await utilities.getAvailableLoras();
-                    const availableModels = await utilities.getAvailableModels();
                     const loraFolders = await utilities.getLoraFolders();
-                    const modelFolders = await utilities.getModelFolders();
                     const availableSessions = await utilities.getAvailableSessions();
                     const availableConfigs = await utilities.getAvailableConfigs();
+
+                    // Fetch all model type lists via unified endpoint
+                    await utilities.getModelLists();
+
+                    // Build modelLists object for config management
+                    const modelLists = {
+                        checkpoints: await utilities.getAvailableModels(),
+                        checkpointFolders: await utilities.getModelFolders(),
+                        diffusionModels: utilities.getAvailableDiffusionModels(),
+                        diffusionFolders: utilities.getDiffusionModelFolders(),
+                        ggufModels: utilities.getAvailableGGUFModels(),
+                        ggufFolders: utilities.getGGUFModelFolders(),
+                        textEncoders: utilities.getAvailableTextEncoders(),
+                        textEncoderFolders: utilities.getTextEncoderFolders(),
+                        clipTypes: utilities.getClipTypes(),
+                        dualClipTypes: utilities.getDualClipTypes()
+                    };
 
                     await configManagement.renderUI(
                         this,
                         availableLoras,
-                        availableModels,
+                        modelLists,
                         loraFolders,
-                        modelFolders,
                         availableSessions,
                         availableConfigs,
                         utilities.refreshAllConfigBuilders
@@ -224,12 +242,26 @@ app.registerExtension({
                                         return loraStr;
                                     });
 
-                                    arr.models = arr.models.map(modelStr => {
-                                        const normModel = normalize(modelStr);
+                                    // Handle both string and object-format models
+                                    arr.models = arr.models.map(modelEntry => {
+                                        if (typeof modelEntry === 'object' && modelEntry !== null) {
+                                            // Object format: {path, type} — normalize path
+                                            return {
+                                                ...modelEntry,
+                                                path: normalize(modelEntry.path || "")
+                                            };
+                                        }
+                                        // String format (checkpoint) — normalize as before
+                                        const normModel = normalize(modelEntry);
                                         if (normModel.endsWith("/")) return normModel;
                                         if (modelFolders && modelFolders.includes(normModel + "/")) return normModel + "/";
                                         return normModel;
                                     });
+
+                                    // Ensure new fields exist
+                                    if (!arr.text_encoders) arr.text_encoders = [];
+                                    if (!arr.clip_type) arr.clip_type = "stable_diffusion";
+                                    if (!arr.gguf_options) arr.gguf_options = {};
                                 });
 
                                 this.state.config_arrays = loadedArrays;
@@ -264,6 +296,9 @@ app.registerExtension({
                             steps: oldState.steps || "20",
                             cfg: oldState.cfg || "7.0",
                             models: oldState.model ? [utilities.normalizePath(oldState.model)] : ["None"],
+                            text_encoders: [],
+                            clip_type: "stable_diffusion",
+                            gguf_options: {},
                             loras: arr.loras ? arr.loras.map(l => utilities.normalizePath(l)) : ["None"],
                             lora_omit_triggers: [],
                             lora_triggerwords_append_settings: {},
@@ -292,6 +327,7 @@ app.registerExtension({
                             this.state = existing;
                             if (!this.state.config_name) this.state.config_name = "default_config";
                             if (this.state.auto_save === undefined) this.state.auto_save = false;
+                            if (this.state.label_mode === undefined) this.state.label_mode = false;
 
                             // Migration: ensure global prompt fields exist
                             if (!this.state.global_positive_groups) this.state.global_positive_groups = [];
@@ -304,7 +340,13 @@ app.registerExtension({
                                     delete arr.model;
                                 }
                                 if (!arr.models) arr.models = ["None"];
-                                arr.models = arr.models.map(utilities.normalizePath);
+                                // Normalize models — handle both string and object formats
+                                arr.models = arr.models.map(m => {
+                                    if (typeof m === 'object' && m !== null) {
+                                        return { ...m, path: utilities.normalizePath(m.path || "") };
+                                    }
+                                    return utilities.normalizePath(m);
+                                });
                                 arr.loras = arr.loras ? arr.loras.map(l => {
                                     const p = utilities.parseLoraString(l);
                                     return utilities.buildLoraString(p.name, p.model_str, p.clip_str);
@@ -320,6 +362,11 @@ app.registerExtension({
                                 if (!arr.positive_prompt_groups) arr.positive_prompt_groups = [];
                                 if (arr.negative_prompt === undefined) arr.negative_prompt = "";
                                 if (arr.use_custom_prompts === undefined) arr.use_custom_prompts = false;
+
+                                // Migration: ensure new model type fields exist
+                                if (!arr.text_encoders) arr.text_encoders = [];
+                                if (!arr.clip_type) arr.clip_type = "stable_diffusion";
+                                if (!arr.gguf_options) arr.gguf_options = {};
                             });
                         } else if (existing.lora_config) {
                             this.state = this.migrateOldFormat(existing);
@@ -330,8 +377,7 @@ app.registerExtension({
                     await Promise.all([
                         utilities.getAvailableLoras(),
                         utilities.getLoraFolders(),
-                        utilities.getAvailableModels(),
-                        utilities.getModelFolders(),
+                        utilities.getModelLists(),
                         utilities.getAvailableSessions(),
                         utilities.getAvailableConfigs()
                     ]);

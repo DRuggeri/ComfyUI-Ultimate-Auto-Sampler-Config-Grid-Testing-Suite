@@ -166,6 +166,205 @@ def load_checkpoint(
     return loaded_model, loaded_clip, loaded_vae
 
 
+def _import_gguf():
+    """
+    Lazy import of ComfyUI-GGUF modules.
+    Returns (GGMLOps, gguf_sd_loader, gguf_clip_loader, GGUFModelPatcher).
+    Raises RuntimeError if ComfyUI-GGUF is not installed.
+    """
+    try:
+        from ComfyUI_GGUF.ops import GGMLOps
+        from ComfyUI_GGUF.loader import gguf_sd_loader, gguf_clip_loader
+        from ComfyUI_GGUF.nodes import GGUFModelPatcher
+        return GGMLOps, gguf_sd_loader, gguf_clip_loader, GGUFModelPatcher
+    except ImportError:
+        raise RuntimeError(
+            "ComfyUI-GGUF is required for GGUF model loading but is not installed.\n"
+            "Install it from: https://github.com/city96/ComfyUI-GGUF"
+        )
+
+
+def resolve_text_encoder_path(filename):
+    """
+    Resolve a text encoder filename to its full path.
+    Searches text_encoders, clip, and clip_gguf folder paths.
+    """
+    for folder_key in ["text_encoders", "clip", "clip_gguf"]:
+        try:
+            path = folder_paths.get_full_path(folder_key, filename)
+            if path:
+                return path
+        except (KeyError, Exception):
+            continue
+    raise FileNotFoundError(f"Text encoder not found: {filename}")
+
+
+def load_diffusion_model_and_clip(
+    model_name,
+    model_type,
+    text_encoder_paths,
+    clip_type_str,
+    gguf_options=None,
+    use_remote_vae=False,
+    optional_model=None,
+    optional_clip=None,
+    optional_vae=None,
+    model_cache=None
+):
+    """
+    Load a diffusion model (unet) + separate CLIP text encoders.
+    Used for GGUF and standalone diffusion models.
+
+    Args:
+        model_name: Filename of the diffusion model / GGUF model
+        model_type: "diffusion_model" or "gguf"
+        text_encoder_paths: List of text encoder filenames
+        clip_type_str: CLIPType string (e.g. "flux", "sdxl", "stable_diffusion")
+        gguf_options: Dict with dequant_dtype, patch_dtype, patch_on_device (GGUF only)
+        use_remote_vae: Whether remote VAE is enabled
+        optional_model: Optional pre-loaded model override
+        optional_clip: Optional pre-loaded CLIP override
+        optional_vae: Optional pre-loaded VAE override
+        model_cache: ModelCache instance (optional)
+
+    Returns:
+        tuple: (loaded_model, loaded_clip, loaded_vae)
+        Note: loaded_vae is always optional_vae or None (no bundled VAE)
+    """
+    import comfy.model_management
+
+    # Build cache key for this model+text_encoder combo
+    te_key = "|".join(sorted(text_encoder_paths)) if text_encoder_paths else ""
+    cache_key = f"{model_name}::{model_type}::{te_key}"
+
+    # Check cache first
+    if model_cache is not None:
+        cached = model_cache.get_base_model(cache_key)
+        if cached is not None:
+            cached_model, cached_clip, cached_vae = cached
+            final_model = optional_model if optional_model is not None else cached_model
+            final_clip = optional_clip if optional_clip is not None else cached_clip
+            final_vae = optional_vae if optional_vae is not None else cached_vae
+            return final_model, final_clip, final_vae
+
+    # Use optional overrides if all provided
+    if optional_model is not None and optional_clip is not None:
+        print(f"[GridTester] 🔌 Using optional MODEL and CLIP (skipping {model_type} load)")
+        return optional_model, optional_clip, optional_vae
+
+    start_time = time.time()
+
+    # ---- Load the UNet / diffusion model ----
+    loaded_model = optional_model
+    if loaded_model is None:
+        print(f"[GridTester] 💿 LOADING {model_type.upper()}: {model_name}")
+
+        if model_type == "gguf":
+            GGMLOps, gguf_sd_loader, _, GGUFModelPatcher = _import_gguf()
+
+            # Resolve path - try unet_gguf first, then unet/diffusion_models
+            unet_path = None
+            for folder_key in ["unet_gguf", "unet", "diffusion_models"]:
+                try:
+                    unet_path = folder_paths.get_full_path(folder_key, model_name)
+                    if unet_path:
+                        break
+                except (KeyError, Exception):
+                    continue
+            if unet_path is None:
+                raise FileNotFoundError(f"GGUF model not found: {model_name}")
+
+            ops = GGMLOps()
+            if gguf_options:
+                dequant = gguf_options.get("dequant_dtype", "default")
+                if dequant not in ("default", None):
+                    if dequant == "target":
+                        ops.Linear.dequant_dtype = "target"
+                    else:
+                        ops.Linear.dequant_dtype = getattr(torch, dequant)
+                patch = gguf_options.get("patch_dtype", "default")
+                if patch not in ("default", None):
+                    if patch == "target":
+                        ops.Linear.patch_dtype = "target"
+                    else:
+                        ops.Linear.patch_dtype = getattr(torch, patch)
+
+            sd, extra = gguf_sd_loader(unet_path)
+            loaded_model = comfy.sd.load_diffusion_model_state_dict(
+                sd, model_options={"custom_operations": ops}
+            )
+            if loaded_model is None:
+                raise RuntimeError(f"Could not detect model type of GGUF: {model_name}")
+            loaded_model = GGUFModelPatcher.clone(loaded_model)
+            if gguf_options and gguf_options.get("patch_on_device"):
+                loaded_model.patch_on_device = True
+
+        elif model_type == "diffusion_model":
+            unet_path = folder_paths.get_full_path("diffusion_models", model_name)
+            if unet_path is None:
+                # Also try "unet" folder key
+                unet_path = folder_paths.get_full_path("unet", model_name)
+            if unet_path is None:
+                raise FileNotFoundError(f"Diffusion model not found: {model_name}")
+
+            loaded_model = comfy.sd.load_diffusion_model(unet_path, model_options={})
+
+        print(f"[GridTester] ✅ Model loaded in {time.time() - start_time:.2f}s")
+
+    # ---- Load CLIP text encoders ----
+    loaded_clip = optional_clip
+    if loaded_clip is None and text_encoder_paths:
+        clip_start = time.time()
+        print(f"[GridTester] 💿 LOADING TEXT ENCODERS: {text_encoder_paths}")
+
+        clip_type = getattr(comfy.sd.CLIPType, clip_type_str.upper(), comfy.sd.CLIPType.STABLE_DIFFUSION)
+        resolved_paths = [resolve_text_encoder_path(p) for p in text_encoder_paths]
+        is_any_gguf = any(p.endswith(".gguf") for p in text_encoder_paths)
+
+        if is_any_gguf:
+            GGMLOps, _, gguf_clip_loader, GGUFModelPatcher = _import_gguf()
+
+            clip_data = []
+            for p in resolved_paths:
+                if p.endswith(".gguf"):
+                    clip_data.append(gguf_clip_loader(p))
+                else:
+                    sd_te = comfy.utils.load_torch_file(p, safe_load=True)
+                    clip_data.append(sd_te)
+
+            loaded_clip = comfy.sd.load_text_encoder_state_dicts(
+                clip_type=clip_type,
+                state_dicts=clip_data,
+                model_options={
+                    "custom_operations": GGMLOps,
+                    "initial_device": comfy.model_management.text_encoder_offload_device()
+                },
+                embedding_directory=folder_paths.get_folder_paths("embeddings")
+            )
+            loaded_clip.patcher = GGUFModelPatcher.clone(loaded_clip.patcher)
+        else:
+            loaded_clip = comfy.sd.load_clip(
+                ckpt_paths=resolved_paths,
+                embedding_directory=folder_paths.get_folder_paths("embeddings"),
+                clip_type=clip_type
+            )
+
+        print(f"[GridTester] ✅ Text encoders loaded in {time.time() - clip_start:.2f}s")
+
+    elapsed = time.time() - start_time
+    print(f"[GridTester] ✅ Total {model_type} loading: {elapsed:.2f}s")
+
+    # VAE: non-checkpoint models have no bundled VAE
+    loaded_vae = optional_vae  # Could be None
+
+    # Cache the loaded model
+    if model_cache is not None and loaded_model is not None:
+        model_cache.record_disk_load(is_base_model=True, load_time=elapsed)
+        model_cache.put_base_model(cache_key, loaded_model, loaded_clip, loaded_vae)
+
+    return loaded_model, loaded_clip, loaded_vae
+
+
 def load_loras(base_model, base_clip, lora_string, target_model_name, incompatible_loras, model_cache=None):
     """
     Load and patch LoRAs onto model and CLIP.

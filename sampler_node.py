@@ -52,7 +52,7 @@ class SamplerGridTester:
     def INPUT_TYPES(s):
         return {
             "required": {
-                "ckpt_name": (folder_paths.get_filename_list("checkpoints"), ),
+                "ckpt_name": (folder_paths.get_filename_list("checkpoints"), {"tooltip": "Default checkpoint model. Used when config has model set to 'Default'. Configs can also specify GGUF or diffusion models directly via model_type."}),
                 "positive_text": ("STRING", {"multiline": True, "default": "masterpiece, best quality, 1girl"}),
                 "negative_text": ("STRING", {"multiline": True, "default": "bad quality, worst quality, lowres"}),
                 "seed": ("INT", {"default": 0, "min": 0, "max": 0xffffffffffffffff}),
