@@ -346,9 +346,18 @@ async function scanDirectory() {
         const result = await response.json();
 
         if (response.ok) {
-            const metaInfo = result.with_metadata > 0
-                ? `${result.with_metadata} with metadata`
-                : 'no metadata found';
+            const fromManifest = result.from_manifest || 0;
+            let metaInfo;
+            if (fromManifest > 0) {
+                metaInfo = `${fromManifest} from manifest`;
+                if (result.with_metadata > fromManifest) {
+                    metaInfo += `, ${result.with_metadata - fromManifest} with embedded metadata`;
+                }
+            } else {
+                metaInfo = result.with_metadata > 0
+                    ? `${result.with_metadata} with metadata`
+                    : 'no metadata found';
+            }
 
             if (statusEl) {
                 statusEl.innerText = `Found ${result.item_count} images (${metaInfo}). Loading...`;
