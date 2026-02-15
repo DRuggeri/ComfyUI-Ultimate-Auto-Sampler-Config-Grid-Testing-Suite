@@ -196,7 +196,9 @@ app.registerExtension({
                         clipTypes: utilities.getClipTypes(),
                         dualClipTypes: utilities.getDualClipTypes(),
                         vaeModels: utilities.getAvailableVAEs(),
-                        vaeFolders: utilities.getVAEFolders()
+                        vaeFolders: utilities.getVAEFolders(),
+                        samplers: utilities.getAvailableSamplers(),
+                        schedulers: utilities.getAvailableSchedulers()
                     };
 
                     await configManagement.renderUI(

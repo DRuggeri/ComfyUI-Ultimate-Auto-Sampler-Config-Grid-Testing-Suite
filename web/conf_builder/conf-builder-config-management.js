@@ -13,9 +13,7 @@ import {
     countPromptCombinations,
     expandPromptPreview,
     getAvailableVAEs,
-    getVAEFolders,
-    getAvailableSamplers,
-    getAvailableSchedulers
+    getVAEFolders
 } from './conf-builder-utilities.js';
 
 import {
@@ -274,7 +272,7 @@ function createChipListBuilder({ label, stateKey, options, node, arrayIdx, confi
 
 // --- CONFIG ARRAY ELEMENT CREATOR ---
 
-export function createConfigArrayElement(node, configArray, arrayIdx) {
+export function createConfigArrayElement(node, configArray, arrayIdx, modelLists) {
     const div = document.createElement("div");
     div.className = "cb-array";
 
@@ -294,14 +292,14 @@ export function createConfigArrayElement(node, configArray, arrayIdx) {
 
     // Samplers - dropdown + chips list builder
     const samplersBuilder = createChipListBuilder({
-        label: "Samplers", stateKey: "samplers", options: getAvailableSamplers,
+        label: "Samplers", stateKey: "samplers", options: (modelLists && modelLists.samplers) || [],
         node, arrayIdx, configArray, accentColor: "#0088ff", placeholder: "No samplers selected"
     });
     settingsGrid.appendChild(createInputGroup("Samplers", samplersBuilder));
 
     // Schedulers - dropdown + chips list builder
     const schedulersBuilder = createChipListBuilder({
-        label: "Schedulers", stateKey: "schedulers", options: getAvailableSchedulers,
+        label: "Schedulers", stateKey: "schedulers", options: (modelLists && modelLists.schedulers) || [],
         node, arrayIdx, configArray, accentColor: "#00aa66", placeholder: "No schedulers selected"
     });
     settingsGrid.appendChild(createInputGroup("Schedulers", schedulersBuilder));
@@ -2491,7 +2489,7 @@ export async function renderUI(node, availableLoras, modelLists, loraFolders, av
     arraysContainer.className = "cb-arrays-container";
 
     node.state.config_arrays.forEach((configArray, arrayIdx) => {
-        const arrayElement = createConfigArrayElement(node, configArray, arrayIdx);
+        const arrayElement = createConfigArrayElement(node, configArray, arrayIdx, modelLists);
         renderConfigPromptsSection(node, arrayElement, configArray, arrayIdx);
         renderModelsSection(node, arrayElement, configArray, arrayIdx, modelLists);
         renderVAEsSection(node, arrayElement, configArray, arrayIdx, modelLists);
