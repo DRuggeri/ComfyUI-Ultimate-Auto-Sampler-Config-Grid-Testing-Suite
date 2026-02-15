@@ -616,8 +616,11 @@ def run_generation_loop(
                                         patched_clip.cond_stage_model.set_clip_options({"layer": clip_skip})
 
                                     tokens = patched_clip.tokenize(prompt)
-                                    cond, pooled = patched_clip.encode_from_tokens(tokens, return_pooled=True)
-                                    conditioning_cache["positive"][prompt] = [[cond, {"pooled_output": pooled}]]
+                                    # Use return_dict=True to preserve all extra conditioning keys
+                                    # (e.g. t5xxl_ids/t5xxl_weights for Anima, attention_mask for Lumina, etc.)
+                                    pooled_dict = patched_clip.encode_from_tokens(tokens, return_pooled=True, return_dict=True)
+                                    cond = pooled_dict.pop("cond")
+                                    conditioning_cache["positive"][prompt] = [[cond, pooled_dict]]
 
                                     if original_layer is not None:
                                         patched_clip.cond_stage_model.set_clip_options({"layer": original_layer})
@@ -635,8 +638,10 @@ def run_generation_loop(
                                         patched_clip.cond_stage_model.set_clip_options({"layer": clip_skip})
 
                                     tokens = patched_clip.tokenize(prompt)
-                                    cond, pooled = patched_clip.encode_from_tokens(tokens, return_pooled=True)
-                                    conditioning_cache["negative"][prompt] = [[cond, {"pooled_output": pooled}]]
+                                    # Use return_dict=True to preserve all extra conditioning keys
+                                    pooled_dict = patched_clip.encode_from_tokens(tokens, return_pooled=True, return_dict=True)
+                                    cond = pooled_dict.pop("cond")
+                                    conditioning_cache["negative"][prompt] = [[cond, pooled_dict]]
 
                                     if original_layer is not None:
                                         patched_clip.cond_stage_model.set_clip_options({"layer": original_layer})
