@@ -1,8 +1,11 @@
 import re
+import asyncio
 import server
 from aiohttp import web
 import json
 import os
+import urllib.parse
+import mimetypes
 import folder_paths
 import shutil
 from .sampler_node import SamplerGridTester
@@ -11,6 +14,10 @@ from .html_generator import get_html_template
 from .config_builder_node import UltimateConfigBuilder
 from .json_text_node import SmartJSONTextNode
 from .metadata_packer import pack_metadata_into_image
+from .directory_scanner import scan_directory_for_images
+
+# Security whitelist for external image serving (populated by scan_directory route)
+_whitelisted_directories = set()
 
 
 # --- CONFIG MANAGEMENT PATH ---
@@ -447,25 +454,30 @@ async def export_favorites(request):
             file_path = item.get("file", "")
             
             # Parse filename from URL format: /view?filename=img_123.webp&type=output&subfolder=benchmarks/Session/images
-            if file_path.startswith("/view?"):
+            if file_path.startswith("/config_tester/view_external?"):
+                # External directory image - parse absolute path from query param
+                parsed_url = urllib.parse.urlparse(file_path)
+                url_params = urllib.parse.parse_qs(parsed_url.query)
+                source_path = url_params.get("path", [""])[0]
+                filename = os.path.basename(source_path)
+            elif file_path.startswith("/view?"):
                 # Extract filename from URL
-                import urllib.parse
-                parsed = urllib.parse.urlparse(file_path)
-                params = urllib.parse.parse_qs(parsed.query)
-                filename = params.get("filename", [""])[0]
+                parsed_url = urllib.parse.urlparse(file_path)
+                url_params = urllib.parse.parse_qs(parsed_url.query)
+                filename = url_params.get("filename", [""])[0]
+                source_path = os.path.join(images_dir, filename)
             elif file_path.startswith("./images/"):
                 # Relative path format
                 filename = file_path[9:]  # Remove ./images/
+                source_path = os.path.join(images_dir, filename)
             else:
                 # Just use basename
                 filename = os.path.basename(file_path)
-            
+                source_path = os.path.join(images_dir, filename)
+
             if not filename:
                 print(f"[Export] Warning: Could not parse filename from: {file_path}")
                 continue
-            
-            # Source path in benchmarks folder
-            source_path = os.path.join(images_dir, filename)
             
             if not os.path.exists(source_path):
                 print(f"[Export] Warning: Image not found: {source_path}")
@@ -533,6 +545,219 @@ async def export_favorites(request):
         import traceback
         traceback.print_exc()
         return web.Response(status=500, text=str(e))
+
+# =============================================================================
+# API: SCAN EXTERNAL DIRECTORY
+# =============================================================================
+
+@server.PromptServer.instance.routes.post("/config_tester/scan_directory")
+async def scan_directory_route(request):
+    """
+    Scan an external directory for images, extract PNG metadata,
+    and generate a manifest compatible with the dashboard.
+    """
+    try:
+        data = await request.json()
+        directory_path = data.get("directory_path", "").strip()
+        session_name = data.get("session_name", "").strip()
+
+        if not directory_path:
+            return web.json_response({"error": "Missing directory_path"}, status=400)
+
+        # Normalize path
+        directory_path = os.path.normpath(directory_path)
+
+        if not os.path.isabs(directory_path):
+            return web.json_response({"error": "Path must be absolute"}, status=400)
+
+        if not os.path.isdir(directory_path):
+            return web.json_response({"error": f"Directory not found: {directory_path}"}, status=404)
+
+        # Auto-generate session name from directory if not provided
+        if not session_name:
+            dir_basename = os.path.basename(directory_path)
+            session_name = "scan-" + re.sub(r'[^\w\-]', '', dir_basename)
+
+        # Sanitize session name
+        session_name = re.sub(r'[^\w\-]', '', session_name)
+        if not session_name:
+            session_name = "scan-unnamed"
+
+        print(f"[DirScanner] Scanning directory: {directory_path}")
+        print(f"[DirScanner] Session name: {session_name}")
+
+        # Run the scan in a thread pool to avoid blocking the event loop
+        loop = asyncio.get_event_loop()
+        items, stats = await loop.run_in_executor(
+            None, scan_directory_for_images, directory_path
+        )
+
+        print(f"[DirScanner] Found {stats['total']} images ({stats['with_metadata']} with metadata, {stats['skipped']} skipped)")
+
+        # Build manifest
+        manifest = {
+            "session_name": session_name,
+            "items": items,
+            "meta": {
+                "source_directory": directory_path,
+                "scan_type": "directory",
+                "total_scanned": stats["total"],
+                "with_metadata": stats["with_metadata"],
+            }
+        }
+
+        # Save manifest to benchmarks session directory
+        base_dir = os.path.join(folder_paths.get_output_directory(), "benchmarks", session_name)
+        os.makedirs(base_dir, exist_ok=True)
+        manifest_path = os.path.join(base_dir, "manifest.json")
+
+        # If manifest already exists, preserve user tags (favorited/rejected/notes)
+        if os.path.exists(manifest_path):
+            try:
+                with open(manifest_path, "r") as f:
+                    old_manifest = json.load(f)
+                # Build lookup of old items by source_file for tag preservation
+                old_by_source = {}
+                for old_item in old_manifest.get("items", []):
+                    src = old_item.get("source_file")
+                    if src:
+                        old_by_source[src] = old_item
+                # Merge user tags into new items
+                for item in items:
+                    src = item.get("source_file")
+                    if src and src in old_by_source:
+                        old = old_by_source[src]
+                        item["favorited"] = old.get("favorited", False)
+                        item["rejected"] = old.get("rejected", False)
+                        if old.get("notes"):
+                            item["notes"] = old["notes"]
+            except Exception as e:
+                print(f"[DirScanner] Warning: Could not merge old tags: {e}")
+
+        with open(manifest_path, "w") as f:
+            json.dump(manifest, f, indent=2)
+
+        # Whitelist the directory for the view_external route
+        real_dir = os.path.realpath(directory_path)
+        _whitelisted_directories.add(real_dir)
+        print(f"[DirScanner] Whitelisted directory: {real_dir}")
+
+        return web.json_response({
+            "session_name": session_name,
+            "item_count": len(items),
+            "with_metadata": stats["with_metadata"],
+            "without_metadata": len(items) - stats["with_metadata"],
+            "skipped": stats["skipped"],
+        })
+
+    except ValueError as e:
+        return web.json_response({"error": str(e)}, status=400)
+    except Exception as e:
+        print(f"[DirScanner] Error: {e}")
+        import traceback
+        traceback.print_exc()
+        return web.json_response({"error": str(e)}, status=500)
+
+
+# =============================================================================
+# API: SERVE EXTERNAL IMAGES (Security-Whitelisted)
+# =============================================================================
+
+_IMAGE_CONTENT_TYPES = {
+    ".png": "image/png",
+    ".jpg": "image/jpeg",
+    ".jpeg": "image/jpeg",
+    ".webp": "image/webp",
+    ".bmp": "image/bmp",
+    ".gif": "image/gif",
+}
+
+@server.PromptServer.instance.routes.get("/config_tester/view_external")
+async def view_external_image(request):
+    """
+    Serve image files from whitelisted directories.
+    Only directories registered via scan_directory are allowed.
+    """
+    try:
+        encoded_path = request.query.get("path", "")
+        if not encoded_path:
+            return web.Response(status=400, text="Missing path parameter")
+
+        file_path = urllib.parse.unquote(encoded_path)
+
+        # Security: reject directory traversal attempts
+        if ".." in file_path:
+            return web.Response(status=403, text="Forbidden: directory traversal")
+
+        # Resolve to real path
+        real_path = os.path.realpath(file_path)
+
+        # Security: check file extension is an image
+        ext = os.path.splitext(real_path)[1].lower()
+        if ext not in _IMAGE_CONTENT_TYPES:
+            return web.Response(status=403, text="Forbidden: not an image file")
+
+        # Security: check the file's directory is whitelisted
+        real_dir = os.path.dirname(real_path)
+        is_allowed = any(
+            real_dir == wl_dir or real_dir.startswith(wl_dir + os.sep)
+            for wl_dir in _whitelisted_directories
+        )
+
+        if not is_allowed:
+            return web.Response(status=403, text="Forbidden: directory not whitelisted")
+
+        if not os.path.isfile(real_path):
+            return web.Response(status=404, text="File not found")
+
+        content_type = _IMAGE_CONTENT_TYPES.get(ext, "application/octet-stream")
+
+        return web.FileResponse(
+            real_path,
+            headers={
+                "Content-Type": content_type,
+                "Cache-Control": "public, max-age=3600",
+            }
+        )
+
+    except Exception as e:
+        return web.Response(status=500, text=str(e))
+
+
+# =============================================================================
+# API: RE-WHITELIST DIRECTORY (for loading previously scanned sessions)
+# =============================================================================
+
+@server.PromptServer.instance.routes.post("/config_tester/whitelist_directory")
+async def whitelist_directory_route(request):
+    """
+    Re-whitelist a directory for serving images after server restart.
+    Called automatically when loading a scan-type session.
+    """
+    try:
+        data = await request.json()
+        directory_path = data.get("directory_path", "").strip()
+
+        if not directory_path:
+            return web.Response(status=400, text="Missing directory_path")
+
+        directory_path = os.path.normpath(directory_path)
+
+        if not os.path.isabs(directory_path):
+            return web.Response(status=400, text="Path must be absolute")
+
+        if not os.path.isdir(directory_path):
+            return web.Response(status=404, text="Directory not found")
+
+        real_dir = os.path.realpath(directory_path)
+        _whitelisted_directories.add(real_dir)
+        print(f"[DirScanner] Re-whitelisted directory: {real_dir}")
+
+        return web.Response(status=200, text="Whitelisted")
+
+    except Exception as e:
+        return web.Response(status=500, text=str(e))
+
 
 # =============================================================================
 # NODE MAPPINGS

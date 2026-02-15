@@ -42,7 +42,7 @@ But seriously, after updating your code see if it works. If it didn't send the e
 
 ## Feature: LoRA Lookup From Builder UI. Get metadata, images, url, tags, & more to view quickly from builder in comfyui
 
-## Fix: Manifest doesn't need lora omit triggers list in every item
+## ~~Fix: Manifest doesn't need lora omit triggers list in every item~~ (DONE - already stripped in create_image_metadata via .pop())
 
 ## Add attention options, xformers, sdpa, sage, flash, etc, option for test all, test all should clear ram & vram between each test.
 

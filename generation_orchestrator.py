@@ -372,6 +372,9 @@ def run_generation_loop(
                 pass
             
             current_seed = conf["seed"]
+            if conf.get("seed_behavior") == "randomize":
+                import random
+                current_seed = random.randint(0, 2**63 - 1)
             current_job += 1
             
             if pbar:

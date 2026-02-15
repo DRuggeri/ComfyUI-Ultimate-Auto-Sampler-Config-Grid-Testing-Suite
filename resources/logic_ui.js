@@ -183,31 +183,33 @@ function initFilters() {
             b.innerText = label;
             b.title = fullText;
 
+            // Isolate filter: deselect all others, or re-select all if already isolated
+            const isolateFilter = () => {
+                // Check if this is the only active filter
+                const isOnlyActive = filters[key].size === 1 && filters[key].has(val);
+
+                if (isOnlyActive) {
+                    // If it's the only one active, select all instead
+                    unique.forEach(v => filters[key].add(v));
+                    const allButtons = container.querySelectorAll('.filter-btn');
+                    allButtons.forEach(btn => btn.classList.add('active'));
+                } else {
+                    // Clear all filters of this type, add only this one
+                    filters[key].clear();
+                    filters[key].add(val);
+                    const allButtons = container.querySelectorAll('.filter-btn');
+                    allButtons.forEach(btn => btn.classList.remove('active'));
+                    b.classList.add('active');
+                }
+
+                updateDataPipeline();
+            };
+
             b.onclick = (e) => {
                 // Shift-click: Isolate this filter (deselect all others of this type)
                 if (e.shiftKey) {
                     e.preventDefault();
-
-                    // Check if this is the only active filter
-                    const isOnlyActive = filters[key].size === 1 && filters[key].has(val);
-
-                    if (isOnlyActive) {
-                        // If it's the only one active, select all instead
-                        unique.forEach(v => filters[key].add(v));
-                        // Update all buttons
-                        const allButtons = container.querySelectorAll('.filter-btn');
-                        allButtons.forEach(btn => btn.classList.add('active'));
-                    } else {
-                        // Clear all filters of this type
-                        filters[key].clear();
-                        // Add only this one
-                        filters[key].add(val);
-
-                        // Update all buttons visually
-                        const allButtons = container.querySelectorAll('.filter-btn');
-                        allButtons.forEach(btn => btn.classList.remove('active'));
-                        b.classList.add('active');
-                    }
+                    isolateFilter();
                 } else {
                     // Normal click: Toggle this filter
                     if (filters[key].has(val)) {
@@ -217,9 +219,15 @@ function initFilters() {
                         filters[key].add(val);
                         b.classList.add('active');
                     }
-                }
 
-                updateDataPipeline();
+                    updateDataPipeline();
+                }
+            };
+
+            // Double-click: Isolate this filter (same as shift-click)
+            b.ondblclick = (e) => {
+                e.preventDefault();
+                isolateFilter();
             };
 
             filters[key].add(val);

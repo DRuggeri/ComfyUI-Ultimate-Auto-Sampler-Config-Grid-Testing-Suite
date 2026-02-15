@@ -159,6 +159,19 @@ export function createConfigArrayElement(node, configArray, arrayIdx) {
     addInput("Steps", "steps");
     addInput("CFG", "cfg");
 
+    // Seed Behavior Select
+    const seedSelect = document.createElement("select");
+    seedSelect.className = "cb-select";
+    seedSelect.innerHTML = `
+        <option value="fixed" ${(configArray.seed_behavior || "fixed") === "fixed" ? 'selected' : ''}>Fixed (use node seed)</option>
+        <option value="randomize" ${configArray.seed_behavior === "randomize" ? 'selected' : ''}>Randomize every gen</option>
+    `;
+    seedSelect.onchange = () => {
+        node.state.config_arrays[arrayIdx].seed_behavior = seedSelect.value;
+        node.saveState();
+    };
+    settingsGrid.appendChild(createInputGroup("Seed Behavior", seedSelect));
+
     div.appendChild(settingsGrid);
 
     const controlsBar = document.createElement("div");
@@ -1091,8 +1104,23 @@ function renderOmitTriggersSection(node, div, configArray, arrayIdx) {
     const chipsContainer = document.createElement("div");
     chipsContainer.style.cssText = `display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 8px; min-height: 30px;`;
 
+    // Warning element for when omits are set but no trigger append settings exist
+    const warningEl = document.createElement("div");
+    warningEl.style.cssText = "display: none; background: #3d2e00; border: 1px solid #cc6600; border-radius: 4px; padding: 6px 10px; margin-bottom: 8px; font-size: 11px; color: #ffaa00;";
+    warningEl.textContent = "⚠️ Omit list is active, but no LoRAs have trigger word append settings configured. Make sure the Sampler node's \"lora_triggerwords_mode\" is not set to \"None\", or omits will have no effect.";
+    omitSection.appendChild(warningEl);
+
+    const updateOmitWarning = () => {
+        const hasOmits = configArray.lora_omit_triggers && configArray.lora_omit_triggers.length > 0;
+        const appendSettings = configArray.lora_triggerwords_append_settings || {};
+        const hasAppendSettings = Object.values(appendSettings).some(v => v === "start" || v === "end");
+        // Show warning if omits exist but no per-lora append settings are configured
+        warningEl.style.display = (hasOmits && !hasAppendSettings) ? "block" : "none";
+    };
+
     const renderChips = () => {
         chipsContainer.innerHTML = "";
+        updateOmitWarning();
         if (configArray.lora_omit_triggers.length === 0) {
             const placeholder = document.createElement("div");
             placeholder.textContent = "No triggers omitted";
@@ -1207,6 +1235,9 @@ export async function showTriggerLookupModal(node, arrayIdx) {
         const triggers = data.triggers || {};
         status.textContent = `✅ Found triggers for ${Object.keys(triggers).length} LoRAs`;
         const selectedTriggers = new Set();
+        // Build a normalized set of omitted triggers for visual comparison
+        const omitSet = new Set((configArray.lora_omit_triggers || []).map(t => t.toLowerCase().trim()));
+
         Object.entries(triggers).forEach(([loraName, triggerList]) => {
             const loraSection = document.createElement("div");
             loraSection.style.cssText = `background: #333; border-left: 3px solid #0066cc; padding: 10px; margin-bottom: 10px; border-radius: 4px;`;
@@ -1221,6 +1252,7 @@ export async function showTriggerLookupModal(node, arrayIdx) {
                 loraSection.appendChild(noTriggers);
             } else {
                 triggerList.forEach(trigger => {
+                    const isOmitted = omitSet.has(trigger.toLowerCase().trim());
                     const triggerRow = document.createElement("label");
                     triggerRow.style.cssText = `display: flex; align-items: center; gap: 8px; padding: 4px; cursor: pointer; border-radius: 3px;`;
                     triggerRow.onmouseover = () => triggerRow.style.background = "#444";
@@ -1234,9 +1266,20 @@ export async function showTriggerLookupModal(node, arrayIdx) {
                     };
                     const triggerText = document.createElement("span");
                     triggerText.textContent = trigger;
-                    triggerText.style.cssText = "color: #ddd;";
-                    triggerRow.appendChild(checkbox);
-                    triggerRow.appendChild(triggerText);
+                    if (isOmitted) {
+                        triggerText.style.cssText = "color: #888; text-decoration: line-through; opacity: 0.5;";
+                        // Add omitted label
+                        const omitLabel = document.createElement("span");
+                        omitLabel.textContent = "(omitted)";
+                        omitLabel.style.cssText = "color: #cc6600; font-size: 10px; margin-left: 4px;";
+                        triggerRow.appendChild(checkbox);
+                        triggerRow.appendChild(triggerText);
+                        triggerRow.appendChild(omitLabel);
+                    } else {
+                        triggerText.style.cssText = "color: #ddd;";
+                        triggerRow.appendChild(checkbox);
+                        triggerRow.appendChild(triggerText);
+                    }
                     loraSection.appendChild(triggerRow);
                 });
             }
@@ -1797,6 +1840,7 @@ export async function renderUI(node, availableLoras, availableModels, loraFolder
             schedulers: "normal",
             steps: "20",
             cfg: "7.0",
+            seed_behavior: "fixed",
             models: ["None"],
             loras: ["None"],
             lora_omit_triggers: [],

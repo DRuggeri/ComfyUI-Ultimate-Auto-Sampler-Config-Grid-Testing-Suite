@@ -136,7 +136,8 @@ def create_image_metadata(config, width, height, duration, seed, batch_idx, actu
     # These are session-wide settings that don't change per-image
     global_settings_to_remove = [
         "lora_triggerwords_append_settings",
-        "lora_omit_triggers"
+        "lora_omit_triggers",
+        "seed_behavior"
     ]
     
     for key in global_settings_to_remove:
