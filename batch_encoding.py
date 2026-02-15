@@ -60,9 +60,14 @@ def batch_encode_with_cache(clip_model, prompts, cond_cache, prompt_type="positi
                 
                 # Encode batch
                 for prompt in batch_prompts:
+                    # Check for interrupt before each prompt encoding
+                    if comfy.model_management.processing_interrupted():
+                        print(f"\n[GridTester] 🛑 INTERRUPTED during {prompt_type} encoding - Stopping all encoding")
+                        raise comfy.model_management.InterruptProcessingException()
+
                     try:
                         tokens = clip_model.tokenize(prompt)
-                        
+
                         # ComfyUI's CLIP encode_from_tokens doesn't have a layer parameter
                         # We need to use the CLIP model's layer setter before encoding
                         # Store original layer setting
@@ -70,16 +75,20 @@ def batch_encode_with_cache(clip_model, prompts, cond_cache, prompt_type="positi
                         if clip_skip != 0 and hasattr(clip_model.cond_stage_model, 'clip_layer'):
                             original_layer = clip_model.cond_stage_model.clip_layer
                             clip_model.cond_stage_model.set_clip_options({"layer": clip_skip})
-                        
+
                         cond, pooled = clip_model.encode_from_tokens(tokens, return_pooled=True)
                         conditioning = [[cond, {"pooled_output": pooled}]]
                         results[prompt] = conditioning
                         cond_cache.set(prompt, conditioning, prompt_type)
-                        
+
                         # Restore original layer
                         if original_layer is not None:
                             clip_model.cond_stage_model.set_clip_options({"layer": original_layer})
-                            
+
+                    except comfy.model_management.InterruptProcessingException:
+                        print(f"\n[GridTester] 🛑 INTERRUPTED during {prompt_type} encoding - Stopping all encoding")
+                        raise  # Re-raise to stop all encoding
+
                     except Exception as e:
                         print(f"[GridTester] ⚠️ Failed to encode: {e}")
                         results[prompt] = None

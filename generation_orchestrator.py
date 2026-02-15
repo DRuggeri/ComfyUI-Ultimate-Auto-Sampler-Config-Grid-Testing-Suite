@@ -12,6 +12,7 @@ import torch
 import hashlib
 import folder_paths
 import comfy.sd  # Required for async workers
+import comfy.model_management
 
 from .trigger_words import collect_unique_prompts_with_triggers, build_prompt_with_triggers
 from .batch_encoding import batch_encode_prompts
@@ -372,10 +373,20 @@ def run_generation_loop(
         if clip_skip != 0:
             print(f"[GridTester] 🔧 Using clip_skip={clip_skip}")
         
-        conditioning_cache = batch_encode_prompts(
-            patched_clip, unique_positives, unique_negatives, cond_cache, clip_skip, enable_disk_cache=save_conditioning_cache_to_file
-        )
-        
+        try:
+            conditioning_cache = batch_encode_prompts(
+                patched_clip, unique_positives, unique_negatives, cond_cache, clip_skip, enable_disk_cache=save_conditioning_cache_to_file
+            )
+        except comfy.model_management.InterruptProcessingException:
+            print(f"\n[GridTester] 🛑 INTERRUPTED during pre-encoding - Stopping all jobs")
+            loaded_model, loaded_clip, loaded_vae = None, None, None
+            patched_model, patched_clip = None, None
+            gc.collect()
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
+            html = get_html_template(session_name, existing_data, unique_id)
+            return (html,)
+
         cached_model_key = get_model_cache_key(first_conf)
         cached_lora_key = first_conf["lora_expanded"]
         if model_cache:
@@ -574,7 +585,7 @@ def run_generation_loop(
                 if model_switched or not conditioning_cache["positive"]:
                     model_unique_positives = set()
                     model_unique_negatives = set()
-                    
+
                     for future_idx in range(conf_idx, len(expanded)):
                         future_conf = expanded[future_idx]
                         if get_model_cache_key(future_conf) == target_model_key:
@@ -583,45 +594,90 @@ def run_generation_loop(
                             )
                             model_unique_positives.add(future_positive)
                             model_unique_negatives.add(future_conf["negative"])
-                    
+
                     if model_unique_positives:
                         print(f"[GridTester] 🧠 Batch encoding {len(model_unique_positives)} prompts for {target_model_name}")
                         import comfy.model_management as mm_batch
                         mm_batch.load_models_gpu([patched_clip.patcher], force_patch_weights=True)
-                        
+
                         clip_skip = conf.get("clip_skip", 0)
-                        
-                        for prompt in model_unique_positives:
-                            # print(prompt)
-                            if prompt not in conditioning_cache["positive"]:
-                                original_layer = None
-                                if clip_skip != 0 and hasattr(patched_clip.cond_stage_model, 'clip_layer'):
-                                    original_layer = patched_clip.cond_stage_model.clip_layer
-                                    patched_clip.cond_stage_model.set_clip_options({"layer": clip_skip})
-                                
-                                tokens = patched_clip.tokenize(prompt)
-                                cond, pooled = patched_clip.encode_from_tokens(tokens, return_pooled=True)
-                                conditioning_cache["positive"][prompt] = [[cond, {"pooled_output": pooled}]]
-                                
-                                if original_layer is not None:
-                                    patched_clip.cond_stage_model.set_clip_options({"layer": original_layer})
-                        
-                        for prompt in model_unique_negatives:
-                            if prompt not in conditioning_cache["negative"]:
-                                original_layer = None
-                                if clip_skip != 0 and hasattr(patched_clip.cond_stage_model, 'clip_layer'):
-                                    original_layer = patched_clip.cond_stage_model.clip_layer
-                                    patched_clip.cond_stage_model.set_clip_options({"layer": clip_skip})
-                                
-                                tokens = patched_clip.tokenize(prompt)
-                                cond, pooled = patched_clip.encode_from_tokens(tokens, return_pooled=True)
-                                conditioning_cache["negative"][prompt] = [[cond, {"pooled_output": pooled}]]
-                                
-                                if original_layer is not None:
-                                    patched_clip.cond_stage_model.set_clip_options({"layer": original_layer})
-                        
+
+                        try:
+                            for prompt in model_unique_positives:
+                                # Check for interrupt before each prompt encoding
+                                if mm.processing_interrupted():
+                                    print(f"\n[GridTester] 🛑 INTERRUPTED during positive encoding - Stopping all encoding")
+                                    raise comfy.model_management.InterruptProcessingException()
+
+                                if prompt not in conditioning_cache["positive"]:
+                                    original_layer = None
+                                    if clip_skip != 0 and hasattr(patched_clip.cond_stage_model, 'clip_layer'):
+                                        original_layer = patched_clip.cond_stage_model.clip_layer
+                                        patched_clip.cond_stage_model.set_clip_options({"layer": clip_skip})
+
+                                    tokens = patched_clip.tokenize(prompt)
+                                    cond, pooled = patched_clip.encode_from_tokens(tokens, return_pooled=True)
+                                    conditioning_cache["positive"][prompt] = [[cond, {"pooled_output": pooled}]]
+
+                                    if original_layer is not None:
+                                        patched_clip.cond_stage_model.set_clip_options({"layer": original_layer})
+
+                            for prompt in model_unique_negatives:
+                                # Check for interrupt before each prompt encoding
+                                if mm.processing_interrupted():
+                                    print(f"\n[GridTester] 🛑 INTERRUPTED during negative encoding - Stopping all encoding")
+                                    raise comfy.model_management.InterruptProcessingException()
+
+                                if prompt not in conditioning_cache["negative"]:
+                                    original_layer = None
+                                    if clip_skip != 0 and hasattr(patched_clip.cond_stage_model, 'clip_layer'):
+                                        original_layer = patched_clip.cond_stage_model.clip_layer
+                                        patched_clip.cond_stage_model.set_clip_options({"layer": clip_skip})
+
+                                    tokens = patched_clip.tokenize(prompt)
+                                    cond, pooled = patched_clip.encode_from_tokens(tokens, return_pooled=True)
+                                    conditioning_cache["negative"][prompt] = [[cond, {"pooled_output": pooled}]]
+
+                                    if original_layer is not None:
+                                        patched_clip.cond_stage_model.set_clip_options({"layer": original_layer})
+
+                        except comfy.model_management.InterruptProcessingException:
+                            print(f"\n[GridTester] 🛑 INTERRUPTED during encoding - Stopping all jobs")
+
+                            if pending_batch:
+                                if use_remote_vae:
+                                    flush_batch_with_remote_vae(pending_batch, remote_vae_worker, existing_data, session_name)
+                                else:
+                                    flush_batch_with_vae(pending_batch, loaded_vae, paths["images"], existing_data, session_name, paths["manifest"], unique_id)
+                                pending_batch = []
+
+                            if remote_vae_worker:
+                                remote_vae_worker.wait_completion()
+                                remote_vae_worker.stop()
+
+                            existing_data["meta"] = {
+                                "positive": positive_text,
+                                "negative": negative_text,
+                                "model": ckpt_name,
+                                "seed": seed,
+                                "vae_batch_size": vae_batch_size,
+                                "configs_json": configs_json,
+                                "resolutions_json": resolutions_json
+                            }
+                            save_manifest(paths["manifest"], existing_data)
+
+                            loaded_model, loaded_clip, loaded_vae = None, None, None
+                            patched_model, patched_clip = None, None
+                            conditioning_cache.clear()
+                            gc.collect()
+                            if torch.cuda.is_available():
+                                torch.cuda.empty_cache()
+
+                            html = get_html_template(session_name, existing_data, unique_id)
+                            return (html,)
+
                         print(f"[GridTester] ✅ Encoded {len(conditioning_cache['positive'])} positive, {len(conditioning_cache['negative'])} negative")
-                    
+
                     model_switched = False
                 if cond_cache:
                     cond_cache.set_lora_config(conf['lora_expanded'])
