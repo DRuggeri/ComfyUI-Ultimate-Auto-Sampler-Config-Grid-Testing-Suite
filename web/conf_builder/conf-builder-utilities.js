@@ -193,7 +193,8 @@ export async function getModelLists() {
 
         console.log(`[ConfigBuilder] Model lists loaded: ${availableModels?.length || 0} checkpoints, ` +
             `${availableDiffusionModels.length} diffusion models, ${availableGGUFModels.length} GGUFs, ` +
-            `${availableTextEncoders.length} text encoders, ${availableVAEs.length} VAEs`);
+            `${availableTextEncoders.length} text encoders, ${availableVAEs.length} VAEs, ` +
+            `${availableSamplers.length} samplers, ${availableSchedulers.length} schedulers`);
         if (availableDiffusionModels.length === 0) {
             console.log(`[ConfigBuilder] ℹ️ No diffusion models found. Place .safetensors files in ComfyUI/models/unet/ or ComfyUI/models/diffusion_models/`);
         }
