@@ -18,6 +18,8 @@ let availableVAEs = null;
 let vaeFolders = null;
 let clipTypes = [];
 let dualClipTypes = [];
+let availableSamplers = [];
+let availableSchedulers = [];
 let availableSessions = ["None"];
 let availableConfigs = ["None"];
 
@@ -42,6 +44,8 @@ export function clearAllCaches() {
     vaeFolders = null;
     clipTypes = [];
     dualClipTypes = [];
+    availableSamplers = [];
+    availableSchedulers = [];
 }
 
 export async function refreshAllConfigBuilders() {
@@ -179,6 +183,10 @@ export async function getModelLists() {
         clipTypes = data.clip_types || [];
         dualClipTypes = data.dual_clip_types || [];
 
+        // Sampler and scheduler lists
+        availableSamplers = data.samplers || [];
+        availableSchedulers = data.schedulers || [];
+
         // VAE list
         availableVAEs = (data.vae || []).map(normalizePath);
         vaeFolders = extractFolders(availableVAEs);
@@ -209,6 +217,8 @@ export function getAvailableVAEs() { return availableVAEs || []; }
 export function getVAEFolders() { return vaeFolders || ["/"]; }
 export function getClipTypes() { return clipTypes; }
 export function getDualClipTypes() { return dualClipTypes; }
+export function getAvailableSamplers() { return availableSamplers || []; }
+export function getAvailableSchedulers() { return availableSchedulers || []; }
 
 export async function getAvailableSessions() {
     try {
@@ -302,7 +312,10 @@ export function expandPromptPreview(groups, limit = 20) {
 
 export function getIterationCount(configArray) {
     // 1. Params
-    const countSplit = (str) => str.split(",").map(s => s.trim()).filter(s => s).length || 1;
+    const countSplit = (val) => {
+        if (Array.isArray(val)) return val.length || 1;
+        return String(val).split(",").map(s => s.trim()).filter(s => s).length || 1;
+    };
     const s_count = countSplit(configArray.samplers);
     const sch_count = countSplit(configArray.schedulers);
     const st_count = countSplit(configArray.steps);
@@ -396,7 +409,10 @@ export function getIterationCount(configArray) {
 
 export function convertStateToConfigs(state) {
     const configs = [];
-    const split = (str) => str.split(",").map(s => s.trim()).filter(s => s);
+    const split = (val) => {
+        if (Array.isArray(val)) return val.filter(s => s);
+        return String(val).split(",").map(s => s.trim()).filter(s => s);
+    };
 
     // Global prompts from state (used when per-config prompts not set)
     const globalPositiveGroups = state.global_positive_groups || [];
@@ -515,8 +531,8 @@ export function convertConfigsToConfigArrays(configs) {
     if (!configs || !Array.isArray(configs)) {
         return [{
             name: "Config 1",
-            samplers: "euler",
-            schedulers: "normal",
+            samplers: ["euler"],
+            schedulers: ["normal"],
             steps: "20",
             cfg: "7.0",
             seed_behavior: "fixed",
@@ -645,8 +661,8 @@ export function convertConfigsToConfigArrays(configs) {
 
         configArrays.push({
             name: `Loaded Config ${idx + 1}`,
-            samplers: toString(config.sampler || "euler"),
-            schedulers: toString(config.scheduler || "normal"),
+            samplers: Array.isArray(config.sampler) ? config.sampler : [config.sampler || "euler"],
+            schedulers: Array.isArray(config.scheduler) ? config.scheduler : [config.scheduler || "normal"],
             steps: toString(config.steps || "20"),
             cfg: toString(config.cfg || "7.0"),
             seed_behavior: config.seed_behavior || "fixed",
@@ -669,8 +685,8 @@ export function convertConfigsToConfigArrays(configs) {
 
     return configArrays.length > 0 ? configArrays : [{
         name: "Config 1",
-        samplers: "euler",
-        schedulers: "normal",
+        samplers: ["euler"],
+        schedulers: ["normal"],
         steps: "20",
         cfg: "7.0",
         seed_behavior: "fixed",
