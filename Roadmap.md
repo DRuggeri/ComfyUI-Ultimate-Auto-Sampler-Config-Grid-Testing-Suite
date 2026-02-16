@@ -40,11 +40,24 @@ Check Roadmap.md for some tasks and do them. don't do any marked as (low priorit
 ### **ComfyUI Ultimate Sampler Grid – Development Roadmap**
 
 
-# New to-do items, needs more info/explaining/numbering
 
-## Easy Feature: Add Esc key close to Revise modal and add X to close in top right of modal in Dashboard and the Lookup LoRA Metadata from CivitAI, and omit lora triggerwords modals in the Builder UI. 
+## When you click a sampler or scheduler in the dropdown it should add it to the list right away.
 
-## Bug Fix: Batch Encoding Runs Before Job Skip/Continue/Resume check and will encode everything again even if it's already been completed. Also Continue/Resume Should NOT run by default if optional inputs are connected because changes to the optional inputs are not currently being tracked. We need to track connected node changes from each of the optional inputs, we could also use this step to save the workflow to the benchmark/session folder and compare the last run workflow to the current to track node changes and determine changes and also integrate currenly missing from optional inputs such as model, loras, prompts, etc.
+
+
+
+
+
+
+## Save/Load/Import (Merge) Prompts. (With settable unique naming option) Load should offer a searchable dropdown menu for all past saved prompts. Let's store this data in a outputs/benchmarks/PromptsData folder. Each prompt/save should be its own file.
+
+
+## Easy Feature: Add Esc key close to Revise modal and add X to close in top right of modal in Dashboard and the Lookup LoRA Metadata from CivitAI, and omit lora triggerwords modals in the Builder UI.  Also
+Replace revise button in dashboard with edit emoji 
+
+
+
+## Bug Fix: Batch Encoding Runs Before Job Skip/Continue/Resume check and will encode everything again even if it's already been completed. Also Continue/Resume needs optional inputs to be tracked. We need to track connected node changes from each of the optional inputs, we could also use this step to save the workflow to the benchmark/session folder and compare the last run workflow to the current to track node changes and determine changes and also integrate currenly missing from optional inputs such as model, loras, prompts, etc.
 
 
 # Needs Testing: Batch encoding doesnt seem to be working for optional inputs possibly, or maybe its very large models, I get loading messages after every single encoding instead of once per batch and it takes a long time (low priority)
@@ -55,8 +68,6 @@ loaded partially; 5553.58 MB usable, 5511.79 MB loaded, 660.34 MB offloaded, 41.
 loaded partially; 5537.65 MB usable, 5495.86 MB loaded, 676.40 MB offloaded, 41.79 MB buffer reserved, lowvram patches: 0
 maybe we need to force encodings to offload to ram?
 
-## ~~Fix: Manifest doesn't need lora omit triggers list in every item~~ (DONE - already stripped in create_image_metadata via .pop())
-
 ## Add attention options, xformers, sdpa, sage, flash, etc, option for test all, test all should clear ram & vram between each test.
 
 # Deeper explained items to-do list
@@ -65,53 +76,23 @@ maybe we need to force encodings to offload to ram?
 
 * **Problem:** The `SamplerGridTester` node cannot reliably detect changes in optional inputs (`optional_model`, `optional_vae`, etc.) because standard `IS_CHANGED` logic relies on input hash comparisons, which don't update for passed objects in optional slots.
 
- Causes problems with:
-
- * Grid view using wrong model names
  * Job continuation/skipping/resuming
 
 
- * **Instruction:**
-1. **Modify `sampler_node.py`:** Implement the `IS_CHANGED` class method. Check if any optional input keys are present in the `kwargs`. If yes, return `float("NaN")` (standard ComfyUI trick to force execution) or a `uuid.uuid4().hex`.
-2. **Modify `generation_orchestrator.py`:** Update `check_if_job_completed`. If optional inputs were used, you cannot trust the `manifest.json` history for that specific job. Force a re-run or calculate a hash of the optional input's internal state (e.g., `model.model.diffusion_model`) if possible, otherwise force execution.
-
-
-* **Target Files:** `sampler_node.py`, `generation_orchestrator.py`
 
 
 #### **7. CivitAI Download Integration** (low priority)
-
-* **Problem:** Can fetch info but not download files.
-* **Instruction:**
-1. **Backend:** In `__init__.py`, add route `@routes.post("/configbuilder/download_lora")`.
-2. **Logic:** In `lora_utils.py`, write a `download_file(url, filename)` function using `requests`. Ensure it saves to `folder_paths.get_full_path("loras")`.
-3. **Frontend:** In `web/config_builder.js`, add a "Download" button next to the CivitAI info result. Call the new API endpoint.
+A button in the builder UI to pack short sha256 into config with an explanation that it can be used to share or move an Ultimate Sampler Config Tester workflow and allow for downloading all models and loras in the workflow from civitAI with a few simple easy clicks. lora_utils has calculate civit model has function in it. dropdown configurable options for where to store each file type.
 
 
 * **Target Files:** `__init__.py`, `lora_utils.py`, `web/config_builder.js`
 
 
-#### **9. Tag/Token-Based Omit Logic**
-
-* **Problem:** Current logic (`if word in tag`) is too broad or too strict.
-* **Instruction:**
-1. **Modify `trigger_words.py`:** Update `get_filtered_lora_triggers`.
-2. **Regex:** Instead of `if omit in tag`, use `re.search(r'\b' + re.escape(omit) + r'\b', tag, re.IGNORECASE)`. This ensures "blue" removes "blue" but not "blueberry".
-3. **Tokenization:** Split the tag into words, filter against the omit set, and rejoin.
+#### **9. Tag/Token-Based Omit Logic** DONE
 
 
-* **Target Files:** `trigger_words.py`
+#### **10. Validation Warning (Omit vs Lookup) - Warn user if omits are added but lookup is off** (low priority) DONE
 
-#### **10. Validation Warning (Omit vs Lookup) - Warn user if omits are added but lookup is off** (low priority)
-
-* **Problem:** User adds omit words but forgets to enable "Lookup & Append".
-* **Instruction:**
-1. **Modify `web/config_builder.js`:** inside the `render()` loop.
-2. **Logic:** `if (this.state.lora_omit_triggers.length > 0 && !this.state.lookup_triggers)`.
-3. **UI:** Render a warning alert div: "⚠️ Omit list is active, but Trigger Lookup is disabled. Omits will have no effect."
-
-
-* **Target Files:** `web/config_builder.js`
 
 #### **11. Model-Specific Prompts**
 
@@ -121,8 +102,9 @@ maybe we need to force encodings to offload to ram?
 2. **Orchestrator:** In `generation_orchestrator.py`, inside the loop, check the current `conf["model"]`.
 3. **Injection:** Look up the model name in the map. If found, prepend/append the specific tags to `actual_positive_prompt` before encoding.
 
+add options for append to start or end of prompt.
 
-* **Target Files:** `sampler_node.py`, `generation_orchestrator.py`, `trigger_words.py`
+* **Target Files:** `sampler_node.py`, `generation_orchestrator.py`, `trigger_words.py` `batch_encoder.py`
 
 #### **12. Arrays in LoRA Weights**
 
@@ -146,15 +128,6 @@ maybe we need to force encodings to offload to ram?
 
 * **Target Files:** `generation_orchestrator.py`, `resources/logic_events.js`, `resources/template.html`
 
-#### **14. Cache Trigger Word Placement** (low priority)
-
-* **Problem:** `trigger_words.py` logic runs every loop iteration.
-* **Instruction:**
-1. **Modify `trigger_words.py`:**  
-2. **Apply:** Decorate `get_filtered_lora_triggers`
-
-* **Target Files:** `trigger_words.py`
-
 
 
 
@@ -166,6 +139,7 @@ maybe we need to force encodings to offload to ram?
 2. **Dropdown:** Create a hidden `div` "menu-dropdown". Move "Cols", "Go To", and "Save/Load" inputs inside it.
 3. **Modify `resources/logic_ui.js`:** Add logic to toggle visibility of "menu-dropdown" when the gear is clicked.
 
+Move COLS input into session popup modal, change session to cogwheel, change filters to filter icon,
 
 * **Target Files:** `resources/template.html`, `resources/logic_ui.js`
 
@@ -186,10 +160,11 @@ maybe we need to force encodings to offload to ram?
 * **Problem:** Users don't know shortcuts.
 * **Instruction:**
 1. **Modify `resources/logic_ui.js`:** In the function that renders the settings menu, append a table.
-2. **Content:** `F: Fullscreen`, `Arrows: Pan`, `+/-: Zoom`, `Space: Scroll`.
-
+2. **Content:** `F: Fullscreen`, `Arrows: Pan`, `+/-: Zoom`, `Space: Scroll`. `0 Key Resets Zoom & Pan` Etc
 
 * **Target Files:** `resources/logic_ui.js`
+
+Put the reference list at the bottom of the session popup modal
 
 #### **21. Virtual DOM Pan/Zoom (Canvas Builder)** (low priority)
 
@@ -219,10 +194,11 @@ maybe we need to force encodings to offload to ram?
 1. **Modify `json_text_node.py`:** This needs to interface with `comfy.nodes.GraphExecutor`.
 2. **Logic:** Treat the input JSON as a "Group Node". Map the inputs of the `SamplerGridTester` to the inputs defined in the JSON. Execute the subgraph. Return the latent.
 
+More info needed on how this could work, would like to see a visual interface for it in the builder UI eventaully. (big job, very low priority)
 
 * **Target Files:** `json_text_node.py`, `sampler_node.py`
 
-#### **24. Combinatorial Randomization** - More Randomization tools - generate x configs from y possibilities and z prompts - (low priority)
+#### **24. Combinatorial Randomization** - More Randomization tools - generate x configs from y possibilities and z prompts - (very low priority)
 
 * **Problem:**  Feature. Combinatorial generation logic. Combine random prompts with random loras, fun!
 * **Instruction:**
@@ -232,7 +208,7 @@ maybe we need to force encodings to offload to ram?
 
 * **Target Files:** `config_builder_node.py`
 
-#### **25. Double Click Filter (Isolate)** - (low priority)
+#### **25. Double Click Filter (Isolate)** - (very low priority)
 
 * **Problem:** Tedious to uncheck all other filters.
 * **Instruction:**
@@ -243,16 +219,9 @@ maybe we need to force encodings to offload to ram?
 
 * **Target Files:** `resources/logic_ui.js`
 
-#### **26. Path Validation in Builder** (low priority)
-
-* **Problem:** Add validation check to builder for lora and model paths
-* **Instruction:**
-1. **Modify `web/config_builder.js`:** In the rendering loop for models/LoRAs.
-2. **Check:** Compare input value against `availableModels` / `availableLoras` arrays.
-3. **UI:** If not found, add `border: 1px solid red` and a tooltip "File not found".
+#### **26. Path Validation in Builder** (DONE)
 
 
-* **Target Files:** `web/config_builder.js`
 
 
 
@@ -273,7 +242,7 @@ maybe we need to force encodings to offload to ram?
 #### **15/16. Lookahead Caching Switch & Debug** COMPLETED
 
 
-Add "Don't Append" option to Append Lora Triggerwords To: section. (Adds all triggerwords to omit lora triggerwords list. COMPLETED
+Add "Don't Append" option to Append Lora Triggerwords To: section. Adds all triggerwords to omit lora triggerwords list. COMPLETED
 
 
 ## Feature: LoRA Lookup From Builder UI. Get metadata, images, url, tags, & more to view quickly from builder in comfyui
@@ -288,3 +257,6 @@ Prompts manager section in config builder, browse & combine past prompts, analyz
 
 
 #### **8. Visualize Omitted Triggers** COMPLETED
+
+
+## ~~Fix: Manifest doesn't need lora omit triggers list in every item~~ (DONE - already stripped in create_image_metadata via .pop())
