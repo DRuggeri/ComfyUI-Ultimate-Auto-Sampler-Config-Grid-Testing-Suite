@@ -9,72 +9,77 @@ import comfy.samplers
 
 def parse_prompt_input_nested(prompt_input: str):
     """
-    Parse prompt input that supports plain text, single-level, and nested arrays.
-    Creates Cartesian products from nested arrays.
-    
+    Parse prompt input that supports plain text and arbitrarily deep nested arrays.
+    Recursively creates Cartesian products from nested lists.
+
+    Rules:
+        - A plain string is a single prompt option
+        - A flat list of strings ["a", "b"] = multiple OPTIONS (OR logic)
+        - A list containing sub-lists = SEQUENCE (AND logic, Cartesian product)
+        - Nesting can be arbitrarily deep
+
     Args:
         prompt_input: Plain text string OR JSON string containing prompts
-        
+
     Returns:
         List of final prompt strings
-        
+
     Examples:
-        Plain text: "my prompt" -> ["my prompt"]
-        Plain text with quotes: '"my prompt"' -> ["my prompt"]
-        Simple: '["a", "b", "c"]' -> ["a", "b", "c"]
-        Nested: '[["a", "b"], ["1", "2"]]' -> ["a, 1", "a, 2", "b, 1", "b, 2"]
+        Plain text:     "my prompt"                                          -> ["my prompt"]
+        Simple options: '["a", "b", "c"]'                                    -> ["a", "b", "c"]
+        Cartesian:      '[["a", "b"], ["1", "2"]]'                           -> ["a, 1", "a, 2", "b, 1", "b, 2"]
+        Recursive:      '["Photo of", ["a cat", "a dog"], ["in space", ["eating pizza", "sleeping"]]]'
+                        -> ["Photo of, a cat, in space, eating pizza",
+                            "Photo of, a cat, in space, sleeping",
+                            "Photo of, a dog, in space, eating pizza",
+                            "Photo of, a dog, in space, sleeping"]
     """
-    import json
-    import itertools
-    
-    # Handle None or empty string input
+
+    def recursive_cartesian(item):
+        """Recursively expand nested prompt structures into flat string options."""
+        # Base Case: string/primitive -> single option
+        if not isinstance(item, list):
+            return [str(item)]
+
+        # Check if this list contains any sub-lists
+        has_nested = any(isinstance(sub, list) for sub in item)
+
+        # Flat list of strings -> OPTIONS (OR logic)
+        if not has_nested:
+            return [str(x) for x in item]
+
+        # List containing sub-lists -> SEQUENCE (AND logic, Cartesian product)
+        # Each element is recursively resolved into its options, then we take the product
+        normalized_groups = []
+        for sub in item:
+            normalized_groups.append(recursive_cartesian(sub))
+
+        # Generate Cartesian product across the resolved groups
+        combinations = itertools.product(*normalized_groups)
+        return [", ".join(combo) for combo in combinations]
+
+    # Handle None or empty string
     if not prompt_input or prompt_input.strip() == "":
         return [""]
-    
-    # Strip whitespace
+
     prompt_input = prompt_input.strip()
-    
-    # Try to parse as JSON first
+
+    # Try parsing as JSON
     try:
         parsed = json.loads(prompt_input)
     except (json.JSONDecodeError, ValueError):
         # Not valid JSON - treat as plain text
-        # Remove quotes if they exist (user might have typed "my prompt")
         if (prompt_input.startswith('"') and prompt_input.endswith('"')) or \
            (prompt_input.startswith("'") and prompt_input.endswith("'")):
             prompt_input = prompt_input[1:-1]
         return [prompt_input]
-    
+
     # Handle empty parsed result
     if not parsed:
         return [""]
-    
-    # If it's a single string from JSON
-    if isinstance(parsed, str):
-        return [parsed]
-    
-    # Check if this is a nested structure (has any lists inside)
-    has_nested = any(isinstance(item, list) for item in parsed)
-    
-    if not has_nested:
-        # Simple list of strings: ["a", "b", "c"]
-        return [str(item) for item in parsed]
-    
-    # Nested structure - expand to Cartesian product
-    normalized = []
-    for item in parsed:
-        if isinstance(item, list):
-            normalized.append([str(x) for x in item])
-        else:
-            normalized.append([str(item)])
-    
-    # Generate Cartesian product
-    combinations = list(itertools.product(*normalized))
-    
-    # Join each combination with ", "
-    result = [", ".join(combo) for combo in combinations]
-    
-    return result
+
+    # Start the recursion
+    return recursive_cartesian(parsed)
 
 
 def normalize_str(s):
@@ -181,39 +186,135 @@ def parse_lora_definition(lora_string):
     return definitions
 
 
+def _expand_lora_weight_arrays(lora_string):
+    """
+    Expand LoRA weight arrays into individual LoRA strings.
+
+    Supports array notation in strength values for grid searching:
+    - "lora.safetensors:[0.5, 0.8]:1.0" -> ["lora.safetensors:0.5:1.0", "lora.safetensors:0.8:1.0"]
+    - "lora.safetensors:1.0:[0.5, 0.8]" -> ["lora.safetensors:1.0:0.5", "lora.safetensors:1.0:0.8"]
+    - "lora.safetensors:[0.5, 0.8]:[0.6, 1.0]" -> 4 combinations via Cartesian product
+    - "lora1:[0.5, 0.8]:1.0 + lora2:1.0:1.0" -> expands lora1 weights, keeps lora2 fixed in each
+
+    Args:
+        lora_string: Single LoRA definition (may contain " + " for stacked LoRAs)
+
+    Returns:
+        List of expanded LoRA strings with concrete weight values
+    """
+    if lora_string == "None":
+        return ["None"]
+
+    # Split stacked LoRAs
+    stack_parts = lora_string.split(" + ")
+
+    # For each part, check if it has array weights
+    parts_expansions = []
+    has_arrays = False
+
+    for part in stack_parts:
+        part = part.strip()
+
+        # Check for bracket notation in strength values
+        # Match pattern: name:[array_or_value]:[array_or_value] or name:[array_or_value]
+        bracket_match = re.search(r'\[[\d.,\s]+\]', part)
+        if not bracket_match:
+            # No arrays in this part, keep as-is
+            parts_expansions.append([part])
+            continue
+
+        has_arrays = True
+
+        # Parse the part: split on ":" but respect brackets
+        # Strategy: find the name (everything before first ":"), then parse strength fields
+        segments = []
+        current = ""
+        depth = 0
+        for ch in part:
+            if ch == '[':
+                depth += 1
+                current += ch
+            elif ch == ']':
+                depth -= 1
+                current += ch
+            elif ch == ':' and depth == 0:
+                segments.append(current)
+                current = ""
+            else:
+                current += ch
+        if current:
+            segments.append(current)
+
+        name = segments[0]
+
+        # Parse each strength segment - could be "[0.5, 0.8]" or just "1.0"
+        strength_lists = []
+        for i in range(1, len(segments)):
+            seg = segments[i].strip()
+            if seg.startswith('[') and seg.endswith(']'):
+                # Array notation - parse values
+                inner = seg[1:-1]
+                values = [v.strip() for v in inner.split(',') if v.strip()]
+                strength_lists.append(values)
+            else:
+                strength_lists.append([seg])
+
+        # Generate all combinations of strengths for this LoRA
+        if strength_lists:
+            combos = list(itertools.product(*strength_lists))
+            expanded = [f"{name}:{':'.join(combo)}" for combo in combos]
+            parts_expansions.append(expanded)
+        else:
+            parts_expansions.append([part])
+
+    if not has_arrays:
+        return [lora_string]
+
+    # Cartesian product across stacked LoRAs
+    result = []
+    for combo in itertools.product(*parts_expansions):
+        result.append(" + ".join(combo))
+
+    if len(result) > 1:
+        print(f"[GridTester] 🎛️ LoRA weight arrays expanded to {len(result)} combinations")
+
+    return result
+
+
 def expand_lora_stack(lora_input):
     """
-    Expand LoRA stacks with folder support.
-    
+    Expand LoRA stacks with folder support and weight array expansion.
+
     Handles formats like:
     - "lora.safetensors"
     - "lora.safetensors:0.8:0.6"
+    - "lora.safetensors:[0.5, 0.8]:1.0" (weight array - grid searches strengths)
     - "lora1:0.8:0.6 + lora2:1.0:1.0"
     - "folder/ + lora.safetensors" (expands each LoRA individually)
     - "folder/* + lora.safetensors" (stacks ALL LoRAs in folder together)
     - "folder/:0.8:0.6 + lora.safetensors"
     - "folder/*:0.8:0.6" (stacks ALL LoRAs with same strength)
-    
+
     Args:
         lora_input: LoRA specification string or list
-        
+
     Returns:
         List of expanded LoRA stack strings
     """
     def to_list(x):
         return x if isinstance(x, list) else [x]
-    
+
     raw_loras = to_list(lora_input)
     expanded_loras = []
-    
+
     for l in raw_loras:
         if l == "None":
             expanded_loras.append("None")
             continue
-        
+
         stack_parts = l.split(" + ")
         expanded_parts = []
-        
+
         for part in stack_parts:
             if ":" in part:
                 p_split = part.split(":", 1)
@@ -222,15 +323,15 @@ def expand_lora_stack(lora_input):
             else:
                 base_path = part.strip()
                 args = ""
-            
+
             norm_path = base_path.replace("\\", "/")
-            
+
             # Check for folder/* syntax (stack all together)
             if norm_path.endswith("/*") or (norm_path.endswith("*") and "/" in norm_path):
                 # Remove the /* or * suffix
                 folder_path = norm_path.rstrip("/*").rstrip("*").rstrip("/")
                 found_files = get_files_from_folder(folder_path + "/", "loras")
-                
+
                 if found_files:
                     # Stack ALL files together as a single entry (not separate combinations)
                     stacked = " + ".join([f"{f}{args}" for f in found_files])
@@ -239,21 +340,24 @@ def expand_lora_stack(lora_input):
                 else:
                     print(f"[GridTester] ⚠️ No LoRAs found in folder: {folder_path}")
                     expanded_parts.append([])
-                    
+
             # Check for regular folder/ syntax (expand individually)
             elif norm_path.endswith("/"):
                 found_files = get_files_from_folder(base_path, "loras")
                 expanded_parts.append([f"{f}{args}" for f in found_files])
             else:
                 expanded_parts.append([part])
-        
+
         # Skip if any part expanded to empty
         if not all(expanded_parts):
             continue
-            
+
         for combo in itertools.product(*expanded_parts):
-            expanded_loras.append(" + ".join(combo))
-    
+            joined = " + ".join(combo)
+            # Now expand any weight arrays in the joined result
+            weight_expanded = _expand_lora_weight_arrays(joined)
+            expanded_loras.extend(weight_expanded)
+
     return expanded_loras
 
 
@@ -374,10 +478,28 @@ def expand_configs(raw_configs, pos_prompts, neg_prompts, denoise_values, seed, 
         if not isinstance(lora_triggerwords_append_settings, dict):
             lora_triggerwords_append_settings = {}
 
+        # Get model-specific prompt prefix/suffix (quality tags for specific model families)
+        model_prompt_prefix = entry.get("model_prompt_prefix", "")
+        model_prompt_suffix = entry.get("model_prompt_suffix", "")
+        if not isinstance(model_prompt_prefix, str):
+            model_prompt_prefix = str(model_prompt_prefix)
+        if not isinstance(model_prompt_suffix, str):
+            model_prompt_suffix = str(model_prompt_suffix)
+
+        # Get attention mode(s) for testing different attention implementations
+        # Valid: "default", "xformers", "pytorch", "flash", "sage", "sage3", "sub_quad", "split", "*"
+        VALID_ATTENTION_MODES = ["default", "xformers", "pytorch", "flash", "sage", "sage3", "sub_quad", "split"]
+        raw_attention = to_list(entry.get("attention_mode", "default"))
+        if raw_attention == ["*"]:
+            attention_modes = VALID_ATTENTION_MODES
+        else:
+            attention_modes = [a for a in raw_attention if a in VALID_ATTENTION_MODES] or ["default"]
+
         # Build all combinations
         base_combos = []
         for combo in itertools.product(samplers, schedulers, steps_l, cfgs, clip_skips, expanded_loras,
-                                      denoise_values, entry_prompt_pairs, expanded_models, raw_vaes):
+                                      denoise_values, entry_prompt_pairs, expanded_models, raw_vaes,
+                                      attention_modes):
             base_combos.append({
                 "sampler": combo[0],
                 "scheduler": combo[1],
@@ -390,6 +512,7 @@ def expand_configs(raw_configs, pos_prompts, neg_prompts, denoise_values, seed, 
                 "negative": combo[7][1],
                 "model": combo[8],
                 "vae": combo[9],
+                "attention_mode": combo[10],
                 "seed": seed,
                 "seed_behavior": entry.get("seed_behavior", "fixed"),
                 "model_type": model_type,
@@ -397,7 +520,9 @@ def expand_configs(raw_configs, pos_prompts, neg_prompts, denoise_values, seed, 
                 "text_encoders": list(text_encoders),
                 "gguf_options": dict(gguf_options) if gguf_options else {},
                 "lora_omit_triggers": list(lora_omit_triggers),
-                "lora_triggerwords_append_settings": dict(lora_triggerwords_append_settings)
+                "lora_triggerwords_append_settings": dict(lora_triggerwords_append_settings),
+                "model_prompt_prefix": model_prompt_prefix.strip(),
+                "model_prompt_suffix": model_prompt_suffix.strip()
             })
 
         # Apply base seed and extra seeds

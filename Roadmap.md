@@ -52,33 +52,25 @@ Check Roadmap.md for some tasks and do them. don't do any marked as (low priorit
 ## Save/Load/Import (Merge) Prompts. (With settable unique naming option) Load should offer a searchable dropdown menu for all past saved prompts. Let's store this data in a outputs/benchmarks/PromptsData folder. Each prompt/save should be its own file.
 
 
-## Easy Feature: Add Esc key close to Revise modal and add X to close in top right of modal in Dashboard and the Lookup LoRA Metadata from CivitAI, and omit lora triggerwords modals in the Builder UI.  Also
+## ~~Easy Feature: Add Esc key close to Revise modal and add X to close in top right of modal in Dashboard and the Lookup LoRA Metadata from CivitAI, and omit lora triggerwords modals in the Builder UI.~~ COMPLETED Also
 Replace revise button in dashboard with edit emoji 
 
 
 
 ## Bug Fix: Batch Encoding Runs Before Job Skip/Continue/Resume check and will encode everything again even if it's already been completed. Also Continue/Resume needs optional inputs to be tracked. We need to track connected node changes from each of the optional inputs, we could also use this step to save the workflow to the benchmark/session folder and compare the last run workflow to the current to track node changes and determine changes and also integrate currenly missing from optional inputs such as model, loras, prompts, etc.
 
+## ~~Fix: Manifest doesn't need lora omit triggers list in every item~~ (DONE - already stripped in create_image_metadata via .pop())
 
-# Needs Testing: Batch encoding doesnt seem to be working for optional inputs possibly, or maybe its very large models, I get loading messages after every single encoding instead of once per batch and it takes a long time (low priority)
-Symptom: each encoding fills the GPU more and more and eventually it becomes 0 usable, 0 loaded all offloaded.
-loaded partially; 5585.34 MB usable, 5543.55 MB loaded, 628.32 MB offloaded, 41.79 MB buffer reserved, lowvram patches: 0
-loaded partially; 5569.51 MB usable, 5527.72 MB loaded, 644.90 MB offloaded, 41.79 MB buffer reserved, lowvram patches: 0
-loaded partially; 5553.58 MB usable, 5511.79 MB loaded, 660.34 MB offloaded, 41.79 MB buffer reserved, lowvram patches: 0
-loaded partially; 5537.65 MB usable, 5495.86 MB loaded, 676.40 MB offloaded, 41.79 MB buffer reserved, lowvram patches: 0
-maybe we need to force encodings to offload to ram?
-
-## Add attention options, xformers, sdpa, sage, flash, etc, option for test all, test all should clear ram & vram between each test.
+## ~~Add attention options, xformers, sdpa, sage, flash, etc, option for test all, test all should clear ram & vram between each test.~~ COMPLETED
+* **Status:** Added `attention_mode` config field supporting: default, xformers, pytorch, flash, sage, sage3, sub_quad, split. Use `"*"` to test all modes. Runtime switching via `transformer_options["optimized_attention_override"]` in ComfyUI's attention registry. Config Builder UI has dropdown+chips selector. Per-image metadata tracks which attention mode was used for dashboard filtering. Integrated into config expansion (Cartesian product with other params), skip/resume matching, and generation pipeline.
 
 # Deeper explained items to-do list
 
-#### **1. Skip Logic for Optional Inputs**
+#### **1. Skip Logic for Optional Inputs** COMPLETED
 
 * **Problem:** The `SamplerGridTester` node cannot reliably detect changes in optional inputs (`optional_model`, `optional_vae`, etc.) because standard `IS_CHANGED` logic relies on input hash comparisons, which don't update for passed objects in optional slots.
-
- * Job continuation/skipping/resuming
-
-
+* **Status:** Implemented `IS_CHANGED` classmethod in `sampler_node.py` that returns `float("NaN")` when any optional input is connected (forces re-execution), or a deterministic hash when no optional inputs are used (allows caching). Updated `check_if_job_completed` in `generation_orchestrator.py` to skip model/lora/prompt matching when optional inputs are connected, since those values come from upstream nodes whose changes can't be tracked. Added warning when resume mode is used with optional inputs.
+* **Target Files:** `sampler_node.py`, `generation_orchestrator.py`
 
 
 #### **7. CivitAI Download Integration** (low priority)
@@ -94,44 +86,37 @@ A button in the builder UI to pack short sha256 into config with an explanation 
 #### **10. Validation Warning (Omit vs Lookup) - Warn user if omits are added but lookup is off** (low priority) DONE
 
 
-#### **11. Model-Specific Prompts**
+#### **11. Model-Specific Prompts** COMPLETED
 
 * **Problem:** Different models need different trigger words (e.g., "score_9, score_8" for Pony vs "masterpiece" for SD1.5).
-* **Instruction:**
-1. **Backend:** Add `model_specific_prompts` input to `SamplerGridTester` (dict or JSON).
-2. **Orchestrator:** In `generation_orchestrator.py`, inside the loop, check the current `conf["model"]`.
-3. **Injection:** Look up the model name in the map. If found, prepend/append the specific tags to `actual_positive_prompt` before encoding.
+* **Status:** Implemented as per-config `model_prompt_prefix` and `model_prompt_suffix` fields. These quality tags are prepended/appended to ALL prompts for a given config, wrapping around the entire prompt+triggers assembly. Added `_apply_model_prompt_affixes()` helper in `trigger_words.py`, integrated into both `build_prompt_with_triggers()` and `collect_unique_prompts_with_triggers()` for correct pre-encoding. Config Builder UI shows prefix/suffix text inputs in the Prompts section of each config. Fields persist through save/load and are passed through `expand_configs()` in `config_utils.py`.
+* **Target Files:** `trigger_words.py`, `config_utils.py`, `conf-builder-config-management.js`, `conf-builder-utilities.js`, `conf-builder-main.js`
 
-add options for append to start or end of prompt.
-
-* **Target Files:** `sampler_node.py`, `generation_orchestrator.py`, `trigger_words.py` `batch_encoder.py`
-
-#### **12. Arrays in LoRA Weights**
+#### **12. Arrays in LoRA Weights** COMPLETED
 
 * **Problem:** Cannot grid search LoRA weights like `lora.safetensors:[0.5, 0.8]:1.0`.
-* **Instruction:**
-1. **Modify `config_utils.py`:** Update `expand_configs`.
-2. **Logic:** Detect brackets `[]` inside the LoRA string part. If found, treat it as a list.
-3. **Expansion:** Use `itertools.product` to generate separate config entries for each weight in the array (e.g., one config with 0.5, one with 0.8).
-
-
+* **Status:** Implemented `_expand_lora_weight_arrays()` in `config_utils.py`. Supports `[0.5, 0.8]` syntax in both model_strength and clip_strength positions, with Cartesian product for multiple arrays.
 * **Target Files:** `config_utils.py`
 
-#### **13. Real-Time ETA**
+#### **13. Real-Time ETA** COMPLETED
 
 * **Problem:** ETA only prints to server console.
+* **Status:** Implemented real-time progress bar in Dashboard. Backend sends `ultimate_grid.progress` events via WebSocket after each job. Frontend displays an ETA bar below the header with job count, percentage, ETA, finish time, and avg duration. Shows completion summary and auto-hides after 30s.
+* **Target Files:** `generation_orchestrator.py`, `web/dashboard.js`, `resources/logic_events.js`, `resources/template.html`
+
+#### **14. Cache Trigger Word Placement** (low priority)
+
+* **Problem:** `trigger_words.py` logic runs every loop iteration.
 * **Instruction:**
-1. **Backend (`generation_orchestrator.py`):** In `print_generation_progress`, calculate ETA. Use `PromptServer.instance.send_sync("ultimate_grid.progress", { eta: "..." })` to send it to the frontend.
-2. **Frontend (`resources/logic_events.js`):** Add a listener for `ultimate_grid.progress`.
-3. **UI:** Update a DOM element (e.g., `#header-eta`) in `template.html`.
+1. **Modify `trigger_words.py`:**  
+2. **Apply:** Decorate `get_filtered_lora_triggers`
 
-
-* **Target Files:** `generation_orchestrator.py`, `resources/logic_events.js`, `resources/template.html`
+* **Target Files:** `trigger_words.py`
 
 
 
 
-#### **17. Menu Refactor (Cog Wheel)**
+#### **17. Menu Refactor (Cog Wheel)** COMPLETED
 
 * **Problem:** Header is cluttered.
 * **Instruction:**
@@ -142,6 +127,8 @@ add options for append to start or end of prompt.
 Move COLS input into session popup modal, change session to cogwheel, change filters to filter icon,
 
 * **Target Files:** `resources/template.html`, `resources/logic_ui.js`
+* **Status:** Moved Go To #, Cols, and Reset Zoom into a cog wheel (gear icon) dropdown menu. Added SVG gear icon button, CSS for dropdown menu with items, click-outside-to-close, and Esc key handling.
+* **Target Files:** `resources/template.html`, `resources/logic_ui.js`, `resources/report.css`
 
 #### **18. Optionally Pack workflow into images ** (low priority)
 
@@ -155,14 +142,11 @@ Move COLS input into session popup modal, change session to cogwheel, change fil
 * **Target Files:** `image_generation.py`, `generation_orchestrator.py`
 
 
-#### **20. Hotkeys Reference List**
+#### **20. Hotkeys Reference List** COMPLETED
 
 * **Problem:** Users don't know shortcuts.
-* **Instruction:**
-1. **Modify `resources/logic_ui.js`:** In the function that renders the settings menu, append a table.
-2. **Content:** `F: Fullscreen`, `Arrows: Pan`, `+/-: Zoom`, `Space: Scroll`. `0 Key Resets Zoom & Pan` Etc
-
-* **Target Files:** `resources/logic_ui.js`
+* **Status:** Already implemented in `resources/template.html` as a KEYBOARD SHORTCUTS section in the Filters & Info popup, with a table showing Space, Shift+Space, Arrow Keys, +/-, 0, F, and Shift+Click shortcuts. `0 Key Resets Zoom & Pan` Etc
+* **Target Files:** `resources/template.html`
 
 Put the reference list at the bottom of the session popup modal
 

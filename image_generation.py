@@ -23,11 +23,12 @@ def generate_image(
     positive_conditioning,
     negative_conditioning,
     latent_input,
-    denoise
+    denoise,
+    attention_mode="default"
 ):
     """
     Generate a single image using ComfyUI's KSampler.
-    
+
     Args:
         patched_model: Model (potentially with LoRAs applied)
         seed: Random seed
@@ -39,27 +40,54 @@ def generate_image(
         negative_conditioning: Negative conditioning tensor
         latent_input: Input latent tensor dict
         denoise: Denoise strength (0.0-1.0)
-        
+        attention_mode: Attention implementation to use ("default", "xformers", "pytorch",
+                       "flash", "sage", "sage3", "sub_quad", "split")
+
     Returns:
         tuple: (result_latent_dict, generation_duration_seconds)
     """
+    # Apply attention mode override if not "default"
+    original_attn_override = None
+    if attention_mode and attention_mode != "default":
+        try:
+            from comfy.ldm.modules.attention import get_attention_function
+            attn_func = get_attention_function(attention_mode, default=None)
+            if attn_func is not None:
+                # Save original override (if any) and set the new one
+                original_attn_override = patched_model.model_options.get("transformer_options", {}).get("optimized_attention_override")
+                if "transformer_options" not in patched_model.model_options:
+                    patched_model.model_options["transformer_options"] = {}
+                patched_model.model_options["transformer_options"]["optimized_attention_override"] = attn_func
+            else:
+                print(f"[GridTester] ⚠️ Attention mode '{attention_mode}' not available, using default")
+        except Exception as e:
+            print(f"[GridTester] ⚠️ Could not set attention mode '{attention_mode}': {e}")
+
     t0 = time.time()
-    
-    result = nodes.common_ksampler(
-        model=patched_model,
-        seed=seed,
-        steps=steps,
-        cfg=cfg,
-        sampler_name=sampler_name,
-        scheduler=scheduler,
-        positive=positive_conditioning,
-        negative=negative_conditioning,
-        latent=latent_input,
-        denoise=denoise
-    )
-    
+
+    try:
+        result = nodes.common_ksampler(
+            model=patched_model,
+            seed=seed,
+            steps=steps,
+            cfg=cfg,
+            sampler_name=sampler_name,
+            scheduler=scheduler,
+            positive=positive_conditioning,
+            negative=negative_conditioning,
+            latent=latent_input,
+            denoise=denoise
+        )
+    finally:
+        # Restore original attention override
+        if attention_mode and attention_mode != "default":
+            if original_attn_override is not None:
+                patched_model.model_options["transformer_options"]["optimized_attention_override"] = original_attn_override
+            elif "transformer_options" in patched_model.model_options and "optimized_attention_override" in patched_model.model_options["transformer_options"]:
+                del patched_model.model_options["transformer_options"]["optimized_attention_override"]
+
     duration = round(time.time() - t0, 3)
-    
+
     return result[0], duration
 
 
@@ -138,12 +166,18 @@ def create_image_metadata(config, width, height, duration, seed, batch_idx, actu
         "lora_triggerwords_append_settings",
         "lora_omit_triggers",
         "seed_behavior",
-        "gguf_options"
+        "gguf_options",
+        "model_prompt_prefix",
+        "model_prompt_suffix"
     ]
-    
+
     for key in global_settings_to_remove:
         meta.pop(key, None)
-    
+
+    # Remove attention_mode if it's "default" (keep manifest backward-compatible)
+    if meta.get("attention_mode") == "default":
+        meta.pop("attention_mode", None)
+
     meta.update({
         "width": width,
         "height": height,
@@ -153,7 +187,7 @@ def create_image_metadata(config, width, height, duration, seed, batch_idx, actu
         "positive": actual_positive_prompt,
         "negative": actual_negative_prompt
     })
-    
+
     return meta
 
 

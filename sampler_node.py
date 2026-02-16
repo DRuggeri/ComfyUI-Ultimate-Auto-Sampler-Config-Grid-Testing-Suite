@@ -10,6 +10,7 @@ import os
 import time
 import random
 import hashlib
+import uuid
 import folder_paths
 import nodes
 import comfy.utils
@@ -98,6 +99,48 @@ class SamplerGridTester:
     FUNCTION = "run_tests"
     CATEGORY = "sampling/testing"
 
+    @classmethod
+    def IS_CHANGED(cls, **kwargs):
+        """
+        Force re-execution when optional inputs are connected.
+
+        ComfyUI's standard IS_CHANGED uses input hash comparisons to decide
+        whether to skip execution. However, for complex objects like MODEL, CLIP,
+        VAE, and CONDITIONING passed via optional inputs, the hash doesn't reliably
+        change when the upstream node's internal state changes (e.g., user swaps
+        model in a loader node).
+
+        When ANY optional input is connected, we return a unique value each time
+        to force ComfyUI to always re-execute this node, ensuring the grid tester
+        picks up upstream changes to models, LoRAs, prompts, etc.
+
+        When NO optional inputs are connected, we return a deterministic hash
+        based on the text/numeric inputs so ComfyUI can properly cache.
+        """
+        optional_keys = [
+            "optional_model", "optional_clip", "optional_vae",
+            "optional_positive", "optional_negative", "optional_latent"
+        ]
+
+        # Check if any optional input is connected (not None and present in kwargs)
+        has_optional = any(
+            kwargs.get(key) is not None for key in optional_keys
+        )
+
+        if has_optional:
+            # Force re-execution every time - optional inputs can't be reliably hashed
+            return float("NaN")
+
+        # No optional inputs - return deterministic hash so ComfyUI can cache properly
+        # Hash the text/numeric inputs that we CAN reliably track
+        hash_parts = []
+        for key in sorted(kwargs.keys()):
+            if key not in optional_keys and key != "unique_id":
+                val = kwargs.get(key)
+                if val is not None:
+                    hash_parts.append(f"{key}={val}")
+
+        return hashlib.md5("|".join(hash_parts).encode()).hexdigest()
 
     # --- HELPER METHODS ---
     def is_float_equal(self, a, b, tolerance=1e-5):
