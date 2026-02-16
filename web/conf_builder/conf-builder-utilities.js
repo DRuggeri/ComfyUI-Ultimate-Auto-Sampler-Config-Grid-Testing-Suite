@@ -367,6 +367,7 @@ export function getIterationCount(configArray) {
     } else {
         configArray.models.forEach(m => {
             const modelPath = typeof m === 'string' ? m : (m?.path || "None");
+            if (configArray.model_bypass_states?.[modelPath]) return; // Skip bypassed
             const modelType = typeof m === 'string' ? 'checkpoint' : (m?.type || 'checkpoint');
 
             // Pick the correct file list for folder expansion
@@ -399,6 +400,7 @@ export function getIterationCount(configArray) {
         configArray.loras.forEach(l => {
             const parsed = parseLoraString(l);
             const name = parsed.name;
+            if (configArray.lora_bypass_states?.[name]) return; // Skip bypassed
             if (name === "None") {
                 l_count += 1;
             } else if (name.endsWith("/*")) {
@@ -461,8 +463,12 @@ export function convertStateToConfigs(state) {
     const globalNegative = state.global_negative || "";
 
     state.config_arrays.forEach(configArray => {
-        // Process LoRAs - FIXED VERSION
-        let loras = configArray.loras.filter(l => l && l !== "None");
+        // Process LoRAs - filter out bypassed entries
+        let loras = configArray.loras.filter(l => {
+            if (!l || l === "None") return false;
+            const parsed = parseLoraString(l);
+            return !configArray.lora_bypass_states?.[parsed.name];
+        });
 
         // Convert loras array to proper format
         let loraValue;
@@ -480,11 +486,11 @@ export function convertStateToConfigs(state) {
         let finalModels = [];
         (configArray.models || []).forEach(m => {
             if (typeof m === 'object' && m !== null) {
-                if (m.path && m.path !== "None") {
+                if (m.path && m.path !== "None" && !configArray.model_bypass_states?.[m.path]) {
                     finalModels.push(m.path);
                     modelType = m.type || "checkpoint";
                 }
-            } else if (typeof m === 'string' && m && m !== "None") {
+            } else if (typeof m === 'string' && m && m !== "None" && !configArray.model_bypass_states?.[m]) {
                 finalModels.push(m);
             }
         });
