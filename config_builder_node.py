@@ -737,6 +737,109 @@ async def lookup_lora_metadata_endpoint(request):
         }, status=500)
 
 
+# API endpoint for detailed Model/Checkpoint metadata lookup
+@server.PromptServer.instance.routes.post("/configbuilder/lookup_model_metadata")
+async def lookup_model_metadata_endpoint(request):
+    """API endpoint to lookup full metadata for a model/checkpoint from CivitAI"""
+    try:
+        data = await request.json()
+        model_name = data.get("model_name", "")
+        model_type = data.get("model_type", "checkpoint")
+
+        if not model_name:
+            return web.json_response({
+                "error": "No model name provided"
+            }, status=400)
+
+        print(f"[ConfigBuilder] 🔍 Full metadata lookup request for model: {model_name} (type: {model_type})")
+
+        # Resolve the full path based on model type
+        model_path = None
+        if model_type == "gguf":
+            try:
+                model_path = folder_paths.get_full_path("unet_gguf", model_name)
+            except (KeyError, Exception):
+                pass
+            if model_path is None:
+                model_path = folder_paths.get_full_path("diffusion_models", model_name)
+        elif model_type == "diffusion_model":
+            model_path = folder_paths.get_full_path("diffusion_models", model_name)
+        else:
+            model_path = folder_paths.get_full_path("checkpoints", model_name)
+
+        if model_path is None:
+            return web.json_response({
+                "error": f"Model file not found: {model_name}"
+            }, status=404)
+
+        # Calculate the hash
+        model_hash = calculate_sha256(model_path)
+        short_hash = model_hash[:10]
+
+        print(f"[ConfigBuilder] 📊 Hash calculated: {short_hash}")
+
+        # Fetch metadata from CivitAI
+        model_info = get_model_version_info(model_hash)
+
+        if model_info is None:
+            return web.json_response({
+                "error": "No metadata found on CivitAI",
+                "hash": model_hash,
+                "short_hash": short_hash
+            }, status=404)
+
+        # Extract relevant information
+        metadata = {
+            "name": model_info.get("name", "Unknown"),
+            "model_name": model_info.get("model", {}).get("name", "Unknown") if isinstance(model_info.get("model"), dict) else "Unknown",
+            "trained_words": model_info.get("trainedWords", []),
+            "base_model": model_info.get("baseModel", "Unknown"),
+            "description": model_info.get("description", ""),
+            "tags": model_info.get("model", {}).get("tags", []) if isinstance(model_info.get("model"), dict) else [],
+            "images": [],
+            "url": f"https://civitai.com/models/{model_info.get('modelId', '')}" if model_info.get("modelId") else "",
+            "hash": model_hash,
+            "short_hash": short_hash,
+            "file_path": model_path,
+            "stats": model_info.get("stats", {}),
+            "creator": model_info.get("creator", {}).get("username", "Unknown") if isinstance(model_info.get("creator"), dict) else "Unknown"
+        }
+
+        # Extract images
+        if "images" in model_info and isinstance(model_info["images"], list):
+            for img in model_info["images"][:5]:
+                if isinstance(img, dict) and "url" in img:
+                    metadata["images"].append({
+                        "url": img["url"],
+                        "nsfw": img.get("nsfw", "None"),
+                        "width": img.get("width", 0),
+                        "height": img.get("height", 0)
+                    })
+
+        # Save metadata to file
+        output_dir = folder_paths.get_output_directory()
+        model_data_dir = os.path.join(output_dir, "benchmarks", "model-data", model_name.replace("/", "_").replace("\\", "_").replace(".safetensors", "").replace(".ckpt", "").replace(".gguf", ""))
+        os.makedirs(model_data_dir, exist_ok=True)
+
+        metadata_file = os.path.join(model_data_dir, "metadata.json")
+        save_dict_to_json(metadata, metadata_file)
+
+        print(f"[ConfigBuilder] ✅ Model metadata saved to: {metadata_file}")
+
+        return web.json_response({
+            "metadata": metadata,
+            "saved_to": metadata_file
+        })
+
+    except Exception as e:
+        print(f"[ConfigBuilder] ❌ Error in lookup_model_metadata endpoint: {e}")
+        import traceback
+        traceback.print_exc()
+        return web.json_response({
+            "error": str(e)
+        }, status=500)
+
+
 # API endpoint to get all model lists for unified model selector
 @server.PromptServer.instance.routes.get("/configbuilder/model_lists")
 async def get_model_lists_endpoint(request):

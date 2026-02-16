@@ -619,6 +619,55 @@ export function createModelElement(node, modelEntry, arrayIdx, modelIdx, modelLi
         contentDiv.appendChild(expandBtn);
     }
 
+    // --- COLLAPSIBLE "MORE MODEL OPTIONS" SECTION ---
+    if (modelPath !== "None" && !isFolder) {
+        const moreOptionsUid = `${uid}-moreoptions`;
+        const isMoreOptionsCollapsed = node.uiState.modelsCollapsed[moreOptionsUid] !== false; // Default collapsed
+
+        const moreOptionsSection = document.createElement("div");
+        moreOptionsSection.style.cssText = `background: #252525; border-radius: 4px; padding: 8px; margin-top: 6px; border-left: 3px solid #cc6600;`;
+
+        const moreOptionsHeader = document.createElement("div");
+        moreOptionsHeader.style.cssText = "display: flex; justify-content: space-between; align-items: center; cursor: pointer; user-select: none;";
+
+        const moreOptionsTitle = document.createElement("div");
+        moreOptionsTitle.textContent = "⚙️ More Model Options";
+        moreOptionsTitle.style.cssText = "font-size: 11px; font-weight: bold; color: #cc6600;";
+
+        const moreOptionsArrow = document.createElement("span");
+        moreOptionsArrow.textContent = isMoreOptionsCollapsed ? "▶" : "▼";
+        moreOptionsArrow.style.cssText = "font-size: 10px; color: #cc6600;";
+
+        moreOptionsHeader.appendChild(moreOptionsTitle);
+        moreOptionsHeader.appendChild(moreOptionsArrow);
+        moreOptionsSection.appendChild(moreOptionsHeader);
+
+        const moreOptionsContent = document.createElement("div");
+        moreOptionsContent.style.display = isMoreOptionsCollapsed ? "none" : "flex";
+        moreOptionsContent.style.flexDirection = "column";
+        moreOptionsContent.style.gap = "8px";
+        moreOptionsContent.style.marginTop = "8px";
+
+        // Toggle handler
+        moreOptionsHeader.onclick = () => {
+            const isNowCollapsed = moreOptionsContent.style.display !== "none";
+            moreOptionsContent.style.display = isNowCollapsed ? "none" : "flex";
+            moreOptionsArrow.textContent = isNowCollapsed ? "▶" : "▼";
+            node.uiState.modelsCollapsed[moreOptionsUid] = isNowCollapsed;
+        };
+
+        // Model Metadata Lookup Button
+        const metadataBtn = document.createElement("button");
+        metadataBtn.className = "cb-button";
+        metadataBtn.style.cssText = `width: 100%; background: linear-gradient(135deg, #cc8833, #cc6600); border-left: 4px solid #ffaa44; margin-top: 4px;`;
+        metadataBtn.textContent = "🔍 Lookup Model Metadata from CivitAI";
+        metadataBtn.onclick = async () => await showModelMetadataModal(node, arrayIdx, modelPath, modelType);
+        moreOptionsContent.appendChild(metadataBtn);
+
+        moreOptionsSection.appendChild(moreOptionsContent);
+        contentDiv.appendChild(moreOptionsSection);
+    }
+
     div.appendChild(contentDiv);
     return div;
 }
@@ -1173,6 +1222,184 @@ async function showLoraMetadataModal(node, arrayIdx, loraName) {
     modal.appendChild(closeBtn);
 }
 
+// Modal for Model/Checkpoint metadata lookup from CivitAI
+async function showModelMetadataModal(node, arrayIdx, modelName, modelType) {
+    const overlay = document.createElement("div");
+    overlay.style.cssText = `position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0, 0, 0, 0.85); display: flex; align-items: center; justify-content: center; z-index: 10000;`;
+
+    const modal = document.createElement("div");
+    modal.classList.add("cb-modal-popup");
+
+    // Red X close button
+    const closeX = document.createElement("button");
+    closeX.textContent = "✖";
+    closeX.style.cssText = "position: absolute; top: 10px; right: 10px; background: #cc3333; color: white; border: none; border-radius: 4px; width: 28px; height: 28px; font-size: 16px; cursor: pointer; display: flex; align-items: center; justify-content: center; z-index: 1;";
+    closeX.onmouseover = () => closeX.style.background = "#dd4444";
+    closeX.onmouseout = () => closeX.style.background = "#cc3333";
+
+    const closeModal = () => {
+        if (overlay.parentNode) document.body.removeChild(overlay);
+        document.removeEventListener('keydown', escHandler);
+    };
+
+    closeX.onclick = closeModal;
+    modal.appendChild(closeX);
+
+    // Close on Escape key
+    const escHandler = (e) => {
+        if (e.key === 'Escape') closeModal();
+    };
+    document.addEventListener('keydown', escHandler);
+
+    const title = document.createElement("h3");
+    title.textContent = "🔍 Model Metadata Lookup";
+    title.style.cssText = "margin: 0 0 15px 0; color: #cc6600;";
+    modal.appendChild(title);
+
+    const status = document.createElement("div");
+    status.textContent = `🔄 Fetching metadata for: ${modelName.split('/').pop()}`;
+    status.style.cssText = "margin-bottom: 15px; color: #aaa;";
+    modal.appendChild(status);
+
+    const content = document.createElement("div");
+    modal.appendChild(content);
+
+    const closeBtn = document.createElement("button");
+    closeBtn.className = "cb-button";
+    closeBtn.textContent = "Close";
+    closeBtn.style.marginTop = "15px";
+    closeBtn.onclick = closeModal;
+
+    overlay.appendChild(modal);
+    document.body.appendChild(overlay);
+
+    // Fetch metadata
+    try {
+        const resp = await fetch("/configbuilder/lookup_model_metadata", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ model_name: modelName, model_type: modelType })
+        });
+
+        if (!resp.ok) {
+            const errorData = await resp.json();
+            status.textContent = "❌ Error: " + (errorData.error || "Failed to fetch metadata");
+            status.style.color = "#ff6666";
+
+            // If we got a hash back even though CivitAI didn't have it, show it
+            if (errorData.short_hash) {
+                const hashInfo = document.createElement("div");
+                hashInfo.style.cssText = "margin-top: 8px; font-size: 11px; color: #888;";
+                hashInfo.textContent = `Hash: ${errorData.short_hash}`;
+                content.appendChild(hashInfo);
+            }
+
+            modal.appendChild(closeBtn);
+            return;
+        }
+
+        const data = await resp.json();
+        const metadata = data.metadata;
+
+        status.textContent = "✅ Metadata loaded successfully!";
+        status.style.color = "#66ff66";
+
+        // Display metadata
+        content.innerHTML = "";
+
+        // Model name and creator
+        const headerSection = document.createElement("div");
+        headerSection.style.cssText = "margin-bottom: 15px; padding-bottom: 10px; border-bottom: 2px solid #444;";
+        headerSection.innerHTML = `
+            <div style="font-size: 18px; font-weight: bold; color: #ffaa44; margin-bottom: 5px;">${metadata.model_name}</div>
+            <div style="font-size: 14px; color: #aaa;">Version: ${metadata.name}</div>
+            <div style="font-size: 12px; color: #888;">Creator: ${metadata.creator}</div>
+            <div style="font-size: 11px; color: #666; margin-top: 5px;">
+                Hash: <code style="background: #1a1a1a; padding: 2px 6px; border-radius: 3px;">${metadata.short_hash}</code>
+            </div>
+        `;
+        content.appendChild(headerSection);
+
+        // Base Model and Tags
+        const infoSection = document.createElement("div");
+        infoSection.style.cssText = "margin-bottom: 15px;";
+        infoSection.innerHTML = `
+            <div style="margin-bottom: 8px;"><strong style="color: #cc6600;">Base Model:</strong> ${metadata.base_model}</div>
+            <div style="margin-bottom: 8px;">
+                <strong style="color: #cc6600;">Tags:</strong>
+                <div style="margin-top: 4px; display: flex; flex-wrap: wrap; gap: 4px;">
+                    ${metadata.tags.slice(0, 10).map(tag => `<span style="background: #444; padding: 2px 8px; border-radius: 10px; font-size: 11px;">${tag}</span>`).join('')}
+                </div>
+            </div>
+        `;
+        content.appendChild(infoSection);
+
+        // Trigger Words (some models have them too)
+        if (metadata.trained_words && metadata.trained_words.length > 0) {
+            const triggerSection = document.createElement("div");
+            triggerSection.style.cssText = "margin-bottom: 15px; background: #252525; padding: 10px; border-radius: 4px; border-left: 3px solid #00aa88;";
+            triggerSection.innerHTML = `
+                <div style="font-weight: bold; color: #00aa88; margin-bottom: 6px;">🏷️ Trigger Words:</div>
+                <div style="display: flex; flex-wrap: wrap; gap: 6px;">
+                    ${metadata.trained_words.map(word => `<span style="background: #333; padding: 4px 8px; border-radius: 4px; font-size: 12px; font-family: monospace;">${word}</span>`).join('')}
+                </div>
+            `;
+            content.appendChild(triggerSection);
+        }
+
+        // Images
+        if (metadata.images && metadata.images.length > 0) {
+            const imagesSection = document.createElement("div");
+            imagesSection.style.cssText = "margin-bottom: 15px;";
+            imagesSection.innerHTML = `<div style="font-weight: bold; color: #cc6600; margin-bottom: 8px;">📸 Example Images:</div>`;
+
+            const imageGrid = document.createElement("div");
+            imageGrid.style.cssText = "display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 8px;";
+
+            metadata.images.forEach(img => {
+                const imgContainer = document.createElement("div");
+                imgContainer.style.cssText = "position: relative; aspect-ratio: 1; overflow: hidden; border-radius: 4px; border: 1px solid #444; cursor: pointer;";
+                imgContainer.title = "Click to open full size";
+
+                const imgElem = document.createElement("img");
+                imgElem.src = img.url;
+                imgElem.style.cssText = "width: 100%; height: 100%; object-fit: cover;";
+                imgElem.onclick = () => window.open(img.url, '_blank');
+
+                imgContainer.appendChild(imgElem);
+                imageGrid.appendChild(imgContainer);
+            });
+
+            imagesSection.appendChild(imageGrid);
+            content.appendChild(imagesSection);
+        }
+
+        // Links
+        const linksSection = document.createElement("div");
+        linksSection.style.cssText = "margin-top: 15px; padding-top: 10px; border-top: 2px solid #444;";
+
+        const civitaiLink = document.createElement("a");
+        civitaiLink.href = metadata.url;
+        civitaiLink.target = "_blank";
+        civitaiLink.textContent = "🌐 View on CivitAI";
+        civitaiLink.style.cssText = "display: inline-block; background: #0066cc; color: white; padding: 8px 16px; border-radius: 4px; text-decoration: none; margin-right: 10px;";
+
+        const savedPath = document.createElement("div");
+        savedPath.style.cssText = "margin-top: 8px; font-size: 11px; color: #666;";
+        savedPath.textContent = `💾 Metadata saved to: ${data.saved_to}`;
+
+        linksSection.appendChild(civitaiLink);
+        linksSection.appendChild(savedPath);
+        content.appendChild(linksSection);
+
+    } catch (e) {
+        status.textContent = "❌ Error: " + e.message;
+        status.style.color = "#ff6666";
+        console.error("[ConfigBuilder] Model metadata lookup error:", e);
+    }
+
+    modal.appendChild(closeBtn);
+}
 
 
 // --- RENDER MODELS AND LORAS SECTIONS ---
