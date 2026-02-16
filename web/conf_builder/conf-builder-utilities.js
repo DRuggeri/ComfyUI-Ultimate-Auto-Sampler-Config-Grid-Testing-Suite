@@ -546,6 +546,11 @@ export function convertStateToConfigs(state) {
             config.lora_bypass_states = configArray.lora_bypass_states;
         }
 
+        // Add model_bypass_states if any are set
+        if (configArray.model_bypass_states && Object.keys(configArray.model_bypass_states).length > 0) {
+            config.model_bypass_states = configArray.model_bypass_states;
+        }
+
         // Add lora_strength_lock if any are set
         if (configArray.lora_strength_lock && Object.keys(configArray.lora_strength_lock).length > 0) {
             config.lora_strength_lock = configArray.lora_strength_lock;
@@ -602,6 +607,7 @@ export function convertConfigsToConfigArrays(configs) {
             lora_triggerwords_append_settings: {},
             lora_bypass_states: {},
             lora_strength_lock: {},
+            model_bypass_states: {},
             combine: false,
             positive_prompt_groups: [],
             negative_prompt: "",
@@ -678,6 +684,12 @@ export function convertConfigsToConfigArrays(configs) {
             strengthLock = { ...config.lora_strength_lock };
         }
 
+        // Load model_bypass_states
+        let modelBypassStates = {};
+        if (config.model_bypass_states && typeof config.model_bypass_states === 'object') {
+            modelBypassStates = { ...config.model_bypass_states };
+        }
+
         // Parse VAE
         let vaes = ["None"];
         if (config.vae) {
@@ -738,6 +750,7 @@ export function convertConfigsToConfigArrays(configs) {
             lora_triggerwords_append_settings: triggerPlacements,
             lora_bypass_states: bypassStates,
             lora_strength_lock: strengthLock,
+            model_bypass_states: modelBypassStates,
             combine: hasCombined,
             positive_prompt_groups: positivePromptGroups,
             negative_prompt: negativePrompt,
@@ -767,6 +780,7 @@ export function convertConfigsToConfigArrays(configs) {
         lora_triggerwords_append_settings: {},
         lora_bypass_states: {},
         lora_strength_lock: {},
+        model_bypass_states: {},
         combine: false,
         positive_prompt_groups: [],
         negative_prompt: "",

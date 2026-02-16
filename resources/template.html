@@ -13,9 +13,6 @@
 
     <!-- COMPACT SINGLE-LINE HEADER -->
     <div id="header">
-        <button class="session-popup-btn" onclick="toggleSessionPopup()" title="Session Management">
-            SESSION
-        </button>
         <button class="filter-popup-btn" onclick="toggleFiltersPopup()" title="Open Filters & Info">
             FILTERS
         </button>
@@ -47,14 +44,40 @@
         </div>
 
         <!-- COG WHEEL MENU -->
-        <div class="cog-menu-container" style="position: relative; overflow: visible;">
+        <div class="cog-menu-container">
             <button class="action-btn" onclick="toggleCogMenu()" title="Settings">
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
                     <circle cx="12" cy="12" r="3"></circle>
                     <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"></path>
                 </svg>
             </button>
-            <div id="cog-menu-dropdown" class="cog-menu-dropdown" style="display: none;">
+        </div>
+
+        <button class="fs-btn" onclick="toggleFullscreen()" title="Toggle Fullscreen">⛶</button>
+    </div>
+
+    <!-- SETTINGS PANEL (Unified Cog + Session) -->
+    <div id="cog-menu-dropdown" class="cog-menu-panel" style="display: none;">
+        <div class="cog-panel-header">
+            <span style="font-size: 13px; font-weight: 700; color: #fff;">Settings</span>
+            <button class="close-popup-btn" onclick="toggleCogMenu()">&#10005;</button>
+        </div>
+        <div class="cog-panel-content">
+
+            <!-- Section 1: Session Management -->
+            <div class="cog-panel-section">
+                <div class="cog-panel-section-title">SESSION</div>
+                <input id="session-input" class="session-name-input" type="text" value="__TITLE__"
+                    placeholder="Session name...">
+                <div class="session-actions" style="margin-top: 6px;">
+                    <button class="session-action-btn save-btn" onclick="saveState()">SAVE</button>
+                    <button class="session-action-btn load-btn" onclick="loadSession()">LOAD</button>
+                </div>
+            </div>
+
+            <!-- Section 2: Grid Display -->
+            <div class="cog-panel-section">
+                <div class="cog-panel-section-title">GRID DISPLAY</div>
                 <div class="cog-menu-item">
                     <span class="meta-label">Go To</span>
                     <input type="text" inputmode="numeric" id="goto-input" min="1" placeholder="#"
@@ -66,13 +89,76 @@
                         title="Set grid columns (0 = Auto)">
                 </div>
                 <div class="cog-menu-item">
-                    <button class="action-btn" onclick="resetZoom(); toggleCogMenu();" title="Reset Zoom (0)" style="width: 100%; justify-content: center;">⊙ Reset Zoom</button>
+                    <button class="action-btn" onclick="resetZoom();" title="Reset Zoom (0)"
+                        style="width: 100%; justify-content: center;">&#8857; Reset Zoom</button>
                 </div>
             </div>
-        </div>
 
-        <button class="fs-btn" onclick="toggleFullscreen()" title="Toggle Fullscreen">⛶</button>
+            <!-- Section 3: Export Favorites -->
+            <div class="cog-panel-section">
+                <div class="cog-panel-section-title">EXPORT FAVORITES</div>
+                <button class="session-action-btn"
+                    style="background: #00d1b2; width: 100%; font-size: 11px; padding: 10px;"
+                    onclick="exportFavorites()" title="Export favorited images to benchmark_favorites folder">
+                    COPY FAVORITES TO BENCHMARK FAVORITES FOLDER
+                </button>
+
+                <div style="margin-top: 8px; display: flex; align-items: center; gap: 6px;">
+                    <input type="checkbox" checked id="pack-metadata-checkbox"
+                        style="width: 14px; height: 14px; cursor: pointer;">
+                    <label for="pack-metadata-checkbox"
+                        style="font-size: 10px; color: #999; cursor: pointer; user-select: none;">
+                        Pack metadata into copied favorites (for CivitAI)
+                    </label>
+                </div>
+
+                <div style="margin-top: 8px; display: flex; align-items: center; gap: 6px;">
+                    <input type="checkbox" id="organize-by-prompt-checkbox"
+                        style="width: 14px; height: 14px; cursor: pointer;">
+                    <label for="organize-by-prompt-checkbox"
+                        style="font-size: 10px; color: #999; cursor: pointer; user-select: none;">
+                        Organize into separate folders by prompt (Prompt1, Prompt2, etc.)
+                    </label>
+                </div>
+
+                <div style="margin-top: 8px; display: flex; align-items: center; gap: 6px;">
+                    <input type="checkbox" id="organize-by-lora-checkbox"
+                        style="width: 14px; height: 14px; cursor: pointer;">
+                    <label for="organize-by-lora-checkbox"
+                        style="font-size: 10px; color: #999; cursor: pointer; user-select: none;">
+                        Organize into separate folders by lora sets (loras1, loras2, etc.)
+                    </label>
+                </div>
+
+                <div id="export-status" style="margin-top: 8px; font-size: 10px; color: #666; min-height: 16px;"></div>
+            </div>
+
+            <!-- Section 4: Scan External Directory -->
+            <div class="cog-panel-section">
+                <div class="cog-panel-section-title">SCAN EXTERNAL DIRECTORY</div>
+                <div style="font-size: 9px; color: #666; margin-bottom: 8px;">
+                    Load any folder of images into the dashboard. Reads PNG metadata for filtering/sorting.
+                </div>
+                <div style="display: flex; gap: 6px; align-items: center;">
+                    <input type="text" id="scan-directory-input"
+                        placeholder="Paste absolute directory path..."
+                        style="flex: 1; background: #000; border: 1px solid #333; color: #fff;
+                               padding: 8px; font-size: 11px; font-family: monospace; border-radius: 3px;"
+                        onkeydown="if(event.key==='Enter')scanDirectory()">
+                    <button class="session-action-btn" id="scan-directory-btn"
+                        style="background: #6366f1; white-space: nowrap; padding: 8px 16px; font-size: 11px; font-weight: bold;"
+                        onclick="scanDirectory()">
+                        SCAN
+                    </button>
+                </div>
+                <div id="scan-status" style="margin-top: 6px; font-size: 10px; color: #666; min-height: 16px;"></div>
+            </div>
+
+        </div>
     </div>
+
+    <!-- Overlay for settings panel -->
+    <div id="cog-menu-overlay" class="filters-overlay" onclick="toggleCogMenu()" style="display: none;"></div>
 
     <!-- REAL-TIME ETA BAR -->
     <div id="eta-bar" style="display: none; align-items: center; gap: 10px; padding: 4px 12px; background: #1a1a2e; border-bottom: 1px solid #333; font-size: 11px; color: #aaa; position: relative;">
@@ -227,80 +313,6 @@
     <!-- Overlay for popup -->
     <div id="filters-overlay" class="filters-overlay" onclick="toggleFiltersPopup()" style="display: none;"></div>
 
-
-    <!-- SESSION POPUP PANEL -->
-    <div id="session-popup" class="session-dropdown" style="display: none;">
-        <div class="session-dropdown-content">
-            <input id="session-input" class="session-name-input" type="text" value="__TITLE__"
-                placeholder="Session name...">
-            <div class="session-actions">
-                <button class="session-action-btn save-btn" onclick="saveState()">SAVE</button>
-                <button class="session-action-btn load-btn" onclick="loadSession()">LOAD</button>
-            </div>
-
-            <!-- NEW: Export Favorites Section -->
-            <div style="border-top: 1px solid #333; margin-top: 12px; padding-top: 12px;">
-                <button class="session-action-btn"
-                    style="background: #00d1b2; width: 100%; font-size: 11px; padding: 10px;"
-                    onclick="exportFavorites()" title="Export favorited images to benchmark_favorites folder">
-                    📦 COPY FAVORITES TO BENCHMARK FAVORITES FOLDER
-                </button>
-
-                <div style="margin-top: 8px; display: flex; align-items: center; gap: 6px;">
-                    <input type="checkbox" checked id="pack-metadata-checkbox"
-                        style="width: 14px; height: 14px; cursor: pointer;">
-                    <label for="pack-metadata-checkbox"
-                        style="font-size: 10px; color: #999; cursor: pointer; user-select: none;">
-                        Pack metadata into copied favorites (for CivitAI)
-                    </label>
-                </div>
-
-                <div style="margin-top: 8px; display: flex; align-items: center; gap: 6px;">
-                    <input type="checkbox" id="organize-by-prompt-checkbox"
-                        style="width: 14px; height: 14px; cursor: pointer;">
-                    <label for="organize-by-prompt-checkbox"
-                        style="font-size: 10px; color: #999; cursor: pointer; user-select: none;">
-                        Organize into separate folders by prompt (Prompt1, Prompt2, etc.)
-                    </label>
-                </div>
-                <div style="margin-top: 8px; display: flex; align-items: center; gap: 6px;">
-
-                    <input type="checkbox" id="organize-by-lora-checkbox"
-                        style="width: 14px; height: 14px; cursor: pointer;">
-                    <label for="organize-by-lora-checkbox"
-                        style="font-size: 10px; color: #999; cursor: pointer; user-select: none;">
-                        Organize into separate folders by lora sets (loras1, loras2, etc.)
-                    </label>
-
-                </div>
-
-                <div id="export-status" style="margin-top: 8px; font-size: 10px; color: #666; min-height: 16px;"></div>
-            </div>
-
-            <!-- SCAN EXTERNAL DIRECTORY Section -->
-            <div style="border-top: 1px solid #333; margin-top: 12px; padding-top: 12px;">
-                <div style="font-size: 10px; color: #888; margin-bottom: 6px; font-weight: bold; letter-spacing: 0.5px;">
-                    SCAN EXTERNAL DIRECTORY
-                </div>
-                <div style="font-size: 9px; color: #666; margin-bottom: 8px;">
-                    Load any folder of images into the dashboard. Reads PNG metadata for filtering/sorting.
-                </div>
-                <div style="display: flex; gap: 6px; align-items: center;">
-                    <input type="text" id="scan-directory-input"
-                        placeholder="Paste absolute directory path..."
-                        style="flex: 1; background: #000; border: 1px solid #333; color: #fff;
-                               padding: 8px; font-size: 11px; font-family: monospace; border-radius: 3px;"
-                        onkeydown="if(event.key==='Enter')scanDirectory()">
-                    <button class="session-action-btn" id="scan-directory-btn"
-                        style="background: #6366f1; white-space: nowrap; padding: 8px 16px; font-size: 11px; font-weight: bold;"
-                        onclick="scanDirectory()">
-                        SCAN
-                    </button>
-                </div>
-                <div id="scan-status" style="margin-top: 6px; font-size: 10px; color: #666; min-height: 16px;"></div>
-            </div>
-        </div>
-    </div>
 
     <div id="viewport">
         <div id="canvas">

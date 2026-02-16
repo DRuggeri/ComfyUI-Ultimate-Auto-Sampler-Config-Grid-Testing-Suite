@@ -3,7 +3,10 @@
     "allow": [
       "Bash(git config --global --add safe.directory '%\\(prefix\\)///DESKTOP-2GIRPC5/comfy/comfy_v0.12.3/ComfyUI/custom_nodes/ComfyUI-Ultimate-Auto-Sampler-Config-Grid-Testing-Suite/.claude/worktrees/hungry-gagarin')",
       "Bash(python -c:*)",
-      "WebFetch(domain:api.comfy.org)"
+      "WebFetch(domain:api.comfy.org)",
+      "WebFetch(domain:github.com)",
+      "WebFetch(domain:raw.githubusercontent.com)",
+      "WebFetch(domain:api.github.com)"
     ]
   }
 }
