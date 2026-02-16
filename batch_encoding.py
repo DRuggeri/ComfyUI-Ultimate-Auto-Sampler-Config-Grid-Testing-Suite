@@ -1,11 +1,238 @@
 """
 Batch CLIP Encoding Module
-Handles efficient batch encoding of prompts with caching
+Handles efficient batch encoding of prompts with caching.
+Supports prompt combinators: AND, CAT, AVG(), BREAK (native).
 """
 
+import re
 import torch
 import gc
 import comfy.model_management
+
+
+# ============================================================
+# === PROMPT COMBINATOR ENCODING (AND / CAT / AVG / BREAK) ===
+# ============================================================
+
+def _encode_single(clip_model, text, clip_skip=0):
+    """
+    Encode a single text segment. BREAK is handled natively by clip.tokenize().
+
+    Args:
+        clip_model: CLIP model instance
+        text: Prompt text (may contain BREAK keyword)
+        clip_skip: CLIP layer skip value
+
+    Returns:
+        Conditioning list: [[cond_tensor, pooled_dict]]
+    """
+    original_layer = None
+    if clip_skip != 0 and hasattr(clip_model.cond_stage_model, 'clip_layer'):
+        original_layer = clip_model.cond_stage_model.clip_layer
+        clip_model.cond_stage_model.set_clip_options({"layer": clip_skip})
+
+    tokens = clip_model.tokenize(text)  # BREAK handled natively here
+    pooled_dict = clip_model.encode_from_tokens(tokens, return_pooled=True, return_dict=True)
+    cond = pooled_dict.pop("cond")
+    result = [[cond, pooled_dict]]
+
+    if original_layer is not None:
+        clip_model.cond_stage_model.set_clip_options({"layer": original_layer})
+
+    return result
+
+
+def _parse_and_segments(prompt):
+    """
+    Split prompt on AND keyword. Returns list of (text, weight) tuples.
+
+    Examples:
+        "a cat AND a dog"           -> [("a cat", 1.0), ("a dog", 1.0)]
+        "a cat :1.5 AND a dog :0.5" -> [("a cat", 1.5), ("a dog", 0.5)]
+        "a cat AND a dog :0"        -> [("a cat", 1.0), ("a dog", 0.0)]
+    """
+    parts = re.split(r'\s+AND\s+', prompt)
+    segments = []
+    for part in parts:
+        part = part.strip()
+        # Check for trailing weight like "cat :1.5" (space before colon distinguishes from (word:weight) syntax)
+        weight_match = re.match(r'^(.*?)\s+:(\d+\.?\d*)\s*$', part)
+        if weight_match:
+            segments.append((weight_match.group(1).strip(), float(weight_match.group(2))))
+        else:
+            segments.append((part, 1.0))
+    return segments
+
+
+def _parse_avg_segments(text):
+    """
+    Split text on AVG(weight) markers. Returns list of (text, avg_weight) tuples.
+    The first segment has weight=None (it's the base). Subsequent segments have their AVG weight.
+
+    Examples:
+        "realistic AVG(0.3) anime"  -> [("realistic", None), ("anime", 0.3)]
+        "a AVG() b"                 -> [("a", None), ("b", 0.5)]  (default weight 0.5)
+        "no avg here"               -> [("no avg here", None)]
+    """
+    parts = re.split(r'\s*AVG\((\d*\.?\d*)\)\s*', text)
+    if len(parts) == 1:
+        return [(text, None)]  # No AVG found
+
+    segments = []
+    for i in range(0, len(parts), 2):
+        segment_text = parts[i].strip() if i < len(parts) else ""
+        if not segment_text:
+            continue
+        if i == 0:
+            # First segment is the base — no weight
+            segments.append((segment_text, None))
+        else:
+            # Subsequent segments get the weight from the preceding capture group
+            weight_str = parts[i - 1] if i - 1 < len(parts) else ""
+            weight = float(weight_str) if weight_str else 0.5
+            segments.append((segment_text, weight))
+
+    return segments if segments else [(text, None)]
+
+
+def _parse_cat_segments(text):
+    """
+    Split text on CAT keyword. Returns list of text segments.
+
+    Example:
+        "a cat CAT in a garden" -> ["a cat", "in a garden"]
+    """
+    return [s.strip() for s in re.split(r'\s+CAT\s+', text) if s.strip()]
+
+
+def _conditioning_combine(cond1, cond2):
+    """
+    ConditioningCombine: list concatenation.
+    Each conditioning entry becomes a separate guidance signal during sampling.
+    Same as ComfyUI's ConditioningCombine node (nodes.py).
+    """
+    return cond1 + cond2
+
+
+def _conditioning_concat(cond_to, cond_from):
+    """
+    ConditioningConcat: tensor concatenation along dim 1.
+    Extends the token context window by appending from-conditioning tokens.
+    Same as ComfyUI's ConditioningConcat node (nodes.py).
+    """
+    out = []
+    cond_from_tensor = cond_from[0][0]
+    for i in range(len(cond_to)):
+        t1 = cond_to[i][0]
+        tw = torch.cat((t1, cond_from_tensor), 1)
+        n = [tw, cond_to[i][1].copy()]
+        out.append(n)
+    return out
+
+
+def _conditioning_average(cond_to, cond_from, strength):
+    """
+    ConditioningAverage: weighted blend of conditioning tensors.
+    strength=1.0 means 100% cond_to, strength=0.0 means 100% cond_from.
+    Same as ComfyUI's ConditioningAverage node (nodes.py).
+    """
+    out = []
+    cond_from_tensor = cond_from[0][0]
+    pooled_from = cond_from[0][1].get("pooled_output", None)
+
+    for i in range(len(cond_to)):
+        t1 = cond_to[i][0]
+        pooled_to = cond_to[i][1].get("pooled_output", pooled_from)
+
+        t0 = cond_from_tensor[:, :t1.shape[1]]
+        if t0.shape[1] < t1.shape[1]:
+            t0 = torch.cat([t0, torch.zeros((1, t1.shape[1] - t0.shape[1], t1.shape[2]))], dim=1)
+
+        tw = torch.mul(t1, strength) + torch.mul(t0, 1.0 - strength)
+        t_to = cond_to[i][1].copy()
+
+        if pooled_from is not None and pooled_to is not None:
+            t_to["pooled_output"] = torch.mul(pooled_to, strength) + torch.mul(pooled_from, 1.0 - strength)
+        elif pooled_from is not None:
+            t_to["pooled_output"] = pooled_from
+
+        out.append([tw, t_to])
+    return out
+
+
+def encode_prompt_with_combinators(clip_model, prompt, clip_skip=0):
+    """
+    Encode a prompt that may contain AND, CAT, or AVG() combinators.
+
+    Processing order (matching comfyui-prompt-control):
+      1. Split on AND (creates separate conditioning entries via ConditioningCombine)
+      2. Within each AND-segment, process AVG(weight) (weighted blend via ConditioningAverage)
+      3. Within each segment, process CAT (tensor concat via ConditioningConcat)
+      4. BREAK is handled natively by clip.tokenize() within each segment
+
+    Syntax:
+      - "prompt1 AND prompt2"           → ConditioningCombine
+      - "prompt1 AND prompt2 :0.5"      → AND with weight scaling
+      - "prompt1 CAT prompt2"           → ConditioningConcat
+      - "prompt1 AVG(0.3) prompt2"      → ConditioningAverage (0.3 = 30% prompt2)
+      - "prompt1 BREAK prompt2"         → Separate 77-token chunks (native)
+
+    Args:
+        clip_model: CLIP model instance
+        prompt: Prompt text possibly containing combinators
+        clip_skip: CLIP layer skip value
+
+    Returns:
+        Conditioning list: [[cond_tensor, pooled_dict], ...]
+    """
+    # Fast path: if no combinators present, use direct encoding
+    if ' AND ' not in prompt and ' CAT ' not in prompt and 'AVG(' not in prompt:
+        return _encode_single(clip_model, prompt, clip_skip)
+
+    # 1. Split on AND
+    and_segments = _parse_and_segments(prompt)
+
+    all_conditionings = []
+    for segment_text, and_weight in and_segments:
+        if and_weight == 0:
+            continue  # Skip zero-weighted AND segments
+
+        # 2. Process AVG() within this AND-segment
+        avg_segments = _parse_avg_segments(segment_text)
+
+        if len(avg_segments) > 1:
+            # Has AVG — encode first segment as base, then blend with subsequent segments
+            result = _encode_single(clip_model, avg_segments[0][0], clip_skip)
+            for avg_text, avg_weight in avg_segments[1:]:
+                next_cond = _encode_single(clip_model, avg_text, clip_skip)
+                w = avg_weight if avg_weight is not None else 0.5
+                result = _conditioning_average(result, next_cond, w)
+        else:
+            # 3. Process CAT within this segment
+            cat_parts = _parse_cat_segments(segment_text)
+            if len(cat_parts) > 1:
+                result = _encode_single(clip_model, cat_parts[0], clip_skip)
+                for cat_text in cat_parts[1:]:
+                    next_cond = _encode_single(clip_model, cat_text, clip_skip)
+                    result = _conditioning_concat(result, next_cond)
+            else:
+                result = _encode_single(clip_model, segment_text, clip_skip)
+
+        # Apply AND weight by scaling the conditioning tensor
+        if and_weight != 1.0:
+            result = [[torch.mul(r[0], and_weight), r[1]] for r in result]
+
+        all_conditionings.append(result)
+
+    # 4. Combine all AND segments via ConditioningCombine
+    if not all_conditionings:
+        return _encode_single(clip_model, "", clip_skip)
+
+    final = all_conditionings[0]
+    for additional in all_conditionings[1:]:
+        final = _conditioning_combine(final, additional)
+
+    return final
 
 
 def batch_encode_with_cache(clip_model, prompts, cond_cache, prompt_type="positive", batch_size=64, clip_skip=0):
@@ -66,27 +293,10 @@ def batch_encode_with_cache(clip_model, prompts, cond_cache, prompt_type="positi
                         raise comfy.model_management.InterruptProcessingException()
 
                     try:
-                        tokens = clip_model.tokenize(prompt)
-
-                        # ComfyUI's CLIP encode_from_tokens doesn't have a layer parameter
-                        # We need to use the CLIP model's layer setter before encoding
-                        # Store original layer setting
-                        original_layer = None
-                        if clip_skip != 0 and hasattr(clip_model.cond_stage_model, 'clip_layer'):
-                            original_layer = clip_model.cond_stage_model.clip_layer
-                            clip_model.cond_stage_model.set_clip_options({"layer": clip_skip})
-
-                        # Use return_dict=True to preserve all extra conditioning keys
-                        # (e.g. t5xxl_ids/t5xxl_weights for Anima, attention_mask for Lumina, etc.)
-                        pooled_dict = clip_model.encode_from_tokens(tokens, return_pooled=True, return_dict=True)
-                        cond = pooled_dict.pop("cond")
-                        conditioning = [[cond, pooled_dict]]
+                        # Encode with combinator support (AND/CAT/AVG/BREAK)
+                        conditioning = encode_prompt_with_combinators(clip_model, prompt, clip_skip)
                         results[prompt] = conditioning
                         cond_cache.set(prompt, conditioning, prompt_type)
-
-                        # Restore original layer
-                        if original_layer is not None:
-                            clip_model.cond_stage_model.set_clip_options({"layer": original_layer})
 
                     except comfy.model_management.InterruptProcessingException:
                         print(f"\n[GridTester] 🛑 INTERRUPTED during {prompt_type} encoding - Stopping all encoding")

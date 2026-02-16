@@ -74,38 +74,22 @@ function toggleRejectedFilter() {
     updateDataPipeline();
     console.log('[Top Filter] Rejected:', topFilters.showRejected ? 'ON' : 'OFF');
 }
-// Toggle Session Popup
-function toggleSessionPopup() {
-    const popup = document.getElementById('session-popup');
-    const overlay = document.getElementById('session-overlay');
+// Settings Panel Toggle (unified cog + session)
+function toggleCogMenu() {
+    const panel = document.getElementById('cog-menu-dropdown');
+    const overlay = document.getElementById('cog-menu-overlay');
+    if (!panel) return;
 
-    if (popup.style.display === 'none' || !popup.style.display) {
-        popup.style.display = 'block';
-        overlay.style.display = 'block';
+    if (panel.style.display === 'none' || !panel.style.display) {
+        panel.style.display = 'block';
+        if (overlay) overlay.style.display = 'block';
         document.body.style.overflow = 'hidden';
     } else {
-        popup.style.display = 'none';
-        overlay.style.display = 'none';
+        panel.style.display = 'none';
+        if (overlay) overlay.style.display = 'none';
         document.body.style.overflow = '';
     }
 }
-
-// Cog Wheel Settings Menu
-function toggleCogMenu() {
-    const dropdown = document.getElementById('cog-menu-dropdown');
-    if (!dropdown) return;
-    const isHidden = dropdown.style.display === 'none' || !dropdown.style.display;
-    dropdown.style.display = isHidden ? 'flex' : 'none';
-}
-
-// Close cog menu when clicking outside
-document.addEventListener('click', (e) => {
-    const dropdown = document.getElementById('cog-menu-dropdown');
-    const container = e.target.closest('.cog-menu-container');
-    if (dropdown && dropdown.style.display !== 'none' && !container) {
-        dropdown.style.display = 'none';
-    }
-});
 
 // Close popup on Escape key
 document.addEventListener('keydown', (e) => {
@@ -117,20 +101,17 @@ document.addEventListener('keydown', (e) => {
             return;
         }
 
-        // Close cog menu
-        const cogMenu = document.getElementById('cog-menu-dropdown');
-        if (cogMenu && cogMenu.style.display !== 'none') {
-            cogMenu.style.display = 'none';
+        // Close settings panel
+        const cogPanel = document.getElementById('cog-menu-dropdown');
+        if (cogPanel && cogPanel.style.display !== 'none') {
+            toggleCogMenu();
             return;
         }
 
+        // Close filters popup
         const filtersPopup = document.getElementById('filters-popup');
-        const sessionPopup = document.getElementById('session-popup');
-
         if (filtersPopup && filtersPopup.style.display !== 'none') {
             toggleFiltersPopup();
-        } else if (sessionPopup && sessionPopup.style.display !== 'none') {
-            toggleSessionPopup();
         }
     }
 });

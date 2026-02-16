@@ -98,6 +98,7 @@ app.registerExtension({
                         lora_triggerwords_append_settings: {},
                         lora_bypass_states: {},
                         lora_strength_lock: {},
+                        model_bypass_states: {},
                         combine: false,
                         positive_prompt_groups: [],
                         negative_prompt: "",
@@ -316,6 +317,7 @@ app.registerExtension({
                             lora_triggerwords_append_settings: {},
                             lora_bypass_states: {},
                             lora_strength_lock: {},
+                            model_bypass_states: {},
                             combine: arr.combine || false,
                             positive_prompt_groups: [],
                             negative_prompt: "",
@@ -372,6 +374,7 @@ app.registerExtension({
                                 if (!arr.lora_triggerwords_append_settings) arr.lora_triggerwords_append_settings = {};
                                 if (!arr.lora_bypass_states) arr.lora_bypass_states = {};
                                 if (!arr.lora_strength_lock) arr.lora_strength_lock = {};
+                                if (!arr.model_bypass_states) arr.model_bypass_states = {};
 
                                 // Migration: ensure prompt fields exist
                                 if (!arr.positive_prompt_groups) arr.positive_prompt_groups = [];

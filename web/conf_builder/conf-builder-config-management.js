@@ -453,15 +453,51 @@ export function createModelElement(node, modelEntry, arrayIdx, modelIdx, modelLi
     div.className = "cb-item-card model-card";
     const uid = `${arrayIdx}_${modelIdx}`;
 
+    // Initialize model bypass states if they don't exist
+    if (!node.state.config_arrays[arrayIdx].model_bypass_states) {
+        node.state.config_arrays[arrayIdx].model_bypass_states = {};
+    }
+
+    // Get bypass state
+    const isBypassed = node.state.config_arrays[arrayIdx].model_bypass_states[modelPath] || false;
+
     // Initial State
     const isCollapsed = node.uiState.modelsCollapsed[uid] || false;
 
-    // Header
+    // Header with bypass toggle
     const header = document.createElement("div");
     header.className = "cb-header-bar";
 
     const leftGroup = document.createElement("div");
     leftGroup.className = "cb-header-left";
+
+    // Bypass Checkbox (in header, before toggle arrow)
+    if (modelPath !== "None") {
+        const bypassLabel = document.createElement("label");
+        bypassLabel.style.cssText = "display: flex; align-items: center; gap: 4px; cursor: pointer; margin-right: 8px;";
+        bypassLabel.title = "Bypass (disable) this Model";
+
+        const bypassCheck = document.createElement("input");
+        bypassCheck.type = "checkbox";
+        bypassCheck.checked = !isBypassed; // Inverted: checked = enabled
+        bypassCheck.style.cssText = "cursor: pointer;";
+        bypassCheck.onclick = (e) => {
+            e.stopPropagation(); // Prevent header collapse
+            const newBypassState = !bypassCheck.checked;
+            node.state.config_arrays[arrayIdx].model_bypass_states[modelPath] = newBypassState;
+            node.saveState();
+            // Visual feedback
+            div.style.opacity = newBypassState ? "0.5" : "1.0";
+            div.style.filter = newBypassState ? "grayscale(0.7)" : "none";
+        };
+
+        bypassLabel.appendChild(bypassCheck);
+        const bypassText = document.createElement("span");
+        bypassText.textContent = "On";
+        bypassText.style.cssText = "font-size: 11px; color: #cc8844;";
+        bypassLabel.appendChild(bypassText);
+        leftGroup.appendChild(bypassLabel);
+    }
 
     const toggleArrow = document.createElement("span");
     toggleArrow.textContent = isCollapsed ? "▶" : "▼";
@@ -504,6 +540,12 @@ export function createModelElement(node, modelEntry, arrayIdx, modelIdx, modelLi
     header.appendChild(deleteBtn);
     div.appendChild(header);
 
+    // Apply bypass visual state
+    if (isBypassed) {
+        div.style.opacity = "0.5";
+        div.style.filter = "grayscale(0.7)";
+    }
+
     // Content Container
     const contentDiv = document.createElement("div");
     contentDiv.style.display = isCollapsed ? "none" : "flex";
@@ -512,7 +554,7 @@ export function createModelElement(node, modelEntry, arrayIdx, modelIdx, modelLi
     contentDiv.style.width = "100%";
 
     header.onclick = (e) => {
-        if (e.target.tagName === 'BUTTON') return;
+        if (e.target.tagName === 'BUTTON' || e.target.tagName === 'INPUT' || e.target.tagName === 'LABEL') return;
         const isNowCollapsed = contentDiv.style.display !== "none";
         contentDiv.style.display = isNowCollapsed ? "none" : "flex";
         toggleArrow.textContent = isNowCollapsed ? "▶" : "▼";
@@ -2219,6 +2261,9 @@ function createPromptGroupEditor(groups, onChange, label, borderColor = "#0066cc
     const container = document.createElement("div");
     container.style.cssText = `display: flex; flex-direction: column; gap: 8px; width: 100%;`;
 
+    // Track current groups locally so mode switches use latest data
+    let currentGroupsState = groups;
+
     // Track mode state locally (visual vs raw)
     let isRawMode = false;
 
@@ -2266,6 +2311,7 @@ function createPromptGroupEditor(groups, onChange, label, borderColor = "#0066cc
             if (Array.isArray(parsed)) {
                 // Accept recursive structures directly - the backend and preview
                 // functions handle arbitrary nesting depth
+                currentGroupsState = parsed;
                 onChange(parsed);
                 rawTextarea.style.borderColor = "#00aa44";
                 setTimeout(() => { rawTextarea.style.borderColor = "#3a3a3a"; }, 1000);
@@ -2292,8 +2338,8 @@ function createPromptGroupEditor(groups, onChange, label, borderColor = "#0066cc
         rawContainer.style.display = "block";
         rawBtn.classList.add("active");
         visualBtn.classList.remove("active");
-        // Sync raw editor with current groups
-        rawTextarea.value = groups.length > 0 ? JSON.stringify(groups, null, 2) : "";
+        // Sync raw editor with current groups (use tracked state, not stale parameter)
+        rawTextarea.value = currentGroupsState.length > 0 ? JSON.stringify(currentGroupsState, null, 2) : "";
     };
 
     container.appendChild(visualContainer);
@@ -2391,6 +2437,7 @@ function createPromptGroupEditor(groups, onChange, label, borderColor = "#0066cc
             groupDeleteBtn.onclick = () => {
                 const newGroups = [...currentGroups];
                 newGroups.splice(groupIdx, 1);
+                currentGroupsState = newGroups;
                 onChange(newGroups);
                 renderVisualGroups(newGroups);
                 renderPreview(newGroups);
@@ -2422,6 +2469,7 @@ function createPromptGroupEditor(groups, onChange, label, borderColor = "#0066cc
                     if (newGroups[groupIdx].length === 0) {
                         newGroups.splice(groupIdx, 1);
                     }
+                    currentGroupsState = newGroups;
                     onChange(newGroups);
                     renderVisualGroups(newGroups);
                     renderPreview(newGroups);
@@ -2455,6 +2503,7 @@ function createPromptGroupEditor(groups, onChange, label, borderColor = "#0066cc
                     if (val) {
                         const newGroups = currentGroups.map(g => Array.isArray(g) ? [...g] : [String(g)]);
                         newGroups[groupIdx].push(val);
+                        currentGroupsState = newGroups;
                         onChange(newGroups);
                         renderVisualGroups(newGroups);
                         renderPreview(newGroups);
@@ -2504,6 +2553,7 @@ function createPromptGroupEditor(groups, onChange, label, borderColor = "#0066cc
                 const val = input.value.trim();
                 if (val) {
                     const newGroups = [...(currentGroups || []), [val]];
+                    currentGroupsState = newGroups;
                     onChange(newGroups);
                     renderVisualGroups(newGroups);
                     renderPreview(newGroups);
@@ -2844,6 +2894,9 @@ export async function renderUI(node, availableLoras, modelLists, loraFolders, av
             loras: ["None"],
             lora_omit_triggers: [],
             lora_triggerwords_append_settings: {},
+            lora_bypass_states: {},
+            lora_strength_lock: {},
+            model_bypass_states: {},
             combine: false,
             positive_prompt_groups: [],
             negative_prompt: "",

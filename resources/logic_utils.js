@@ -137,11 +137,11 @@ async function loadSession() {
         // 11. Restore UI
         if (grid) grid.style.opacity = '1';
 
-        // Close Popups
-        const popup = document.getElementById('session-popup');
-        const overlay = document.getElementById('session-overlay');
-        if (popup) popup.style.display = 'none';
-        if (overlay) overlay.style.display = 'none';
+        // Close Settings Panel
+        const cogPanel = document.getElementById('cog-menu-dropdown');
+        const cogOverlay = document.getElementById('cog-menu-overlay');
+        if (cogPanel) cogPanel.style.display = 'none';
+        if (cogOverlay) cogOverlay.style.display = 'none';
         document.body.style.overflow = '';
         console.log('[Load] ✅ Session loaded successfully');
 
