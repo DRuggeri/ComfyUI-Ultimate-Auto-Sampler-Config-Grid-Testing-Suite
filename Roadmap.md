@@ -61,6 +61,14 @@ Replace revise button in dashboard with edit emoji
 
 ## ~~Fix: Manifest doesn't need lora omit triggers list in every item~~ (DONE - already stripped in create_image_metadata via .pop())
 
+# Needs Testing: Batch encoding doesnt seem to be working for optional inputs possibly, or maybe its very large models, I get loading messages after every single encoding instead of once per batch and it takes a long time (low priority)
+Symptom: each encoding fills the GPU more and more and eventually it becomes 0 usable, 0 loaded all offloaded.
+loaded partially; 5585.34 MB usable, 5543.55 MB loaded, 628.32 MB offloaded, 41.79 MB buffer reserved, lowvram patches: 0
+loaded partially; 5569.51 MB usable, 5527.72 MB loaded, 644.90 MB offloaded, 41.79 MB buffer reserved, lowvram patches: 0
+loaded partially; 5553.58 MB usable, 5511.79 MB loaded, 660.34 MB offloaded, 41.79 MB buffer reserved, lowvram patches: 0
+loaded partially; 5537.65 MB usable, 5495.86 MB loaded, 676.40 MB offloaded, 41.79 MB buffer reserved, lowvram patches: 0
+maybe we need to force encodings to offload to ram?
+
 ## ~~Add attention options, xformers, sdpa, sage, flash, etc, option for test all, test all should clear ram & vram between each test.~~ COMPLETED
 * **Status:** Added `attention_mode` config field supporting: default, xformers, pytorch, flash, sage, sage3, sub_quad, split. Use `"*"` to test all modes. Runtime switching via `transformer_options["optimized_attention_override"]` in ComfyUI's attention registry. Config Builder UI has dropdown+chips selector. Per-image metadata tracks which attention mode was used for dashboard filtering. Integrated into config expansion (Cartesian product with other params), skip/resume matching, and generation pipeline.
 
