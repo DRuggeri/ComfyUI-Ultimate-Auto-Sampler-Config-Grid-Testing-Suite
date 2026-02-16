@@ -49,6 +49,10 @@ Stop guessing which Sampler, Scheduler, Prompt, Denoise, Model, Lora or CFG valu
   - [Strength Locking](#strength-locking)
   - [Folder Expansion (Models & LoRAs)](#folder-expansion-models--loras)
   - [LoRA Stacking](#lora-stacking)
+  - [VAEs Section](#vaes-section)
+  - [Attention Modes](#attention-modes)
+  - [Model-Specific Prompts](#model-specific-prompts)
+  - [Recursive Cartesian Prompt Builder](#recursive-cartesian-prompt-builder)
 - [Dashboard Interface](#-dashboard-interface)
   - [Header Bar](#header-bar)
   - [Toolbar](#toolbar)
@@ -117,6 +121,12 @@ Stop guessing which Sampler, Scheduler, Prompt, Denoise, Model, Lora or CFG valu
 * **VAE Batching:** Includes a `vae_batch_size` input to batch decode images, significantly speeding up large grid runs.
 * **Live Dashboard Updates:** Configure `flush_batch_every` to update the dashboard incrementally (e.g., every 4 images) instead of waiting for the entire batch to complete.
 * **Remote VAE Support:** Offload VAE decoding to remote servers (HuggingFace endpoints or local) for 20-30% faster generation and lower VRAM usage.
+* **VAE Selection & Iteration:** Test multiple VAEs per config — add individual VAEs from a searchable dropdown or expand entire VAE folders. Each VAE becomes a dimension in the Cartesian grid.
+* **Attention Mode Testing:** Grid-test different attention implementations (`default`, `sageattn`, `xformers`, etc.) as a combinatorial dimension. Find the optimal attention backend for your hardware.
+* **CLIP Encoding Combinators:** Advanced prompt syntax with `AND`, `CAT`, `AVG(weight)`, and `BREAK` keywords for multi-segment conditioning. `AND` creates separate conditioning entries, `CAT` concatenates token contexts, `AVG(0.5)` blends prompts, and `BREAK` forces new 77-token chunks.
+* **Model-Specific Prompts:** Per-config prompt prefix and suffix fields for model-appropriate quality tags (e.g., prepend `"masterpiece, best quality"` for anime models, append `"4k, photorealistic"` for realistic models).
+* **Recursive Cartesian Prompt Builder:** Visual chip-based prompt editor with `{option1|option2|option3}` syntax that expands into all combinations. Nest multiple groups for exponential prompt variation.
+* **Model & LoRA On/Off Switches:** Toggle individual models and LoRAs on/off without removing them from the config. Bypassed entries are omitted from both the preview JSON and the generated config output.
 
 ### 🎨 Interactive Dashboard (The "IDE")
 * **Infinite Canvas with Pan/Zoom:** Google Maps-style navigation with mouse drag, mousewheel zoom, and keyboard shortcuts.
@@ -130,6 +140,10 @@ Stop guessing which Sampler, Scheduler, Prompt, Denoise, Model, Lora or CFG valu
 * **Auto-Load Sessions:** Dashboard automatically loads when generation starts — no manual session name entry needed.
 * **Session Management:** Save and load previous testing sessions directly from the UI.
 * **Keyboard Navigation:** `Space` to scroll rows, `Arrow Keys` to pan, `+/-` to zoom, `0` to reset, `F` to auto-fit.
+* **Real-Time ETA Progress Bar:** Shows estimated time remaining during generation with a progress bar in the dashboard header.
+* **Unified Settings Panel:** Gear icon (⚙️) opens a consolidated settings panel with Session management, Grid Display controls, Export Favorites, and Scan External Directory — replacing the old separate SESSION button.
+* **Scan External Directory:** Load image sessions from any folder (including other ComfyUI instances) into the dashboard for viewing and filtering. Reads PNG metadata for full config display.
+* **Export Favorites:** Copy all favorited images to a dedicated export folder with optional CivitAI metadata packing for sharing.
 
 ### ⚡ The "Revise & Generate" Workflow
 * **One-Click Revision:** Click "REVISE" on any image to open a detail view.
@@ -421,6 +435,9 @@ Config Arrays are the building blocks of your testing grid. Each array defines a
 * **Schedulers:** Comma-separated list of schedulers (e.g., `"normal, karras, exponential"`).
 * **Steps:** Comma-separated list of step counts (e.g., `"20, 30, 40"`).
 * **CFG:** Comma-separated list of CFG scale values (e.g., `"6.0, 7.0, 8.0"`).
+* **Samplers Dropdown:** Searchable dropdown auto-populated with all available samplers from the connected sampler node. Select multiple to add them as a comma-separated list.
+* **Schedulers Dropdown:** Searchable dropdown auto-populated with all available schedulers. Works the same as the samplers dropdown.
+* **Attention Mode:** Dropdown selector for attention implementations (`default`, `sageattn`, `xformers`, etc.). Select multiple to test as a grid dimension.
 
 #### Iteration Count Display
 
@@ -439,6 +456,7 @@ Updates in real-time as you add/remove items.
 * **📋 Duplicate Config** — Creates an exact copy of this config array (useful for variations).
 * **🗑️ Delete Config** — Removes this entire config array.
 * **▼ Collapse/Expand** — Toggle visibility of Models and LoRAs sections.
+* **➕ Add VAE** — Adds a new VAE slot to the VAEs section for testing multiple VAE decoders.
 
 ### Models Section
 
@@ -450,6 +468,8 @@ Each model card includes:
   - **Folder (Separate):** Expand folder — each model becomes a separate test. Multiplies iteration count by number of models in folder.
   - **Folder (Combined):** *Reserved for future use.*
 * **🗑️ Remove Model:** Deletes this model from the config (at least one model is always required).
+* **🔘 On/Off (Bypass) Switch:** Toggle a model on or off without removing it. Bypassed models are grayed out and excluded from the generated config output.
+* **🔍 CivitAI Model Lookup:** Opens a metadata panel showing model info fetched from CivitAI (name, base model, tags, creator, description). Includes a direct link to the model page.
 
 ### LoRAs Section
 
@@ -466,6 +486,7 @@ Each LoRA card includes:
 * **🔍 Lookup Trigger Words:** Opens the Trigger Word Lookup Modal (fetches from CivitAI API).
 * **🚫 Bypass Trigger Fetch:** Toggle to prevent automatic trigger word lookup for this LoRA.
 * **🗑️ Remove LoRA:** Deletes this LoRA from the config (at least one is always required).
+* **🔘 On/Off (Bypass) Switch:** Toggle a LoRA on or off without removing it. Bypassed LoRAs are grayed out and excluded from both the preview JSON and the Python node's `config_json` output.
 
 ### LoRA Trigger Words
 
@@ -561,6 +582,47 @@ Combine multiple LoRAs into a single generation by adding multiple LoRA slots to
 
 **Mixed Expansion + Manual:** You can combine folder expansion with manual stacking — for example, a combined quality folder plus a specific character LoRA stacked together.
 
+### VAEs Section
+
+Each VAE card includes:
+
+* **VAE Name (Searchable):** Dropdown with fuzzy search through all available VAE models. Supports folder structure display.
+* **Type Selection:**
+  - **Single File:** Test just this specific VAE.
+  - **Folder (Separate):** Expand folder — each VAE becomes a separate iteration, multiplying the total grid size.
+* **🗑️ Remove VAE:** Deletes this VAE from the config.
+
+VAEs are treated as a Cartesian dimension just like samplers or models. If you add 3 VAEs, your total iteration count is multiplied by 3.
+
+### Attention Modes
+
+Select which attention backend implementations to test. Available options depend on your system (e.g., `default`, `sageattn`, `xformers`). Like other parameters, you can select multiple modes and they become a grid dimension.
+
+### Model-Specific Prompts
+
+Per-config prompt prefix and suffix fields that are prepended/appended to all prompts generated by that config array:
+
+* **Prompt Prefix:** Text prepended to the positive prompt (e.g., `"masterpiece, best quality, "` for anime models).
+* **Prompt Suffix:** Text appended to the positive prompt (e.g., `", 4k, photorealistic"` for realistic models).
+
+These fields are especially useful when testing multiple models that require different quality tags or style descriptors.
+
+### Recursive Cartesian Prompt Builder
+
+A visual chip-based prompt editor that supports variation groups using `{option1|option2|option3}` syntax:
+
+```
+a {photo|painting|sketch} of a {cat|dog} in a {forest|city}
+```
+
+This expands into all combinations (3 × 2 × 2 = 12 prompts):
+- "a photo of a cat in a forest"
+- "a photo of a cat in a city"
+- "a painting of a dog in a forest"
+- ... etc.
+
+The editor provides a visual chip interface for building and editing these variation groups. Each group is displayed as a clickable chip that can be expanded to add/remove options. Multiple groups can be nested for exponential prompt variation.
+
 ---
 
 ## 🖥️ Dashboard Interface
@@ -572,12 +634,14 @@ Combine multiple LoRAs into a single generation by adding multiple LoRA slots to
 * **Zoom Controls:** `⊙` (reset), `−` (zoom out), `+` (zoom in).
 
 ### Toolbar
-* **Session Controls:** 
-  - Dashboard auto-loads when connected to sampler and generation starts.
-  - **LOAD** to view previous results by session name.
-  - **SAVE** to persist current state to disk.
-  - **DELETE** to remove session and all images.
-  
+* **⚙️ Settings Panel (Gear Icon):** Opens a unified settings panel with four sections:
+  - **Session:** Name input + SAVE/LOAD buttons. Dashboard auto-loads when connected to sampler and generation starts.
+  - **Grid Display:** Go to Image #, Column Count, Reset Zoom controls.
+  - **Export Favorites:** Export starred images to a dedicated folder with optional CivitAI metadata packing.
+  - **Scan External Directory:** Load image sessions from any folder path into the dashboard.
+
+* **ETA Progress Bar:** During generation, a real-time progress bar appears in the header showing estimated time remaining and completion percentage.
+
 * **Filter Groups:** Click colored buttons to toggle visibility:
   - **Model** (Purple): Filter by checkpoint
   - **Sampler** (Cyan): Filter by sampler type
@@ -585,9 +649,9 @@ Combine multiple LoRAs into a single generation by adding multiple LoRA slots to
   - **Denoise** (Red): Filter by denoise value
   - **LoRA** (Orange): Filter by LoRA configs
   - **Shift+Click:** Isolate single filter (deselect all others)
-  
+
 * **Sort Button:** Cycles between **Sort: Oldest** (default), **Sort: Newest**, and **Sort: Fastest** (by generation time). Preference is saved to localStorage.
-  
+
 * **Fullscreen Button (⛶):** Expand dashboard to fill entire screen.
 
 ### Navigation & Controls
@@ -972,6 +1036,10 @@ The Config Builder generates JSON in the exact format required by the Ultimate S
     "cfg": [6.0, 7.0, 8.0],
     "lora": "style.safetensors:0.8:0.8 + detail.safetensors:0.5:0.5",
     "model": "base_xl.safetensors",
+    "vae": ["vae_v1.safetensors", "vae_v2.safetensors"],
+    "attention_mode": ["default", "sageattn"],
+    "prompt_prefix": "masterpiece, best quality, ",
+    "prompt_suffix": ", 4k, detailed",
     "lora_omit_triggers": ["masterpiece", "best quality"],
     "lora_triggerwords_append_settings": {
       "style.safetensors": "positive_start",
@@ -979,6 +1047,9 @@ The Config Builder generates JSON in the exact format required by the Ultimate S
     },
     "lora_bypass_states": {
       "technique_lora.safetensors": true
+    },
+    "model_bypass_states": {
+      "old_model.safetensors": true
     },
     "lora_strength_lock": {
       "style.safetensors": true
@@ -992,6 +1063,10 @@ The Config Builder generates JSON in the exact format required by the Ultimate S
 - **Array:** `["euler", "dpmpp_2m"]` or `[6.0, 7.0, 8.0]`
 - **LoRA string:** `"name:model_str:clip_str"` — stack with ` + `
 - **Folder:** `"path/"` (separate) or `"path/*"` (combined)
+- **VAE:** Single VAE name or array of VAE names (each becomes a grid dimension)
+- **Attention mode:** Single mode string or array of modes to test
+- **Prompt prefix/suffix:** Strings prepended/appended to all prompts in this config
+- **Bypass states:** Object mapping model/LoRA names to `true` (bypassed) or `false` (active)
 
 ---
 
@@ -1049,6 +1124,51 @@ Fetch complete metadata for a specific LoRA from CivitAI.
 ### `/configbuilder/refresh_models` (POST)
 Signal to clear frontend caches (called by ComfyUI when refreshing node definitions).
 
+### `/configbuilder/lookup_model_metadata` (POST)
+Fetch metadata for a checkpoint model from CivitAI (same as LoRA metadata but for models).
+
+**Request:**
+```json
+{
+  "model_name": "realistic_vision_v5.safetensors"
+}
+```
+
+**Response:**
+```json
+{
+  "metadata": {
+    "name": "Realistic Vision V5.1",
+    "model_name": "Realistic Vision",
+    "base_model": "SD 1.5",
+    "description": "...",
+    "tags": ["realistic", "photorealistic"],
+    "url": "https://civitai.com/models/12345",
+    "hash": "abc123...",
+    "creator": "SG161222"
+  }
+}
+```
+
+### `/configbuilder/scan_directory` (POST)
+Scan an external directory for image sessions and load them into the dashboard.
+
+**Request:**
+```json
+{
+  "path": "D:/other_comfyui/output/benchmarks/my_session"
+}
+```
+
+**Response:**
+```json
+{
+  "success": true,
+  "images_found": 42,
+  "manifest": { ... }
+}
+```
+
 ---
 
 ## File Locations
@@ -1097,6 +1217,7 @@ ComfyUI/output/benchmarks/model-data/
 | `+/-` | Zoom in/out |
 | `0` | Reset zoom to 1:1 |
 | `F` | Auto-fit first row to viewport width |
+| `Escape` | Close active modal/popup (priority: Revision > Filters > Settings > Fullscreen) |
 
 ### Config Builder
 | Shortcut | Action |
@@ -1109,6 +1230,24 @@ ComfyUI/output/benchmarks/model-data/
 ---
 
 ## 📝 Changelog
+
+### Update 2/16/26 — Config Builder & Dashboard Overhaul
+* 🎛️ **VAE Selection & Iteration:** Test multiple VAEs per config with searchable dropdown and folder expansion. VAEs are a full Cartesian dimension.
+* 🧠 **Attention Mode Testing:** Grid-test different attention implementations (`default`, `sageattn`, `xformers`) as a combinatorial dimension.
+* 🔗 **CLIP Encoding Combinators:** `AND`, `CAT`, `AVG(weight)`, and `BREAK` keywords for multi-segment conditioning and prompt blending.
+* 📝 **Model-Specific Prompts:** Per-config prompt prefix and suffix fields for model-appropriate quality tags.
+* 🔄 **Recursive Cartesian Prompt Builder:** Visual chip-based editor with `{option1|option2}` syntax expanding into all combinations.
+* 🔘 **Model & LoRA On/Off Switches:** Toggle entries on/off without removing them. Bypassed entries excluded from preview and output.
+* 🔍 **CivitAI Model Metadata Lookup:** Fetch model info from CivitAI directly in the Config Builder (same as existing LoRA lookup).
+* 📋 **Sampler/Scheduler Dropdowns:** Searchable dropdowns auto-populated from the connected sampler node, replacing free-text CSV entry.
+* ⚙️ **Unified Settings Panel:** SESSION button merged into a gear icon settings panel with Session, Grid Display, Export Favorites, and Scan Directory sections.
+* 📊 **Real-Time ETA Progress Bar:** Shows estimated time remaining during generation in the dashboard header.
+* 📂 **Scan External Directory:** Load image sessions from any folder into the dashboard for viewing and filtering.
+* 📦 **Export Favorites:** Copy starred images to a dedicated folder with optional CivitAI metadata packing.
+* 🛑 **Cancel During Text Encoding:** Properly cancels the entire run when interrupted during the text encoding step.
+* 🔄 **Connected Node Change Detection:** Detects when upstream nodes have changed for smarter job resuming.
+* ⌨️ **Close Modal Hotkeys:** Escape key closes modals in priority order (Revision > Filters > Settings > Fullscreen).
+* 🧹 **Dashboard Topbar Consolidation:** Streamlined header with condensed controls.
 
 ### Update 2/5/26 — Code Refactoring & Performance Improvements
 * 🏗️ **Major Code Refactoring:** Reorganized codebase into 6 modular files for better maintainability (`trigger_words.py`, `batch_encoding.py`, `manifest_utils.py`, `model_loader.py`, `image_generation.py`, `generation_orchestrator.py`).
