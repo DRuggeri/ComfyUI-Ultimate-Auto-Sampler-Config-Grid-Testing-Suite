@@ -42,31 +42,21 @@ Check Roadmap.md for some tasks and do them. don't do any marked as (low priorit
 
 # New to-do items, needs more info/explaining/numbering
 
-## Easy Feature: Add Esc key close to Revise modal and add X to close in top right of modal in Dashboard and the Lookup LoRA Metadata from CivitAI, and omit lora triggerwords modals in the Builder UI. 
+## ~~Easy Feature: Add Esc key close to Revise modal and add X to close in top right of modal in Dashboard and the Lookup LoRA Metadata from CivitAI, and omit lora triggerwords modals in the Builder UI.~~ COMPLETED
 
 ## Bug Fix: Batch Encoding Runs Before Job Skip/Continue/Resume check and will encode everything again even if it's already been completed. Also Continue/Resume Should NOT run by default if optional inputs are connected because changes to the optional inputs are not currently being tracked. We need to track connected node changes from each of the optional inputs, we could also use this step to save the workflow to the benchmark/session folder and compare the last run workflow to the current to track node changes and determine changes and also integrate currenly missing from optional inputs such as model, loras, prompts, etc.
 
 ## ~~Fix: Manifest doesn't need lora omit triggers list in every item~~ (DONE - already stripped in create_image_metadata via .pop())
 
-## Add attention options, xformers, sdpa, sage, flash, etc, option for test all, test all should clear ram & vram between each test.
+## ~~Add attention options, xformers, sdpa, sage, flash, etc, option for test all, test all should clear ram & vram between each test.~~ COMPLETED
+* **Status:** Added `attention_mode` config field supporting: default, xformers, pytorch, flash, sage, sage3, sub_quad, split. Use `"*"` to test all modes. Runtime switching via `transformer_options["optimized_attention_override"]` in ComfyUI's attention registry. Config Builder UI has dropdown+chips selector. Per-image metadata tracks which attention mode was used for dashboard filtering. Integrated into config expansion (Cartesian product with other params), skip/resume matching, and generation pipeline.
 
 # Deeper explained items to-do list
 
-#### **1. Skip Logic for Optional Inputs**
+#### **1. Skip Logic for Optional Inputs** COMPLETED
 
 * **Problem:** The `SamplerGridTester` node cannot reliably detect changes in optional inputs (`optional_model`, `optional_vae`, etc.) because standard `IS_CHANGED` logic relies on input hash comparisons, which don't update for passed objects in optional slots.
-
- Causes problems with:
-
- * Grid view using wrong model names
- * Job continuation/skipping/resuming
-
-
- * **Instruction:**
-1. **Modify `sampler_node.py`:** Implement the `IS_CHANGED` class method. Check if any optional input keys are present in the `kwargs`. If yes, return `float("NaN")` (standard ComfyUI trick to force execution) or a `uuid.uuid4().hex`.
-2. **Modify `generation_orchestrator.py`:** Update `check_if_job_completed`. If optional inputs were used, you cannot trust the `manifest.json` history for that specific job. Force a re-run or calculate a hash of the optional input's internal state (e.g., `model.model.diffusion_model`) if possible, otherwise force execution.
-
-
+* **Status:** Implemented `IS_CHANGED` classmethod in `sampler_node.py` that returns `float("NaN")` when any optional input is connected (forces re-execution), or a deterministic hash when no optional inputs are used (allows caching). Updated `check_if_job_completed` in `generation_orchestrator.py` to skip model/lora/prompt matching when optional inputs are connected, since those values come from upstream nodes whose changes can't be tracked. Added warning when resume mode is used with optional inputs.
 * **Target Files:** `sampler_node.py`, `generation_orchestrator.py`
 
 
@@ -82,7 +72,7 @@ Check Roadmap.md for some tasks and do them. don't do any marked as (low priorit
 * **Target Files:** `__init__.py`, `lora_utils.py`, `web/config_builder.js`
 
 
-#### **9. Tag/Token-Based Omit Logic**
+#### **9. Tag/Token-Based Omit Logic** COMPLETED
 
 * **Problem:** Current logic (`if word in tag`) is too broad or too strict.
 * **Instruction:**
@@ -90,7 +80,7 @@ Check Roadmap.md for some tasks and do them. don't do any marked as (low priorit
 2. **Regex:** Instead of `if omit in tag`, use `re.search(r'\b' + re.escape(omit) + r'\b', tag, re.IGNORECASE)`. This ensures "blue" removes "blue" but not "blueberry".
 3. **Tokenization:** Split the tag into words, filter against the omit set, and rejoin.
 
-
+* **Status:** Already implemented in `_should_omit_trigger()` function with regex word boundary matching.
 * **Target Files:** `trigger_words.py`
 
 #### **10. Validation Warning (Omit vs Lookup) - Warn user if omits are added but lookup is off** (low priority)
@@ -104,38 +94,23 @@ Check Roadmap.md for some tasks and do them. don't do any marked as (low priorit
 
 * **Target Files:** `web/config_builder.js`
 
-#### **11. Model-Specific Prompts**
+#### **11. Model-Specific Prompts** COMPLETED
 
 * **Problem:** Different models need different trigger words (e.g., "score_9, score_8" for Pony vs "masterpiece" for SD1.5).
-* **Instruction:**
-1. **Backend:** Add `model_specific_prompts` input to `SamplerGridTester` (dict or JSON).
-2. **Orchestrator:** In `generation_orchestrator.py`, inside the loop, check the current `conf["model"]`.
-3. **Injection:** Look up the model name in the map. If found, prepend/append the specific tags to `actual_positive_prompt` before encoding.
+* **Status:** Implemented as per-config `model_prompt_prefix` and `model_prompt_suffix` fields. These quality tags are prepended/appended to ALL prompts for a given config, wrapping around the entire prompt+triggers assembly. Added `_apply_model_prompt_affixes()` helper in `trigger_words.py`, integrated into both `build_prompt_with_triggers()` and `collect_unique_prompts_with_triggers()` for correct pre-encoding. Config Builder UI shows prefix/suffix text inputs in the Prompts section of each config. Fields persist through save/load and are passed through `expand_configs()` in `config_utils.py`.
+* **Target Files:** `trigger_words.py`, `config_utils.py`, `conf-builder-config-management.js`, `conf-builder-utilities.js`, `conf-builder-main.js`
 
-
-* **Target Files:** `sampler_node.py`, `generation_orchestrator.py`, `trigger_words.py`
-
-#### **12. Arrays in LoRA Weights**
+#### **12. Arrays in LoRA Weights** COMPLETED
 
 * **Problem:** Cannot grid search LoRA weights like `lora.safetensors:[0.5, 0.8]:1.0`.
-* **Instruction:**
-1. **Modify `config_utils.py`:** Update `expand_configs`.
-2. **Logic:** Detect brackets `[]` inside the LoRA string part. If found, treat it as a list.
-3. **Expansion:** Use `itertools.product` to generate separate config entries for each weight in the array (e.g., one config with 0.5, one with 0.8).
-
-
+* **Status:** Implemented `_expand_lora_weight_arrays()` in `config_utils.py`. Supports `[0.5, 0.8]` syntax in both model_strength and clip_strength positions, with Cartesian product for multiple arrays.
 * **Target Files:** `config_utils.py`
 
-#### **13. Real-Time ETA**
+#### **13. Real-Time ETA** COMPLETED
 
 * **Problem:** ETA only prints to server console.
-* **Instruction:**
-1. **Backend (`generation_orchestrator.py`):** In `print_generation_progress`, calculate ETA. Use `PromptServer.instance.send_sync("ultimate_grid.progress", { eta: "..." })` to send it to the frontend.
-2. **Frontend (`resources/logic_events.js`):** Add a listener for `ultimate_grid.progress`.
-3. **UI:** Update a DOM element (e.g., `#header-eta`) in `template.html`.
-
-
-* **Target Files:** `generation_orchestrator.py`, `resources/logic_events.js`, `resources/template.html`
+* **Status:** Implemented real-time progress bar in Dashboard. Backend sends `ultimate_grid.progress` events via WebSocket after each job. Frontend displays an ETA bar below the header with job count, percentage, ETA, finish time, and avg duration. Shows completion summary and auto-hides after 30s.
+* **Target Files:** `generation_orchestrator.py`, `web/dashboard.js`, `resources/logic_events.js`, `resources/template.html`
 
 #### **14. Cache Trigger Word Placement** (low priority)
 
@@ -149,16 +124,11 @@ Check Roadmap.md for some tasks and do them. don't do any marked as (low priorit
 
 
 
-#### **17. Menu Refactor (Cog Wheel)**
+#### **17. Menu Refactor (Cog Wheel)** COMPLETED
 
 * **Problem:** Header is cluttered.
-* **Instruction:**
-1. **Modify `resources/template.html`:** Replace the "Session" button with a `div` class "menu-container" containing an SVG gear icon.
-2. **Dropdown:** Create a hidden `div` "menu-dropdown". Move "Cols", "Go To", and "Save/Load" inputs inside it.
-3. **Modify `resources/logic_ui.js`:** Add logic to toggle visibility of "menu-dropdown" when the gear is clicked.
-
-
-* **Target Files:** `resources/template.html`, `resources/logic_ui.js`
+* **Status:** Moved Go To #, Cols, and Reset Zoom into a cog wheel (gear icon) dropdown menu. Added SVG gear icon button, CSS for dropdown menu with items, click-outside-to-close, and Esc key handling.
+* **Target Files:** `resources/template.html`, `resources/logic_ui.js`, `resources/report.css`
 
 #### **18. Optionally Pack workflow into images ** (low priority)
 
@@ -172,15 +142,12 @@ Check Roadmap.md for some tasks and do them. don't do any marked as (low priorit
 * **Target Files:** `image_generation.py`, `generation_orchestrator.py`
 
 
-#### **20. Hotkeys Reference List**
+#### **20. Hotkeys Reference List** COMPLETED
 
 * **Problem:** Users don't know shortcuts.
-* **Instruction:**
-1. **Modify `resources/logic_ui.js`:** In the function that renders the settings menu, append a table.
-2. **Content:** `F: Fullscreen`, `Arrows: Pan`, `+/-: Zoom`, `Space: Scroll`.
+* **Status:** Already implemented in `resources/template.html` as a KEYBOARD SHORTCUTS section in the Filters & Info popup, with a table showing Space, Shift+Space, Arrow Keys, +/-, 0, F, and Shift+Click shortcuts.
 
-
-* **Target Files:** `resources/logic_ui.js`
+* **Target Files:** `resources/template.html`
 
 #### **21. Virtual DOM Pan/Zoom (Canvas Builder)** (low priority)
 

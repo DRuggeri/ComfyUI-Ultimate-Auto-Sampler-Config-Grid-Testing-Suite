@@ -167,7 +167,7 @@ def collect_unique_prompts_with_triggers(expanded_configs, lora_triggerwords_mod
     
     for conf in expanded_configs:
         full_positive = conf["positive"]
-         
+
         if lora_triggerwords_mode != "None" and conf["lora"] != "None":
             omit_list = conf.get("lora_omit_triggers", [])
             trigger_list = get_filtered_lora_triggers(
@@ -175,24 +175,24 @@ def collect_unique_prompts_with_triggers(expanded_configs, lora_triggerwords_mod
                 omit_list,
                 lookup_triggers=True
             )
-            
+
             if trigger_list:
                 # Parse the lora string to get individual loras
                 active_loras = parse_lora_definition(conf["lora"])
-                
+
                 # Separate triggers by placement
                 start_triggers = []
                 end_triggers = []
-                
+
                 for lora_def in active_loras:
                     lname, _, _ = lora_def
                     placement = get_trigger_placement_for_lora(lname, conf, lora_triggerwords_mode)
-                    
+
                     # Get triggers specific to this lora
                     try:
                         lora_triggers = load_and_save_tags(lname, force_fetch=False)
                         omit_normalized = [str(t).lower().strip().rstrip(',').strip() for t in omit_list]
-                        
+
                         for tag in lora_triggers:
                             cleaned_tag = tag.strip().rstrip(',').strip()
                             if not _should_omit_trigger(cleaned_tag.lower(), omit_normalized):
@@ -202,7 +202,7 @@ def collect_unique_prompts_with_triggers(expanded_configs, lora_triggerwords_mod
                                     end_triggers.append(cleaned_tag)
                     except:
                         pass
-                
+
                 # Build the full prompt with triggers in correct positions
                 parts = []
                 if start_triggers:
@@ -210,9 +210,9 @@ def collect_unique_prompts_with_triggers(expanded_configs, lora_triggerwords_mod
                 parts.append(conf['positive'])
                 if end_triggers:
                     parts.append(", ".join(end_triggers))
-                
+
                 full_positive = ", ".join(parts)
-                
+
                 # Show omitted triggers only once during pre-encoding
                 if omit_list:
                     all_triggers = []
@@ -224,11 +224,14 @@ def collect_unique_prompts_with_triggers(expanded_configs, lora_triggerwords_mod
                             all_triggers.extend([t.strip().rstrip(',').strip() for t in tags])
                         except:
                             pass
-                    
+
                     omitted = set(all_triggers) - set(start_triggers + end_triggers)
                     if omitted:
                         print(f"[GridTester] 🚫 Omitted triggers: {', '.join(omitted)}")
-        
+
+        # Apply model-specific prompt prefix/suffix (wraps entire prompt+triggers)
+        full_positive = _apply_model_prompt_affixes(full_positive, conf)
+
         unique_positives.add(full_positive)
         unique_negatives.add(conf["negative"])
     
@@ -238,9 +241,39 @@ def collect_unique_prompts_with_triggers(expanded_configs, lora_triggerwords_mod
 _build_prompt_cache = {}
 
 
+def _apply_model_prompt_affixes(prompt, config):
+    """
+    Apply model-specific prompt prefix and suffix to a prompt string.
+
+    These are quality tags that should always wrap the prompt for specific model families,
+    e.g. "score_9, score_8_up" for Pony or "masterpiece, best quality" for SD1.5.
+
+    Args:
+        prompt: The assembled prompt string (may already include LoRA triggers)
+        config: Configuration dictionary with optional model_prompt_prefix/suffix
+
+    Returns:
+        The prompt with prefix/suffix applied
+    """
+    prefix = config.get("model_prompt_prefix", "").strip()
+    suffix = config.get("model_prompt_suffix", "").strip()
+
+    if not prefix and not suffix:
+        return prompt
+
+    parts = []
+    if prefix:
+        parts.append(prefix)
+    parts.append(prompt)
+    if suffix:
+        parts.append(suffix)
+
+    return ", ".join(parts)
+
+
 def build_prompt_with_triggers(config, lora_triggerwords_mode):
     """
-    Build final prompt with LoRA triggers applied.
+    Build final prompt with LoRA triggers and model-specific prefix/suffix applied.
     Results are cached based on relevant config fields to avoid redundant work.
 
     Args:
@@ -251,7 +284,8 @@ def build_prompt_with_triggers(config, lora_triggerwords_mode):
         tuple: (final_prompt, trigger_string)
     """
     if config["lora"] == "None" or lora_triggerwords_mode == "None":
-        return config["positive"], ""
+        prompt = _apply_model_prompt_affixes(config["positive"], config)
+        return prompt, ""
 
     omit_list = config.get("lora_omit_triggers", [])
     append_settings = config.get("lora_triggerwords_append_settings", {})
@@ -262,7 +296,9 @@ def build_prompt_with_triggers(config, lora_triggerwords_mode):
         config["positive"],
         tuple(omit_list),
         tuple(sorted(append_settings.items())) if append_settings else (),
-        lora_triggerwords_mode
+        lora_triggerwords_mode,
+        config.get("model_prompt_prefix", ""),
+        config.get("model_prompt_suffix", "")
     )
 
     if cache_key in _build_prompt_cache:
@@ -270,21 +306,19 @@ def build_prompt_with_triggers(config, lora_triggerwords_mode):
 
     # Parse the lora string to get individual loras
     active_loras = parse_lora_definition(config["lora"])
-    
+
     # Separate triggers by placement
     start_triggers = []
     end_triggers = []
-    
+
     for lora_def in active_loras:
         lname, _, _ = lora_def
         placement = get_trigger_placement_for_lora(lname, config, lora_triggerwords_mode)
-        # print('placement')
-        # print(placement)
         # Get triggers specific to this lora
         try:
             lora_triggers = load_and_save_tags(lname, force_fetch=False)
             omit_normalized = [str(t).lower().strip().rstrip(',').strip() for t in omit_list]
-            
+
             for tag in lora_triggers:
                 cleaned_tag = tag.strip().rstrip(',').strip()
                 if not _should_omit_trigger(cleaned_tag.lower(), omit_normalized):
@@ -294,13 +328,13 @@ def build_prompt_with_triggers(config, lora_triggerwords_mode):
                         end_triggers.append(cleaned_tag)
         except:
             pass
-    
+
     # Build the trigger string for return value
     all_triggers = start_triggers + end_triggers
     trigger_string = ""
     if all_triggers:
         trigger_string = ", " + ", ".join(all_triggers)
-    
+
     # Build the full prompt with triggers in correct positions
     parts = []
     if start_triggers:
@@ -308,8 +342,11 @@ def build_prompt_with_triggers(config, lora_triggerwords_mode):
     parts.append(config['positive'])
     if end_triggers:
         parts.append(", ".join(end_triggers))
-    
+
     final_prompt = ", ".join(parts)
+
+    # Apply model-specific prefix/suffix (wraps the entire prompt+triggers)
+    final_prompt = _apply_model_prompt_affixes(final_prompt, config)
 
     result = (final_prompt, trigger_string)
 

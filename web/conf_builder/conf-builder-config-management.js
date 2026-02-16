@@ -272,9 +272,31 @@ function createChipListBuilder({ label, stateKey, options, node, arrayIdx, confi
 
 // --- CONFIG ARRAY ELEMENT CREATOR ---
 
+// Color palette for config array headers — cycles for easy visual distinction
+const CONFIG_COLORS = ["#0088ff", "#ff6600", "#00cc66", "#cc44cc", "#ffaa00", "#44cccc", "#ff4466", "#88aa00"];
+
 export function createConfigArrayElement(node, configArray, arrayIdx, modelLists) {
+    const accentColor = CONFIG_COLORS[arrayIdx % CONFIG_COLORS.length];
     const div = document.createElement("div");
     div.className = "cb-array";
+    div.id = `cb-config-${arrayIdx}`;
+    div.style.borderLeft = `4px solid ${accentColor}`;
+
+    // Prominent config header banner
+    const configBanner = document.createElement("div");
+    configBanner.style.cssText = `display: flex; align-items: center; gap: 10px; padding: 8px 12px; margin: -12px -12px 12px -12px; background: linear-gradient(90deg, ${accentColor}22, transparent); border-bottom: 2px solid ${accentColor}44; border-radius: 4px 4px 0 0;`;
+
+    const configIndex = document.createElement("span");
+    configIndex.style.cssText = `background: ${accentColor}; color: #000; font-weight: 900; font-size: 13px; padding: 2px 8px; border-radius: 4px; font-family: monospace; min-width: 20px; text-align: center;`;
+    configIndex.textContent = `${arrayIdx + 1}`;
+    configBanner.appendChild(configIndex);
+
+    const configTitle = document.createElement("span");
+    configTitle.style.cssText = `color: ${accentColor}; font-weight: 800; font-size: 14px; flex: 1;`;
+    configTitle.textContent = configArray.name || `Config ${arrayIdx + 1}`;
+    configBanner.appendChild(configTitle);
+
+    div.appendChild(configBanner);
 
     const settingsGrid = document.createElement("div");
     settingsGrid.className = "cb-flex-grid";
@@ -303,6 +325,17 @@ export function createConfigArrayElement(node, configArray, arrayIdx, modelLists
         node, arrayIdx, configArray, accentColor: "#00aa66", placeholder: "No schedulers selected"
     });
     settingsGrid.appendChild(createInputGroup("Schedulers", schedulersBuilder));
+
+    // Attention Mode - dropdown + chips list builder
+    const ATTENTION_MODES = ["default", "xformers", "pytorch", "flash", "sage", "sage3", "sub_quad", "split"];
+    if (!configArray.attention_modes || configArray.attention_modes.length === 0) {
+        configArray.attention_modes = ["default"];
+    }
+    const attentionBuilder = createChipListBuilder({
+        label: "Attention", stateKey: "attention_modes", options: ATTENTION_MODES,
+        node, arrayIdx, configArray, accentColor: "#cc44cc", placeholder: "default"
+    });
+    settingsGrid.appendChild(createInputGroup("Attention", attentionBuilder));
 
     addInput("Steps", "steps");
     addInput("CFG", "cfg");
@@ -984,8 +1017,20 @@ async function showLoraMetadataModal(node, arrayIdx, loraName) {
     closeX.style.cssText = "position: absolute; top: 10px; right: 10px; background: #cc3333; color: white; border: none; border-radius: 4px; width: 28px; height: 28px; font-size: 16px; cursor: pointer; display: flex; align-items: center; justify-content: center; z-index: 1;";
     closeX.onmouseover = () => closeX.style.background = "#dd4444";
     closeX.onmouseout = () => closeX.style.background = "#cc3333";
-    closeX.onclick = () => document.body.removeChild(overlay);
+    // Shared close function to clean up modal and event listener
+    const closeModal = () => {
+        if (overlay.parentNode) document.body.removeChild(overlay);
+        document.removeEventListener('keydown', escHandler);
+    };
+
+    closeX.onclick = closeModal;
     modal.appendChild(closeX);
+
+    // Close on Escape key
+    const escHandler = (e) => {
+        if (e.key === 'Escape') closeModal();
+    };
+    document.addEventListener('keydown', escHandler);
 
     const title = document.createElement("h3");
     title.textContent = "🔍 LoRA Metadata Lookup";
@@ -1004,7 +1049,7 @@ async function showLoraMetadataModal(node, arrayIdx, loraName) {
     closeBtn.className = "cb-button";
     closeBtn.textContent = "Close";
     closeBtn.style.marginTop = "15px";
-    closeBtn.onclick = () => document.body.removeChild(overlay);
+    closeBtn.onclick = closeModal;
 
     overlay.appendChild(modal);
     document.body.appendChild(overlay);
@@ -1799,15 +1844,35 @@ function renderOmitTriggersSection(node, div, configArray, arrayIdx) {
     div.appendChild(omitSection);
 }
 
-// --- TRIGGER LOOKUP MODAL (Kept same as before) ---
+// --- TRIGGER LOOKUP MODAL ---
 export async function showTriggerLookupModal(node, arrayIdx) {
-    // ... (This function remains unchanged from previous versions, 
-    //      just ensure it's present in the file)
     const configArray = node.state.config_arrays[arrayIdx];
     const overlay = document.createElement("div");
     overlay.style.cssText = `position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0, 0, 0, 0.8); display: flex; align-items: center; justify-content: center; z-index: 10000;`;
     const modal = document.createElement("div");
-    modal.style.cssText = `background: #2a2a2a; border: 2px solid #0066cc; border-radius: 8px; padding: 20px; max-width: 600px; max-height: 80vh; overflow-y: auto; color: white;`;
+    modal.style.cssText = `position: relative; background: #2a2a2a; border: 2px solid #0066cc; border-radius: 8px; padding: 20px; max-width: 600px; max-height: 80vh; overflow-y: auto; color: white;`;
+
+    // Shared close function to clean up modal and event listener
+    const closeModal = () => {
+        if (overlay.parentNode) document.body.removeChild(overlay);
+        document.removeEventListener('keydown', escHandler);
+    };
+
+    // X close button in top right
+    const closeX = document.createElement("button");
+    closeX.textContent = "\u2716";
+    closeX.style.cssText = "position: absolute; top: 10px; right: 10px; background: #cc3333; color: white; border: none; border-radius: 4px; width: 28px; height: 28px; font-size: 16px; cursor: pointer; display: flex; align-items: center; justify-content: center; z-index: 1;";
+    closeX.onmouseover = () => closeX.style.background = "#dd4444";
+    closeX.onmouseout = () => closeX.style.background = "#cc3333";
+    closeX.onclick = closeModal;
+    modal.appendChild(closeX);
+
+    // Close on Escape key
+    const escHandler = (e) => {
+        if (e.key === 'Escape') closeModal();
+    };
+    document.addEventListener('keydown', escHandler);
+
     const title = document.createElement("h3");
     title.textContent = "🔎 LoRA Trigger Words Lookup";
     title.style.cssText = "margin: 0 0 15px 0; color: #0066cc;";
@@ -1827,7 +1892,7 @@ export async function showTriggerLookupModal(node, arrayIdx) {
     const closeBtn = document.createElement("button");
     closeBtn.className = "cb-button";
     closeBtn.textContent = "Close";
-    closeBtn.onclick = () => document.body.removeChild(overlay);
+    closeBtn.onclick = closeModal;
     buttonBar.appendChild(addAllBtn);
     buttonBar.appendChild(closeBtn);
     modal.appendChild(buttonBar);
@@ -1965,22 +2030,20 @@ function createPromptGroupEditor(groups, onChange, label, borderColor = "#0066cc
 
     const rawTextarea = document.createElement("textarea");
     rawTextarea.className = "cb-prompt-raw-editor";
-    rawTextarea.placeholder = '[["variation1", "variation2"], ["subject1", "subject2"]]';
+    rawTextarea.placeholder = '[["variation1", "variation2"], ["subject1", "subject2"]]\nRecursive: ["fixed text", ["optA", "optB"], ["sub", ["nested1", "nested2"]]]';
     rawTextarea.value = groups.length > 0 ? JSON.stringify(groups, null, 2) : "";
 
     rawTextarea.onchange = () => {
         try {
             const parsed = JSON.parse(rawTextarea.value);
             if (Array.isArray(parsed)) {
-                // Normalize: ensure each item is an array
-                const normalized = parsed.map(item =>
-                    Array.isArray(item) ? item.map(String) : [String(item)]
-                );
-                onChange(normalized);
+                // Accept recursive structures directly - the backend and preview
+                // functions handle arbitrary nesting depth
+                onChange(parsed);
                 rawTextarea.style.borderColor = "#00aa44";
                 setTimeout(() => { rawTextarea.style.borderColor = "#3a3a3a"; }, 1000);
-                renderVisualGroups(normalized);
-                renderPreview(normalized);
+                renderVisualGroups(parsed);
+                renderPreview(parsed);
             }
         } catch (e) {
             rawTextarea.style.borderColor = "#cc3333";
@@ -2015,11 +2078,11 @@ function createPromptGroupEditor(groups, onChange, label, borderColor = "#0066cc
 
     function renderPreview(currentGroups) {
         previewContainer.innerHTML = "";
-        const validGroups = (currentGroups || []).filter(g => Array.isArray(g) && g.length > 0);
-        if (validGroups.length === 0) return;
+        if (!currentGroups || !Array.isArray(currentGroups) || currentGroups.length === 0) return;
 
-        const count = countPromptCombinations(validGroups);
-        const previews = expandPromptPreview(validGroups, 20);
+        // Pass the full structure to count/preview — they handle recursive nesting
+        const count = countPromptCombinations(currentGroups);
+        const previews = expandPromptPreview(currentGroups, 20);
 
         const previewDiv = document.createElement("div");
         previewDiv.className = "cb-prompt-preview";
@@ -2043,7 +2106,45 @@ function createPromptGroupEditor(groups, onChange, label, borderColor = "#0066cc
     function renderVisualGroups(currentGroups) {
         visualContainer.innerHTML = "";
 
+        // Detect if structure uses deep recursive nesting (anything beyond 2 levels)
+        const hasDeepNesting = (currentGroups || []).some(item => {
+            if (!Array.isArray(item)) return false;
+            return item.some(sub => Array.isArray(sub));
+        });
+
+        if (hasDeepNesting) {
+            // Show read-only notice for recursive structures - edit in JSON mode
+            const notice = document.createElement("div");
+            notice.style.cssText = "padding: 8px; background: #2a2a3a; border: 1px solid #5544aa; border-radius: 4px; margin-bottom: 8px;";
+            notice.innerHTML = `
+                <div style="font-size: 11px; color: #aa88ff; font-weight: bold; margin-bottom: 4px;">🔀 Recursive Cartesian Structure Detected</div>
+                <div style="font-size: 10px; color: #888;">This prompt uses nested arrays for recursive Cartesian products. Use the <b>JSON</b> editor to modify it.
+                <br><br><b>Format:</b> <code style="color: #aaa;">["fixed text", ["option A", "option B"], ["sub1", ["nested1", "nested2"]]]</code>
+                <br><b>Rules:</b> Strings = literal text, flat lists = options (OR), lists containing lists = sequence (AND, Cartesian product)</div>
+            `;
+            visualContainer.appendChild(notice);
+
+            // Show flattened read-only preview of the structure
+            (currentGroups || []).forEach((item, idx) => {
+                const itemDiv = document.createElement("div");
+                itemDiv.style.cssText = "padding: 4px 8px; font-size: 11px; color: #aaa; font-family: monospace; background: #1a1a2a; border-radius: 3px; margin-bottom: 2px;";
+                if (Array.isArray(item)) {
+                    itemDiv.textContent = `[${idx}] ${JSON.stringify(item)}`;
+                    itemDiv.style.color = "#88aaff";
+                } else {
+                    itemDiv.textContent = `[${idx}] "${item}"`;
+                    itemDiv.style.color = "#aaffaa";
+                }
+                visualContainer.appendChild(itemDiv);
+            });
+            return;
+        }
+
+        // Standard 2-level visual editor for flat groups
         (currentGroups || []).forEach((group, groupIdx) => {
+            // Normalize: if group is a string, wrap it for display
+            const groupArr = Array.isArray(group) ? group : [String(group)];
+
             const groupDiv = document.createElement("div");
             groupDiv.className = "cb-prompt-group";
 
@@ -2052,7 +2153,7 @@ function createPromptGroupEditor(groups, onChange, label, borderColor = "#0066cc
             groupHeader.className = "cb-prompt-group-header";
 
             const groupLabel = document.createElement("span");
-            groupLabel.textContent = `Group ${groupIdx + 1} (${group.length} variation${group.length !== 1 ? 's' : ''})`;
+            groupLabel.textContent = `Group ${groupIdx + 1} (${groupArr.length} variation${groupArr.length !== 1 ? 's' : ''})`;
             groupHeader.appendChild(groupLabel);
 
             const groupDeleteBtn = document.createElement("button");
@@ -2075,20 +2176,20 @@ function createPromptGroupEditor(groups, onChange, label, borderColor = "#0066cc
             const chipsDiv = document.createElement("div");
             chipsDiv.className = "cb-prompt-chips";
 
-            group.forEach((variation, varIdx) => {
+            groupArr.forEach((variation, varIdx) => {
                 const chip = document.createElement("span");
                 chip.className = "cb-prompt-chip";
 
                 const chipText = document.createElement("span");
-                chipText.textContent = variation;
-                chipText.title = variation;
+                chipText.textContent = String(variation);
+                chipText.title = String(variation);
                 chip.appendChild(chipText);
 
                 const chipClose = document.createElement("span");
                 chipClose.className = "chip-close";
                 chipClose.textContent = "×";
                 chipClose.onclick = () => {
-                    const newGroups = currentGroups.map(g => [...g]);
+                    const newGroups = currentGroups.map(g => Array.isArray(g) ? [...g] : [String(g)]);
                     newGroups[groupIdx].splice(varIdx, 1);
                     // Remove group if empty
                     if (newGroups[groupIdx].length === 0) {
@@ -2125,7 +2226,7 @@ function createPromptGroupEditor(groups, onChange, label, borderColor = "#0066cc
                 const addVariation = () => {
                     const val = input.value.trim();
                     if (val) {
-                        const newGroups = currentGroups.map(g => [...g]);
+                        const newGroups = currentGroups.map(g => Array.isArray(g) ? [...g] : [String(g)]);
                         newGroups[groupIdx].push(val);
                         onChange(newGroups);
                         renderVisualGroups(newGroups);
@@ -2392,6 +2493,64 @@ export function renderConfigPromptsSection(node, div, configArray, arrayIdx) {
         contentDiv.appendChild(infoText);
     }
 
+    // --- Model Prompt Prefix / Suffix (always shown, applies to all prompts for this config) ---
+    const affixSection = document.createElement("div");
+    affixSection.style.cssText = "width: 100%; margin-top: 10px; padding-top: 8px; border-top: 1px solid #3a3a3a;";
+
+    const affixLabel = document.createElement("div");
+    affixLabel.style.cssText = "font-size: 11px; font-weight: bold; color: #88aa00; margin-bottom: 6px;";
+    affixLabel.textContent = "🏷️ Model Quality Tags (Prefix / Suffix)";
+    affixSection.appendChild(affixLabel);
+
+    const affixHint = document.createElement("div");
+    affixHint.style.cssText = "font-size: 10px; color: #666; margin-bottom: 6px; font-style: italic;";
+    affixHint.textContent = "Added before/after ALL prompts for this config. Great for model-specific quality tags (e.g. 'score_9, score_8_up' for Pony, 'masterpiece, best quality' for SD1.5).";
+    affixSection.appendChild(affixHint);
+
+    // Prefix input
+    const prefixRow = document.createElement("div");
+    prefixRow.style.cssText = "display: flex; align-items: center; gap: 6px; margin-bottom: 4px;";
+    const prefixLabel = document.createElement("span");
+    prefixLabel.style.cssText = "font-size: 11px; color: #aaa; min-width: 45px;";
+    prefixLabel.textContent = "Prefix:";
+    prefixRow.appendChild(prefixLabel);
+
+    const prefixInput = document.createElement("input");
+    prefixInput.type = "text";
+    prefixInput.className = "cb-input";
+    prefixInput.style.cssText = "flex: 1; font-size: 11px;";
+    prefixInput.placeholder = "e.g. score_9, score_8_up, score_7_up";
+    prefixInput.value = configArray.model_prompt_prefix || "";
+    prefixInput.onchange = () => {
+        node.state.config_arrays[arrayIdx].model_prompt_prefix = prefixInput.value;
+        node.saveState();
+    };
+    prefixRow.appendChild(prefixInput);
+    affixSection.appendChild(prefixRow);
+
+    // Suffix input
+    const suffixRow = document.createElement("div");
+    suffixRow.style.cssText = "display: flex; align-items: center; gap: 6px;";
+    const suffixLabel = document.createElement("span");
+    suffixLabel.style.cssText = "font-size: 11px; color: #aaa; min-width: 45px;";
+    suffixLabel.textContent = "Suffix:";
+    suffixRow.appendChild(suffixLabel);
+
+    const suffixInput = document.createElement("input");
+    suffixInput.type = "text";
+    suffixInput.className = "cb-input";
+    suffixInput.style.cssText = "flex: 1; font-size: 11px;";
+    suffixInput.placeholder = "e.g. highly detailed, 8k resolution";
+    suffixInput.value = configArray.model_prompt_suffix || "";
+    suffixInput.onchange = () => {
+        node.state.config_arrays[arrayIdx].model_prompt_suffix = suffixInput.value;
+        node.saveState();
+    };
+    suffixRow.appendChild(suffixInput);
+    affixSection.appendChild(suffixRow);
+
+    contentDiv.appendChild(affixSection);
+
     section.appendChild(contentDiv);
     div.appendChild(section);
 }
@@ -2461,7 +2620,10 @@ export async function renderUI(node, availableLoras, modelLists, loraFolders, av
             combine: false,
             positive_prompt_groups: [],
             negative_prompt: "",
-            use_custom_prompts: false
+            use_custom_prompts: false,
+            model_prompt_prefix: "",
+            model_prompt_suffix: "",
+            attention_modes: ["default"]
         });
         node.saveState();
         node.renderUI();
@@ -2484,6 +2646,31 @@ export async function renderUI(node, availableLoras, modelLists, loraFolders, av
     headerBar.appendChild(labelModeLabel);
 
     configSection.appendChild(headerBar);
+
+    // Quick-jump navigation bar (only show when there are 2+ configs)
+    if (node.state.config_arrays.length > 1) {
+        const navBar = document.createElement("div");
+        navBar.style.cssText = "display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 12px; padding: 8px; background: #252525; border-radius: 4px; position: sticky; top: 0; z-index: 50;";
+
+        const navLabel = document.createElement("span");
+        navLabel.style.cssText = "color: #888; font-size: 11px; font-weight: bold; display: flex; align-items: center; margin-right: 4px;";
+        navLabel.textContent = "JUMP TO:";
+        navBar.appendChild(navLabel);
+
+        node.state.config_arrays.forEach((ca, idx) => {
+            const color = CONFIG_COLORS[idx % CONFIG_COLORS.length];
+            const btn = document.createElement("button");
+            btn.className = "cb-button";
+            btn.style.cssText = `padding: 3px 10px; font-size: 11px; font-weight: bold; border-left: 3px solid ${color}; color: ${color};`;
+            btn.textContent = `${idx + 1}. ${ca.name || 'Config ' + (idx + 1)}`;
+            btn.onclick = () => {
+                const target = configSection.querySelector(`#cb-config-${idx}`);
+                if (target) target.scrollIntoView({ behavior: "smooth", block: "start" });
+            };
+            navBar.appendChild(btn);
+        });
+        configSection.appendChild(navBar);
+    }
 
     const arraysContainer = document.createElement("div");
     arraysContainer.className = "cb-arrays-container";

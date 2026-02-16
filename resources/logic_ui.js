@@ -90,9 +90,40 @@ function toggleSessionPopup() {
     }
 }
 
+// Cog Wheel Settings Menu
+function toggleCogMenu() {
+    const dropdown = document.getElementById('cog-menu-dropdown');
+    if (!dropdown) return;
+    const isHidden = dropdown.style.display === 'none' || !dropdown.style.display;
+    dropdown.style.display = isHidden ? 'flex' : 'none';
+}
+
+// Close cog menu when clicking outside
+document.addEventListener('click', (e) => {
+    const dropdown = document.getElementById('cog-menu-dropdown');
+    const container = e.target.closest('.cog-menu-container');
+    if (dropdown && dropdown.style.display !== 'none' && !container) {
+        dropdown.style.display = 'none';
+    }
+});
+
 // Close popup on Escape key
 document.addEventListener('keydown', (e) => {
     if (e.key === 'Escape') {
+        // Close Revise modal first (highest priority)
+        const reviseModal = document.getElementById('modal');
+        if (reviseModal && reviseModal.style.display !== 'none' && reviseModal.style.display !== '') {
+            closeM();
+            return;
+        }
+
+        // Close cog menu
+        const cogMenu = document.getElementById('cog-menu-dropdown');
+        if (cogMenu && cogMenu.style.display !== 'none') {
+            cogMenu.style.display = 'none';
+            return;
+        }
+
         const filtersPopup = document.getElementById('filters-popup');
         const sessionPopup = document.getElementById('session-popup');
 

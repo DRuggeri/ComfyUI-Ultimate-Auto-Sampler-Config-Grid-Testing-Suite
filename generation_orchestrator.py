@@ -97,35 +97,55 @@ def calculate_clip_hash(clip_model):
         return "unknown"
 
 
-def check_if_job_completed(existing_items, conf, seed, width, height, batch_idx, positive_prompt, negative_prompt):
-    """Independent check to see if a specific generation job already exists."""
+def check_if_job_completed(existing_items, conf, seed, width, height, batch_idx, positive_prompt, negative_prompt, has_optional_inputs=False):
+    """Independent check to see if a specific generation job already exists.
+
+    When has_optional_inputs is True, we skip the model/lora/prompt matching since
+    those values came from upstream nodes whose changes we cannot reliably track.
+    We still match on seed/resolution/sampler/scheduler/steps/cfg/denoise so that
+    if the user is ONLY changing upstream model/conditioning, old jobs get re-run.
+    """
     FLOAT_TOLERANCE = 0.0001
-    
+
     for idx, item in enumerate(existing_items):
         if item.get("seed") != seed: continue
         if item.get("width") != width: continue
         if item.get("height") != height: continue
         if item.get("batch_idx", 0) != batch_idx: continue
-        if item.get("model") != conf["model"]: continue
         if item.get("sampler") != conf["sampler"]: continue
         if item.get("scheduler") != conf["scheduler"]: continue
-        
+
+        # Check attention mode (default = no attention_mode key or "default")
+        item_attn = item.get("attention_mode", "default")
+        conf_attn = conf.get("attention_mode", "default")
+        if item_attn != conf_attn: continue
+
         try:
             if abs(float(item.get("steps")) - float(conf["steps"])) > FLOAT_TOLERANCE: continue
             if abs(float(item.get("cfg")) - float(conf["cfg"])) > FLOAT_TOLERANCE: continue
             if abs(float(item.get("denoise")) - float(conf["denoise"])) > FLOAT_TOLERANCE: continue
         except (ValueError, TypeError):
-            continue 
-            
-        if item.get("positive", "").strip() != positive_prompt.strip(): continue
-        if item.get("negative", "").strip() != negative_prompt.strip(): continue
-        
-        item_lora = item.get("lora", "None")
-        conf_lora = conf.get("lora_expanded", "None")
-        if item_lora != conf_lora: continue
+            continue
+
+        if has_optional_inputs:
+            # When optional inputs are connected, we can't reliably match on model,
+            # lora, or prompts because those may come from upstream nodes whose
+            # changes we can't detect. Skip these checks entirely so the job
+            # is always re-run when optional inputs are connected (unless the user
+            # explicitly sets overwrite_existing=False, handled by the caller).
+            pass
+        else:
+            # Standard matching - check model, lora, and prompts
+            if item.get("model") != conf["model"]: continue
+            if item.get("positive", "").strip() != positive_prompt.strip(): continue
+            if item.get("negative", "").strip() != negative_prompt.strip(): continue
+
+            item_lora = item.get("lora", "None")
+            conf_lora = conf.get("lora_expanded", "None")
+            if item_lora != conf_lora: continue
 
         return idx
-        
+
     return -1
 
 
@@ -221,7 +241,7 @@ def run_generation_loop(
         extra_seeds = [random.randint(0, 2**32 - 1) for _ in range(add_random_seeds_to_gens)]
     
     expanded = expand_configs(raw_configs, pos_prompts, neg_prompts, denoise_values, seed, extra_seeds, ckpt_name)
-    expanded.sort(key=lambda x: (x.get('model_type', 'checkpoint'), x['model'], tuple(x.get('text_encoders', [])), x.get('vae', 'Default'), x['lora'], x['positive'], x['negative']))
+    expanded.sort(key=lambda x: (x.get('model_type', 'checkpoint'), x['model'], tuple(x.get('text_encoders', [])), x.get('vae', 'Default'), x['lora'], x.get('attention_mode', 'default'), x['positive'], x['negative']))
     
     # ==== EXPAND LORA FOLDERS ====
     print(f"[GridTester] 🎲 Expanding LoRA folders and random selections...")
@@ -275,13 +295,31 @@ def run_generation_loop(
     print(f"[GridTester] 📋 {len(expanded)} configs × {len(input_jobs)} resolutions = {total_jobs} total jobs")
     print(f"{'='*80}")
     
+    # ==== OPTIONAL INPUT DETECTION ====
+    # Track whether any optional inputs are connected - this affects skip/resume logic
+    has_optional_inputs = any([
+        optional_model is not None,
+        optional_clip is not None,
+        optional_vae is not None,
+        optional_positive is not None,
+        optional_negative is not None,
+        optional_latent is not None
+    ])
+
+    if has_optional_inputs and not overwrite_existing:
+        print(f"[GridTester] ⚠️ Optional inputs connected with Resume mode (overwrite_existing=False).")
+        print(f"[GridTester] ⚠️ Changes to upstream nodes (models, LoRAs, prompts) connected via optional inputs")
+        print(f"[GridTester] ⚠️ CANNOT be automatically detected. Jobs matching sampler/scheduler/steps/cfg/denoise/seed")
+        print(f"[GridTester] ⚠️ will be SKIPPED even if upstream model/conditioning changed.")
+        print(f"[GridTester] ⚠️ Set overwrite_existing=True to force re-generation of all jobs.")
+
     # ==== OPTIONAL CONDITIONING SETUP ====
     if optional_positive or optional_negative:
         pos_hash = hashlib.md5(str(optional_positive).encode()).hexdigest()[:16] if optional_positive else None
         neg_hash = hashlib.md5(str(optional_negative).encode()).hexdigest()[:16] if optional_negative else None
     else:
         pos_hash, neg_hash = None, None
-    
+
     # ==== REMOTE VAE SETUP (use_remote_vae already defined above for VAE validation) ====
 
     try:
@@ -478,13 +516,14 @@ def run_generation_loop(
             
             # ==== CHECK EXISTING MATCH ====
             match_index = check_if_job_completed(
-                existing_data["items"], 
-                conf, 
-                current_seed, 
-                w, h, 
-                batch_idx, 
-                actual_positive_prompt, 
-                actual_negative_prompt
+                existing_data["items"],
+                conf,
+                current_seed,
+                w, h,
+                batch_idx,
+                actual_positive_prompt,
+                actual_negative_prompt,
+                has_optional_inputs=has_optional_inputs
             )
 
             if match_index != -1:
@@ -785,17 +824,44 @@ def run_generation_loop(
             
             result_latent = None
             try:
+                attention_mode = conf.get("attention_mode", "default")
+                if attention_mode != "default":
+                    print(f"[GridTester] 🧠 Using attention mode: {attention_mode}")
+
                 result_latent, duration = generate_image(
                     patched_model, current_seed, conf["steps"], conf["cfg"],
                     conf["sampler"], conf["scheduler"], final_positive, final_negative,
-                    latent_in, conf["denoise"]
+                    latent_in, conf["denoise"], attention_mode=attention_mode
                 )
                 
                 job_durations.append(duration)
                 eta_info = calculate_eta(job_durations, current_job, total_jobs)
                 if eta_info:
                     print_generation_progress(current_job, total_jobs, conf, w, h, duration, eta_info)
-                
+                    # Send progress to dashboard frontend
+                    if PromptServer is not None:
+                        try:
+                            progress_pct = int((current_job / total_jobs) * 100)
+                            if eta_info['hours'] > 0:
+                                eta_str = f"{eta_info['hours']}h {eta_info['minutes']}m"
+                            elif eta_info['minutes'] > 0:
+                                eta_str = f"{eta_info['minutes']}m {eta_info['seconds']}s"
+                            else:
+                                eta_str = f"{eta_info['seconds']}s"
+                            PromptServer.instance.send_sync("ultimate_grid.progress", {
+                                "node": unique_id,
+                                "session_name": session_name,
+                                "current_job": current_job,
+                                "total_jobs": total_jobs,
+                                "progress_pct": progress_pct,
+                                "eta_str": eta_str,
+                                "finish_time": eta_info['finish_formatted'],
+                                "avg_duration": round(eta_info['avg_duration'], 1),
+                                "last_duration": round(duration, 1)
+                            })
+                        except Exception:
+                            pass
+
                 meta = create_image_metadata(
                     conf, w, h, duration, current_seed, batch_idx,
                     actual_positive_prompt, actual_negative_prompt
@@ -922,5 +988,25 @@ def run_generation_loop(
         print(f"[GridTester] ⏱️  {total_hours}h {total_minutes}m {total_seconds}s total")
         print(f"[GridTester] 📊 {avg_per_job:.1f}s average per job")
         print(f"{'='*80}\n")
+
+        # Send completion event to dashboard
+        if PromptServer is not None:
+            try:
+                PromptServer.instance.send_sync("ultimate_grid.progress", {
+                    "node": unique_id,
+                    "session_name": session_name,
+                    "current_job": total_jobs,
+                    "total_jobs": total_jobs,
+                    "progress_pct": 100,
+                    "eta_str": "Done",
+                    "finish_time": time.strftime("%H:%M:%S"),
+                    "avg_duration": round(avg_per_job, 1),
+                    "last_duration": 0,
+                    "complete": True,
+                    "total_elapsed": f"{total_hours}h {total_minutes}m {total_seconds}s",
+                    "total_generated": total_generated
+                })
+            except Exception:
+                pass
     
     return (html,)

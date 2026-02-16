@@ -101,7 +101,10 @@ app.registerExtension({
                         combine: false,
                         positive_prompt_groups: [],
                         negative_prompt: "",
-                        use_custom_prompts: false
+                        use_custom_prompts: false,
+                        model_prompt_prefix: "",
+                        model_prompt_suffix: "",
+                        attention_modes: ["default"]
                     }]
                 };
 
@@ -316,7 +319,10 @@ app.registerExtension({
                             combine: arr.combine || false,
                             positive_prompt_groups: [],
                             negative_prompt: "",
-                            use_custom_prompts: false
+                            use_custom_prompts: false,
+                            model_prompt_prefix: "",
+                            model_prompt_suffix: "",
+                            attention_modes: ["default"]
                         }))
                     };
                 };
@@ -379,6 +385,13 @@ app.registerExtension({
 
                                 // Migration: ensure VAE field exists
                                 if (!arr.vaes) arr.vaes = ["None"];
+
+                                // Migration: ensure model prompt prefix/suffix fields exist
+                                if (arr.model_prompt_prefix === undefined) arr.model_prompt_prefix = "";
+                                if (arr.model_prompt_suffix === undefined) arr.model_prompt_suffix = "";
+
+                                // Migration: ensure attention modes field exists
+                                if (!arr.attention_modes) arr.attention_modes = ["default"];
                             });
                         } else if (existing.lora_config) {
                             this.state = this.migrateOldFormat(existing);

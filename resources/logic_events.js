@@ -8,6 +8,33 @@ let lastUpdateId = 0;
 
 // WebSocket Listener - OPTIMIZED
 window.addEventListener('message', (event) => {
+    // Handle real-time ETA/progress updates
+    if (event.data && event.data.type === 'progress_update') {
+        const p = event.data.data;
+        if (!p) return;
+        const etaBar = document.getElementById('eta-bar');
+        if (etaBar) {
+            etaBar.style.display = 'flex';
+            const etaText = document.getElementById('eta-text');
+            const etaProgress = document.getElementById('eta-progress');
+            if (p.complete) {
+                // Generation complete
+                if (etaText) etaText.textContent = `Complete! ${p.total_generated} images in ${p.total_elapsed} (${p.avg_duration}s/job)`;
+                if (etaProgress) etaProgress.style.width = '100%';
+                // Auto-hide after 30 seconds
+                setTimeout(() => { if (etaBar) etaBar.style.display = 'none'; }, 30000);
+            } else {
+                if (etaText) {
+                    etaText.textContent = `Job ${p.current_job}/${p.total_jobs} (${p.progress_pct}%) | ETA: ${p.eta_str} | ~${p.finish_time} | ${p.avg_duration}s/job`;
+                }
+                if (etaProgress) {
+                    etaProgress.style.width = `${p.progress_pct}%`;
+                }
+            }
+        }
+        return;
+    }
+
     if (event.data && event.data.type === 'update_data') {
         const payload = event.data.data;
         if (!payload) return;

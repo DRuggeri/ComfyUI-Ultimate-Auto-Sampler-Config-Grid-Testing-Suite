@@ -94,6 +94,32 @@ app.registerExtension({
             console.log('[UltimateGrid] ✅ Update listener installed');
         }
 
+        // PROGRESS/ETA LISTENER (SINGLETON - forward ETA to dashboard iframe)
+        if (!window.__ultimateGridProgressListenerInstalled) {
+            api.addEventListener("ultimate_grid.progress", (event) => {
+                const payload = event.detail;
+                const { session_name } = payload;
+
+                const dashboardNodes = app.graph._nodes.filter(n => n.type === "UltimateGridDashboard");
+                dashboardNodes.forEach(dashboardNode => {
+                    const sessionWidget = dashboardNode.widgets.find(w => w.name === "session_name");
+                    if (!sessionWidget) return;
+
+                    if (sessionWidget.value === session_name &&
+                        dashboardNode.loaded_session === session_name &&
+                        dashboardNode.iframe?.contentWindow) {
+                        try {
+                            dashboardNode.iframe.contentWindow.postMessage({
+                                type: 'progress_update',
+                                data: payload
+                            }, '*');
+                        } catch (e) { /* ignore */ }
+                    }
+                });
+            });
+            window.__ultimateGridProgressListenerInstalled = true;
+        }
+
         // 3. FULLSCREEN LISTENER (SINGLETON - only register once)
         if (!window.__ultimateGridFullscreenListenerInstalled) {
             window.addEventListener("message", (event) => {

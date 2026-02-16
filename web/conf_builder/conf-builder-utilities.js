@@ -274,39 +274,77 @@ export function buildLoraString(name, modelStr, clipStr) {
  * Each group is an array of variations. The total is the product of all group sizes.
  * Example: [["a", "b"], ["c"]] = 2 * 1 = 2 combinations
  */
+/**
+ * Recursively resolve a nested prompt structure into flat string options.
+ * Rules:
+ *   - String/primitive → single option ["text"]
+ *   - Flat list of strings ["a", "b"] → OPTIONS (OR logic)
+ *   - List containing sub-lists → SEQUENCE (AND logic, Cartesian product)
+ *   - Nesting can be arbitrarily deep
+ *
+ * Example: ["Photo of", ["a cat", "a dog"], ["in space", ["eating", "sleeping"]]]
+ *   → ["Photo of, a cat, in space, eating", "Photo of, a cat, in space, sleeping",
+ *      "Photo of, a dog, in space, eating", "Photo of, a dog, in space, sleeping"]
+ */
+function recursiveCartesian(item) {
+    if (!Array.isArray(item)) return [String(item)];
+
+    const hasNested = item.some(sub => Array.isArray(sub));
+
+    // Flat list of strings → OPTIONS (OR)
+    if (!hasNested) return item.map(String);
+
+    // List with sub-lists → SEQUENCE (AND, Cartesian product)
+    const resolvedGroups = item.map(sub => recursiveCartesian(sub));
+
+    // Cartesian product across resolved groups
+    let combos = [[]];
+    for (const group of resolvedGroups) {
+        const newCombos = [];
+        for (const existing of combos) {
+            for (const opt of group) {
+                newCombos.push([...existing, opt]);
+            }
+        }
+        combos = newCombos;
+    }
+    return combos.map(c => c.join(", "));
+}
+
+/**
+ * Efficiently count total prompt combinations from a (possibly recursive) nested structure
+ * without generating all combinations. O(n) where n is structure size.
+ */
+function recursiveCount(item) {
+    if (!Array.isArray(item)) return 1;
+
+    const hasNested = item.some(sub => Array.isArray(sub));
+
+    // Flat list of strings → OPTIONS count
+    if (!hasNested) return item.length || 1;
+
+    // List with sub-lists → product of each sub-item's count
+    return item.reduce((total, sub) => total * recursiveCount(sub), 1);
+}
+
+/**
+ * Count total prompt combinations from a (possibly recursive) nested structure.
+ * Handles both old format [["a","b"], ["c","d"]] and new recursive format.
+ */
 export function countPromptCombinations(groups) {
     if (!groups || !Array.isArray(groups) || groups.length === 0) return 1;
-    // Filter out empty groups
-    const validGroups = groups.filter(g => Array.isArray(g) && g.length > 0);
-    if (validGroups.length === 0) return 1;
-    return validGroups.reduce((total, group) => total * group.length, 1);
+    return recursiveCount(groups) || 1;
 }
 
 /**
  * Generate preview of expanded prompt combinations from nested groups.
  * Returns array of strings, capped at `limit` entries.
- * Example: [["a", "b"], ["1", "2"]] -> ["a, 1", "a, 2", "b, 1", "b, 2"]
+ * Supports arbitrarily deep recursive nesting.
  */
 export function expandPromptPreview(groups, limit = 20) {
     if (!groups || !Array.isArray(groups) || groups.length === 0) return [];
-    const validGroups = groups.filter(g => Array.isArray(g) && g.length > 0);
-    if (validGroups.length === 0) return [];
-
-    // Iterative Cartesian product with early cutoff
-    let combinations = [[]];
-    for (const group of validGroups) {
-        const newCombinations = [];
-        for (const existing of combinations) {
-            for (const item of group) {
-                newCombinations.push([...existing, item]);
-                if (newCombinations.length > limit) {
-                    return newCombinations.slice(0, limit).map(combo => combo.join(", "));
-                }
-            }
-        }
-        combinations = newCombinations;
-    }
-    return combinations.map(combo => combo.join(", "));
+    const all = recursiveCartesian(groups);
+    return all.slice(0, limit);
 }
 
 // --- ITERATION COUNT CALCULATION ---
@@ -403,7 +441,10 @@ export function getIterationCount(configArray) {
         p_count = countPromptCombinations(configArray.positive_prompt_groups);
     }
 
-    return m_count * l_count * v_count * s_count * sch_count * st_count * c_count * p_count;
+    // 6. Attention modes
+    const a_count = (configArray.attention_modes && configArray.attention_modes.length > 0) ? configArray.attention_modes.length : 1;
+
+    return m_count * l_count * v_count * s_count * sch_count * st_count * c_count * p_count * a_count;
 }
 
 // --- CONFIG CONVERSION ---
@@ -459,6 +500,12 @@ export function convertStateToConfigs(state) {
             lora: loraValue,
             model: finalModels.length > 1 ? finalModels : finalModels[0] || "None"
         };
+
+        // Add attention_mode if not just "default"
+        const attentionModes = (configArray.attention_modes || ["default"]).filter(a => a);
+        if (attentionModes.length > 0 && !(attentionModes.length === 1 && attentionModes[0] === "default")) {
+            config.attention_mode = attentionModes.length > 1 ? attentionModes : attentionModes[0];
+        }
 
         // Add VAE if any are selected (not "None")
         if (vaes.length > 0) {
@@ -523,6 +570,15 @@ export function convertStateToConfigs(state) {
             }
         }
 
+        // ==== MODEL PROMPT PREFIX/SUFFIX ====
+        // Quality tags prepended/appended to ALL prompts for this config
+        if (configArray.model_prompt_prefix && configArray.model_prompt_prefix.trim()) {
+            config.model_prompt_prefix = configArray.model_prompt_prefix.trim();
+        }
+        if (configArray.model_prompt_suffix && configArray.model_prompt_suffix.trim()) {
+            config.model_prompt_suffix = configArray.model_prompt_suffix.trim();
+        }
+
         configs.push(config);
     });
     return configs;
@@ -549,7 +605,10 @@ export function convertConfigsToConfigArrays(configs) {
             combine: false,
             positive_prompt_groups: [],
             negative_prompt: "",
-            use_custom_prompts: false
+            use_custom_prompts: false,
+            model_prompt_prefix: "",
+            model_prompt_suffix: "",
+            attention_modes: ["default"]
         }];
     }
 
@@ -638,12 +697,14 @@ export function convertConfigsToConfigArrays(configs) {
             // Config has per-config prompts
             useCustomPrompts = true;
             if (Array.isArray(config.positive)) {
-                // Could be nested array [["a", "b"], ["c"]] or simple array ["a", "b"]
-                if (config.positive.length > 0 && Array.isArray(config.positive[0])) {
-                    // Nested array format - use as-is
+                // Check if this is a recursive/nested structure (any element is a sub-array)
+                const hasAnyNesting = config.positive.some(item => Array.isArray(item));
+                if (hasAnyNesting) {
+                    // Recursive or nested array format - preserve structure as-is
+                    // This handles both classic [["a","b"],["c"]] and recursive ["text",["a","b"],["x",["y","z"]]]
                     positivePromptGroups = config.positive;
                 } else {
-                    // Simple array - wrap as single group
+                    // Simple flat array of strings - wrap as single group
                     positivePromptGroups = [config.positive];
                 }
             } else if (typeof config.positive === 'string' && config.positive.trim()) {
@@ -680,7 +741,12 @@ export function convertConfigsToConfigArrays(configs) {
             combine: hasCombined,
             positive_prompt_groups: positivePromptGroups,
             negative_prompt: negativePrompt,
-            use_custom_prompts: useCustomPrompts
+            use_custom_prompts: useCustomPrompts,
+            model_prompt_prefix: config.model_prompt_prefix || "",
+            model_prompt_suffix: config.model_prompt_suffix || "",
+            attention_modes: config.attention_mode
+                ? (Array.isArray(config.attention_mode) ? config.attention_mode : [config.attention_mode])
+                : ["default"]
         });
     });
 
@@ -704,6 +770,9 @@ export function convertConfigsToConfigArrays(configs) {
         combine: false,
         positive_prompt_groups: [],
         negative_prompt: "",
-        use_custom_prompts: false
+        use_custom_prompts: false,
+        model_prompt_prefix: "",
+        model_prompt_suffix: "",
+        attention_modes: ["default"]
     }];
 }

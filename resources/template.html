@@ -22,21 +22,10 @@
 
         <div style="flex-grow: 1;"></div>
 
-        <div class="meta-box">
-            <input type="text" inputmode="numeric" id="goto-input" min="1" placeholder="Go to # "
-                title="Jump to image number (press Enter)" style="width: 50px;">
-        </div>
-
-        <div class="meta-box">
-            <span class="meta-label">Cols</span>
-            <input type="text" inputmode="numeric" id="col-count" min="0" placeholder="Auto"
-                title="Set grid columns (0 = Auto)">
-        </div>
-
         <div class="meta-box" style="overflow: visible;"> <span class="meta-label">Sort</span>
 
-            <div class="sort-container" id="sort-container" ">
-                <button class=" sort-btn" id="sort-main-btn" onclick="toggleSortPopup()">
+            <div class="sort-container" id="sort-container">
+                <button class="sort-btn" id="sort-main-btn" onclick="toggleSortPopup()">
                 <span id="sort-primary-label">Oldest</span>
                 <span style="opacity:0.5; font-size:8px;">▼</span>
                 </button>
@@ -57,12 +46,42 @@
             </div>
         </div>
 
-        <button class="action-btn" onclick="resetZoom()" title="Reset Zoom (0)">⊙</button>
+        <!-- COG WHEEL MENU -->
+        <div class="cog-menu-container" style="position: relative; overflow: visible;">
+            <button class="action-btn" onclick="toggleCogMenu()" title="Settings">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                    <circle cx="12" cy="12" r="3"></circle>
+                    <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"></path>
+                </svg>
+            </button>
+            <div id="cog-menu-dropdown" class="cog-menu-dropdown" style="display: none;">
+                <div class="cog-menu-item">
+                    <span class="meta-label">Go To</span>
+                    <input type="text" inputmode="numeric" id="goto-input" min="1" placeholder="#"
+                        title="Jump to image number (press Enter)" style="width: 45px;">
+                </div>
+                <div class="cog-menu-item">
+                    <span class="meta-label">Cols</span>
+                    <input type="text" inputmode="numeric" id="col-count" min="0" placeholder="Auto"
+                        title="Set grid columns (0 = Auto)">
+                </div>
+                <div class="cog-menu-item">
+                    <button class="action-btn" onclick="resetZoom(); toggleCogMenu();" title="Reset Zoom (0)" style="width: 100%; justify-content: center;">⊙ Reset Zoom</button>
+                </div>
+            </div>
+        </div>
 
         <button class="fs-btn" onclick="toggleFullscreen()" title="Toggle Fullscreen">⛶</button>
     </div>
 
-
+    <!-- REAL-TIME ETA BAR -->
+    <div id="eta-bar" style="display: none; align-items: center; gap: 10px; padding: 4px 12px; background: #1a1a2e; border-bottom: 1px solid #333; font-size: 11px; color: #aaa; position: relative;">
+        <span style="color: #0af; font-weight: bold;">ETA</span>
+        <span id="eta-text" style="flex: 1;">--</span>
+        <div style="position: absolute; bottom: 0; left: 0; height: 2px; width: 100%; background: #222;">
+            <div id="eta-progress" style="height: 100%; width: 0%; background: linear-gradient(90deg, #0af, #0f6); transition: width 0.5s ease;"></div>
+        </div>
+    </div>
 
 
     <div id="filters-popup" class="filters-popup" style="display: none;">
@@ -325,6 +344,7 @@
     </div>
 
     <div id="modal">
+        <button class="modal-close-x" onclick="closeM()" title="Close (Esc)">&times;</button>
         <div class="modal-main">
             <div class="preview"><img id="m-img" src=""></div>
             <div class="controls">
