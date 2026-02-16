@@ -422,9 +422,19 @@ class UltimateConfigBuilder:
         combine = True 
         
         loras = config_array.get("loras", [])
-        
-        # Loras are already strings
-        lora_strings = [str(lora) for lora in loras if lora and lora != "None"]
+        lora_bypass_states = config_array.get("lora_bypass_states", {})
+
+        # Filter out bypassed loras, then convert to strings
+        lora_strings = []
+        for lora in loras:
+            if not lora or lora == "None":
+                continue
+            lora_str = str(lora)
+            # Extract lora name (path before first colon) to check bypass state
+            lora_name = lora_str.split(":")[0] if ":" in lora_str else lora_str
+            if lora_bypass_states.get(lora_name, False):
+                continue  # Skip bypassed
+            lora_strings.append(lora_str)
         
         # Add combined version if requested
         if combine and len(lora_strings) > 1:
@@ -519,13 +529,14 @@ class UltimateConfigBuilder:
             # Process models - handle both object format {path, type} and legacy string format
             model_strings = []
             model_type = "checkpoint"  # default
+            model_bypass_states = config_array.get("model_bypass_states", {})
             for m in models_raw:
                 if isinstance(m, dict):
                     path = m.get("path", "")
-                    if path and path != "None":
+                    if path and path != "None" and not model_bypass_states.get(path, False):
                         model_strings.append(str(path))
                         model_type = m.get("type", "checkpoint")
-                elif isinstance(m, str) and m and m != "None":
+                elif isinstance(m, str) and m and m != "None" and not model_bypass_states.get(m, False):
                     model_strings.append(str(m))
             
             # Process loras for this config
