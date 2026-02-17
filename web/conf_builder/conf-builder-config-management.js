@@ -1129,7 +1129,7 @@ async function showLoraMetadataModal(node, arrayIdx, loraName) {
     modal.appendChild(title);
 
     const status = document.createElement("div");
-    status.textContent = `🔄 Fetching metadata for: ${loraName.split('/').pop()}`;
+    status.textContent = `🔄 Fetching metadata for: ${loraName.split('/').pop()} (This could take a few seconds the fist time)`;
     status.style.cssText = "margin-bottom: 15px; color: #aaa;";
     modal.appendChild(status);
 
@@ -1299,7 +1299,7 @@ async function showModelMetadataModal(node, arrayIdx, modelName, modelType) {
     modal.appendChild(title);
 
     const status = document.createElement("div");
-    status.textContent = `🔄 Fetching metadata for: ${modelName.split('/').pop()}`;
+    status.textContent = `🔄 Fetching metadata for: ${modelName.split('/').pop()} (This could take a few seconds the fist time)`;
     status.style.cssText = "margin-bottom: 15px; color: #aaa;";
     modal.appendChild(status);
 

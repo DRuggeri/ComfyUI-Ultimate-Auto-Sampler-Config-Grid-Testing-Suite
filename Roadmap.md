@@ -33,9 +33,11 @@ But seriously, after updating your code see if it works. If it didn't send the e
 
 ---
 
-
-Check Roadmap.md for some tasks and do them. don't do any marked as (low priority). If you think you can do the ones marked as New to-do items, needs more info/explaining/numbering those are good. There is some info on the project in README.md and info on the file structure and notes on each files functions in the ProjectStructure.md 
-
+!!!!
+Check Roadmap.md for some tasks and do them. If you think you can do the ones marked as New to-do items, needs more info/explaining/numbering those are good. There is some info on the project in README.md and info on the file structure and notes on each files functions in the ProjectStructure.md 
+!!!!
+ProjectStructure.md has notes to assist AI in developing this project
+!!!!
 
 ### **ComfyUI Ultimate Sampler Grid – Development Roadmap**
 
