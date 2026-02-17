@@ -42,7 +42,7 @@ ProjectStructure.md has notes to assist AI in developing this project
 ### **ComfyUI Ultimate Sampler Grid – Development Roadmap**
 
 
-## BUG: There are a couple thing wrong with the dashboard virtual canvas, toggling fullscreen causes the loss of panning location, panning location (specifically y / height) should be persistant. I believe its stored in local storage to allow for persistance but I think the new filter system broke it. Additionally, when the new filter system and dynamic card sizing based on input images was introduced sometimes cards show up as the wrong size or the grid even shows blank and empty spots. not sure why, we need to check the filter system and dynamic height adjustment system and virtual canvas for any possible issues.
+## BUG: There are a couple thing wrong with the dashboard virtual canvas, toggling fullscreen causes the loss of panning location, panning location (specifically y / height) should be persistant. I believe its stored in local storage to allow for persistance but I think the new filter system broke it. Additionally, when the new filter system and dynamic card sizing based on input images was introduced sometimes cards show up as the wrong size or the grid even shows blank and empty spots. not sure why, we need to check the filter and sorting systems and dynamic height adjustment system and virtual canvas for any possible issues. It also seems like the sorting system caauses lag when dealing with thousands of images, is there any way we could do async loading optimize it to work better with thousands of images?
 
 
 ## When you click a sampler or scheduler in the dropdown it should add it to the list right away.
