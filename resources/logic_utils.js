@@ -91,16 +91,6 @@ async function loadSession() {
         activeData = fullManifest.items || [];
         meta = fullManifest.meta || {};
 
-        // Auto-whitelist source directory for scan-type sessions
-        // (images won't load after server restart without this)
-        if (meta.scan_type === 'directory' && meta.source_directory) {
-            fetch('/config_tester/whitelist_directory', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ directory_path: meta.source_directory })
-            }).catch(e => console.warn('[Load] Could not whitelist directory:', e));
-        }
-
         console.log(`[Load] 📦 activeData now has ${activeData.length} items`);
 
         // 5. Reset indices

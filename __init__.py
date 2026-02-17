@@ -15,9 +15,6 @@ from .json_text_node import SmartJSONTextNode
 from .metadata_packer import pack_metadata_into_image
 from .directory_scanner import scan_directory_for_images
 
-# Security whitelist for external image serving (populated by scan_directory route)
-_whitelisted_directories = set()
-
 
 # --- PATH SECURITY HELPERS ---
 def _get_benchmarks_base():
@@ -427,18 +424,16 @@ async def export_favorites(request):
             file_path = item.get("file", "")
             
             # Parse filename from URL format: /view?filename=img_123.webp&type=output&subfolder=benchmarks/Session/images
-            if file_path.startswith("/config_tester/view_external?"):
-                # External directory image - parse absolute path from query param
-                parsed_url = urllib.parse.urlparse(file_path)
-                url_params = urllib.parse.parse_qs(parsed_url.query)
-                source_path = url_params.get("path", [""])[0]
-                filename = os.path.basename(source_path)
-            elif file_path.startswith("/view?"):
-                # Extract filename from URL
+            if file_path.startswith("/view?"):
+                # Extract filename and subfolder from URL
                 parsed_url = urllib.parse.urlparse(file_path)
                 url_params = urllib.parse.parse_qs(parsed_url.query)
                 filename = url_params.get("filename", [""])[0]
-                source_path = os.path.join(images_dir, filename)
+                subfolder = url_params.get("subfolder", [""])[0]
+                if subfolder:
+                    source_path = os.path.join(folder_paths.get_output_directory(), subfolder, filename)
+                else:
+                    source_path = os.path.join(images_dir, filename)
             elif file_path.startswith("./images/"):
                 # Relative path format
                 filename = file_path[9:]  # Remove ./images/
@@ -528,6 +523,8 @@ async def scan_directory_route(request):
     """
     Scan an external directory for images, extract PNG metadata,
     and generate a manifest compatible with the dashboard.
+    Creates symlinks in the output directory so ComfyUI's built-in
+    /view endpoint can serve the images (no custom file serving needed).
     """
     try:
         data = await request.json()
@@ -559,15 +556,32 @@ async def scan_directory_route(request):
         print(f"[DirScanner] Scanning directory: {directory_path}")
         print(f"[DirScanner] Session name: {session_name}")
 
+        # Prepare the symlink directory within the output folder
+        # so ComfyUI's built-in /view endpoint can serve the images
+        base_dir = os.path.join(folder_paths.get_output_directory(), "benchmarks", session_name)
+
+        if not _is_path_within(base_dir, _get_benchmarks_base()):
+            return web.json_response({"error": "Forbidden: path outside benchmarks directory"}, status=403)
+
+        link_dir = os.path.join(base_dir, "external_images")
+        os.makedirs(link_dir, exist_ok=True)
+
+        # The subfolder path for /view URLs (relative to output dir)
+        view_subfolder = f"benchmarks/{session_name}/external_images"
+
         # Run the scan in a thread pool to avoid blocking the event loop
         loop = asyncio.get_event_loop()
         items, stats = await loop.run_in_executor(
-            None, scan_directory_for_images, directory_path
+            None, scan_directory_for_images, directory_path, 5000, view_subfolder
         )
 
         from_manifest = stats.get("from_manifest", 0)
         manifest_info = f", {from_manifest} from existing manifest" if from_manifest > 0 else ""
         print(f"[DirScanner] Found {stats['total']} images ({stats['with_metadata']} with metadata, {stats['skipped']} skipped{manifest_info})")
+
+        # Create symlinks (or copy on Windows if symlinks not available)
+        # for each image so /view can serve them
+        _create_image_links(directory_path, link_dir, items)
 
         # Build manifest
         manifest = {
@@ -582,12 +596,6 @@ async def scan_directory_route(request):
         }
 
         # Save manifest to benchmarks session directory
-        base_dir = os.path.join(folder_paths.get_output_directory(), "benchmarks", session_name)
-
-        if not _is_path_within(base_dir, _get_benchmarks_base()):
-            return web.json_response({"error": "Forbidden: path outside benchmarks directory"}, status=403)
-
-        os.makedirs(base_dir, exist_ok=True)
         manifest_path = os.path.join(base_dir, "manifest.json")
 
         # If manifest already exists, preserve user tags (favorited/rejected/notes)
@@ -616,16 +624,7 @@ async def scan_directory_route(request):
         with open(manifest_path, "w") as f:
             json.dump(manifest, f, indent=2)
 
-        # Whitelist the directory for the view_external route
-        real_dir = os.path.realpath(directory_path)
-        _whitelisted_directories.add(real_dir)
-        # Also whitelist images/ subdirectory if it exists (generated sessions store images there)
-        images_subdir = os.path.realpath(os.path.join(directory_path, "images"))
-        if os.path.isdir(images_subdir):
-            _whitelisted_directories.add(images_subdir)
-            print(f"[DirScanner] Whitelisted directory: {real_dir} (+ images/)")
-        else:
-            print(f"[DirScanner] Whitelisted directory: {real_dir}")
+        print(f"[DirScanner] Created image links in: {link_dir}")
 
         from_manifest = stats.get("from_manifest", 0)
         return web.json_response({
@@ -646,109 +645,48 @@ async def scan_directory_route(request):
         return web.json_response({"error": str(e)}, status=500)
 
 
-# =============================================================================
-# API: SERVE EXTERNAL IMAGES (Security-Whitelisted)
-# =============================================================================
-
-_IMAGE_CONTENT_TYPES = {
-    ".png": "image/png",
-    ".jpg": "image/jpeg",
-    ".jpeg": "image/jpeg",
-    ".webp": "image/webp",
-    ".bmp": "image/bmp",
-    ".gif": "image/gif",
-}
-
-@server.PromptServer.instance.routes.get("/config_tester/view_external")
-async def view_external_image(request):
+def _create_image_links(source_dir, link_dir, items):
     """
-    Serve image files from whitelisted directories.
-    Only directories registered via scan_directory are allowed.
+    Create symlinks (or copies on Windows) from source images into
+    the output directory so ComfyUI's built-in /view endpoint can serve them.
     """
-    try:
-        encoded_path = request.query.get("path", "")
-        if not encoded_path:
-            return web.Response(status=400, text="Missing path parameter")
+    IMAGE_EXTENSIONS = {".png", ".jpg", ".jpeg", ".webp", ".bmp"}
 
-        file_path = urllib.parse.unquote(encoded_path)
+    # Collect all source files referenced by items
+    filenames = set()
+    for item in items:
+        src = item.get("source_file")
+        if src:
+            filenames.add(src)
 
-        # Security: reject directory traversal attempts
-        if ".." in file_path:
-            return web.Response(status=403, text="Forbidden: directory traversal")
+    # Scan source directory and subdirectories for matching files
+    scan_dirs = [source_dir]
+    images_subdir = os.path.join(source_dir, "images")
+    if os.path.isdir(images_subdir):
+        scan_dirs.append(images_subdir)
 
-        # Resolve to real path
-        real_path = os.path.realpath(file_path)
+    for scan_dir in scan_dirs:
+        try:
+            for entry in os.scandir(scan_dir):
+                if not entry.is_file():
+                    continue
+                ext = os.path.splitext(entry.name)[1].lower()
+                if ext not in IMAGE_EXTENSIONS:
+                    continue
+                if entry.name not in filenames:
+                    continue
 
-        # Security: check file extension is an image
-        ext = os.path.splitext(real_path)[1].lower()
-        if ext not in _IMAGE_CONTENT_TYPES:
-            return web.Response(status=403, text="Forbidden: not an image file")
+                link_path = os.path.join(link_dir, entry.name)
+                if os.path.exists(link_path):
+                    continue
 
-        # Security: check the file's directory is whitelisted
-        real_dir = os.path.dirname(real_path)
-        is_allowed = any(
-            real_dir == wl_dir or real_dir.startswith(wl_dir + os.sep)
-            for wl_dir in _whitelisted_directories
-        )
-
-        if not is_allowed:
-            return web.Response(status=403, text="Forbidden: directory not whitelisted")
-
-        if not os.path.isfile(real_path):
-            return web.Response(status=404, text="File not found")
-
-        content_type = _IMAGE_CONTENT_TYPES.get(ext, "application/octet-stream")
-
-        return web.FileResponse(
-            real_path,
-            headers={
-                "Content-Type": content_type,
-                "Cache-Control": "public, max-age=3600",
-            }
-        )
-
-    except Exception as e:
-        return web.Response(status=500, text=str(e))
-
-
-# =============================================================================
-# API: RE-WHITELIST DIRECTORY (for loading previously scanned sessions)
-# =============================================================================
-
-@server.PromptServer.instance.routes.post("/config_tester/whitelist_directory")
-async def whitelist_directory_route(request):
-    """
-    Re-whitelist a directory for serving images after server restart.
-    Called automatically when loading a scan-type session.
-    Only image files (checked by extension) can be served from whitelisted dirs.
-    """
-    try:
-        data = await request.json()
-        directory_path = data.get("directory_path", "").strip()
-
-        if not directory_path:
-            return web.Response(status=400, text="Missing directory_path")
-
-        directory_path = os.path.normpath(directory_path)
-
-        if not os.path.isabs(directory_path):
-            return web.Response(status=400, text="Path must be absolute")
-
-        if not os.path.isdir(directory_path):
-            return web.Response(status=404, text="Directory not found")
-
-        # Cap whitelist size to prevent unbounded growth
-        if len(_whitelisted_directories) >= 50:
-            return web.Response(status=429, text="Too many whitelisted directories (max 50)")
-
-        real_dir = os.path.realpath(directory_path)
-        _whitelisted_directories.add(real_dir)
-        print(f"[DirScanner] Re-whitelisted directory: {real_dir}")
-
-        return web.Response(status=200, text="Whitelisted")
-
-    except Exception as e:
-        return web.Response(status=500, text=str(e))
+                try:
+                    os.symlink(entry.path, link_path)
+                except (OSError, NotImplementedError):
+                    # Windows may need admin privileges for symlinks; fall back to copy
+                    shutil.copy2(entry.path, link_path)
+        except PermissionError:
+            print(f"[DirScanner] Warning: Permission denied scanning {scan_dir}")
 
 
 # =============================================================================
