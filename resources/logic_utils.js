@@ -168,6 +168,10 @@ async function exportFavorites() {
     const organizeLoraCheckbox = document.getElementById('organize-by-lora-checkbox');
     const organizeByLora = organizeLoraCheckbox ? organizeLoraCheckbox.checked : false;
 
+    // Get export prompt txt checkbox state
+    const promptTxtCheckbox = document.getElementById('export-prompt-txt-checkbox');
+    const exportPromptTxt = promptTxtCheckbox ? promptTxtCheckbox.checked : false;
+
     // Show loading state
     if (statusEl) {
         statusEl.innerText = '⏳ Exporting favorites...';
@@ -187,7 +191,8 @@ async function exportFavorites() {
                 session_name: sessionName,
                 pack_metadata: packMetadata,
                 organize_by_prompt: organizeByPrompt,
-                organize_by_lora: organizeByLora
+                organize_by_lora: organizeByLora,
+                export_prompt_txt: exportPromptTxt
             })
         });
 

@@ -353,6 +353,7 @@ async def export_favorites(request):
         pack_metadata = data.get("pack_metadata", False)
         organize_by_prompt = data.get("organize_by_prompt", False)
         organize_by_lora = data.get("organize_by_lora", False)
+        export_prompt_txt = data.get("export_prompt_txt", False)
         
         # Sanitize
         if session_name:
@@ -494,6 +495,18 @@ async def export_favorites(request):
             else:
                 shutil.copy2(source_path, dest_path)
                 exported_count += 1
+
+            # Export positive prompt as .txt file alongside the image
+            if export_prompt_txt:
+                try:
+                    prompt_text = item.get("positive") or manifest.get("meta", {}).get("positive", "")
+                    if prompt_text:
+                        txt_filename = os.path.splitext(dest_filename)[0] + '.txt'
+                        txt_path = os.path.join(dest_dir, txt_filename)
+                        with open(txt_path, "w", encoding="utf-8") as txt_file:
+                            txt_file.write(prompt_text)
+                except Exception as e:
+                    print(f"[Export] Error writing prompt txt for {filename}: {e}")
         
         result_msg = f"Exported {exported_count} favorited images to 'benchmarks/{session_name}/favorites/'"
         if organize_by_prompt and organize_by_lora:
@@ -504,6 +517,8 @@ async def export_favorites(request):
             result_msg += f" (organized into {len(lora_to_folder)} lora folders)"
         if pack_metadata:
             result_msg += " (with metadata packed)"
+        if export_prompt_txt:
+            result_msg += " (with prompt .txt files)"
         
         print(f"[ConfigTester] ✅ {result_msg}")
         return web.Response(status=200, text=result_msg)
