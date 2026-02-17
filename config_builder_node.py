@@ -675,21 +675,39 @@ async def lookup_lora_metadata_endpoint(request):
             }, status=400)
         
         print(f"[ConfigBuilder] 🔍 Full metadata lookup request for: {lora_name}")
-        
+
+        # Check disk cache first to avoid expensive SHA256 hashing
+        output_dir = folder_paths.get_output_directory()
+        model_data_dir = os.path.join(output_dir, "benchmarks", "model-data", lora_name.replace("/", "_").replace("\\", "_").replace(".safetensors", ""))
+        metadata_file = os.path.join(model_data_dir, "metadata.json")
+
+        if os.path.exists(metadata_file):
+            try:
+                cached = load_json_from_file(metadata_file)
+                if cached and cached.get("name"):
+                    print(f"[ConfigBuilder] ✅ Using cached metadata for: {lora_name}")
+                    return web.json_response({
+                        "metadata": cached,
+                        "saved_to": metadata_file,
+                        "cached": True
+                    })
+            except Exception:
+                pass  # Cache miss or corrupt file - fall through to fresh lookup
+
         # Get the full path to the LoRA file
         lora_path = folder_paths.get_full_path("loras", lora_name)
-        
+
         if lora_path is None:
             return web.json_response({
                 "error": f"LoRA file not found: {lora_name}"
             }, status=404)
-        
-        # Calculate the hash
+
+        # Calculate the hash (expensive - only when not cached)
         lora_hash = calculate_sha256(lora_path)
         short_hash = lora_hash[:10]  # First 10 characters for short hash
-        
+
         print(f"[ConfigBuilder] 📊 Hash calculated: {short_hash}")
-        
+
         # Fetch metadata from CivitAI
         model_info = get_model_version_info(lora_hash)
         
@@ -768,6 +786,24 @@ async def lookup_model_metadata_endpoint(request):
 
         print(f"[ConfigBuilder] 🔍 Full metadata lookup request for model: {model_name} (type: {model_type})")
 
+        # Check disk cache first to avoid expensive SHA256 hashing
+        output_dir = folder_paths.get_output_directory()
+        model_data_dir = os.path.join(output_dir, "benchmarks", "model-data", model_name.replace("/", "_").replace("\\", "_").replace(".safetensors", "").replace(".ckpt", "").replace(".gguf", ""))
+        metadata_file = os.path.join(model_data_dir, "metadata.json")
+
+        if os.path.exists(metadata_file):
+            try:
+                cached = load_json_from_file(metadata_file)
+                if cached and cached.get("name"):
+                    print(f"[ConfigBuilder] ✅ Using cached metadata for model: {model_name}")
+                    return web.json_response({
+                        "metadata": cached,
+                        "saved_to": metadata_file,
+                        "cached": True
+                    })
+            except Exception:
+                pass  # Cache miss or corrupt file - fall through to fresh lookup
+
         # Resolve the full path based on model type
         model_path = None
         if model_type == "gguf":
@@ -787,7 +823,7 @@ async def lookup_model_metadata_endpoint(request):
                 "error": f"Model file not found: {model_name}"
             }, status=404)
 
-        # Calculate the hash
+        # Calculate the hash (expensive - only when not cached)
         model_hash = calculate_sha256(model_path)
         short_hash = model_hash[:10]
 
