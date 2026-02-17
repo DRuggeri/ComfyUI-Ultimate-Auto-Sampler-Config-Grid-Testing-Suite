@@ -133,8 +133,17 @@ app.registerExtension({
                     }
 
                     const el = graphNode.iframe;
+
+                    // Save viewport position before fullscreen toggle
+                    // so it can be restored after the iframe reloads
+                    try {
+                        if (el.contentWindow?.saveViewportPosition) {
+                            el.contentWindow.saveViewportPosition();
+                        }
+                    } catch (e) { /* cross-origin or not loaded yet */ }
+
                     el.addEventListener('load', () => {
-                        console.log('[UltimateGrid] Iframe reloaded, restoring session...');
+                        console.log('[UltimateGrid] Iframe reloaded after fullscreen toggle, restoring session...');
 
                         // Get the session name from the node's widget
                         const sessionWidget = graphNode.widgets?.find(w => w.name === "session_name");

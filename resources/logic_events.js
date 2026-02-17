@@ -42,29 +42,24 @@ window.addEventListener('message', (event) => {
         // 1. Handle NEW ITEMS (incremental)
         if (payload.new_items && payload.new_items.length > 0) {
             console.log(`[Events] 📥 Received ${payload.new_items.length} new items`);
-            
-            if (!fullManifest.items) fullManifest.items = [];
-            
-            // Add to data source
-            fullManifest.items.unshift(...payload.new_items);
-            activeData = fullManifest.items;
-            
 
-            
+            if (!fullManifest.items) fullManifest.items = [];
+
+            // Add to fullManifest data source only (processNewData will add to activeData)
+            fullManifest.items.unshift(...payload.new_items);
+
             // CRITICAL: Process only new items, don't refilter everything
-            refreshIndices();
-            
-            // Update filter options (but don't rebuild unnecessarily)
-            updateFiltersForNewData(payload.new_items);
-            
-            // INCREMENTAL PROCESSING (much faster!)
+            // processNewData handles: adding to activeData, refreshIndices, filter updates, and rendering
             if (typeof processNewData === 'function') {
                 processNewData(payload.new_items);
             } else {
-                // Fallback to full reprocess if function not available
+                // Fallback: sync activeData and do full reprocess
+                activeData = fullManifest.items;
+                refreshIndices();
+                updateFiltersForNewData(payload.new_items);
                 updateDataPipeline();
             }
-            
+
             lastUpdateId++;
             return;
         } 
