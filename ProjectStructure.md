@@ -12,8 +12,10 @@ are hidden from ComfyUI Manager. **All contributors must follow these rules:**
    only, never called at runtime.
 4. **No code obfuscation** — No encoded strings, multi-statement tricks, or undefined
    variable patterns.
-5. **No custom file-serving endpoints** — Use ComfyUI's built-in `WEB_DIRECTORY` mechanism
-   for serving JS. Never create custom routes that serve arbitrary files from disk.
+5. **No custom file-serving endpoints** — Use ComfyUI's built-in `WEB_DIRECTORY` for JS and
+   the built-in `/view` endpoint for images. Never use `web.FileResponse` or create custom
+   routes that serve files from disk. For external images, create symlinks into the output
+   directory and use `/view?filename=X&type=output&subfolder=Y`.
 6. **Path containment on all filesystem operations** — Every endpoint that touches the
    filesystem must validate that resolved paths stay within the expected base directory
    (e.g., `output/benchmarks/`). Use `os.path.realpath()` + `startswith()` checks.
@@ -139,9 +141,7 @@ All routes registered in `__init__.py` via `PromptServer.instance.routes`.
 | POST | `/config_tester/save_manifest` | Full merge save `{session_name, manifest}` |
 | POST | `/config_tester/get_session_html` | Generate dashboard HTML on-demand `{session_name, node_id}` |
 | POST | `/config_tester/export_favorites` | Export favorited images `{session_name, pack_metadata, organize_by_prompt, organize_by_lora}` |
-| POST | `/config_tester/scan_directory` | Scan external dir for images `{directory_path, session_name}` |
-| GET | `/config_tester/view_external` | Serve whitelisted external images `?path=...` |
-| POST | `/config_tester/whitelist_directory` | Re-whitelist dir after restart `{directory_path}` |
+| POST | `/config_tester/scan_directory` | Scan external dir, create symlinks, use built-in `/view` `{directory_path, session_name}` |
 
 ---
 

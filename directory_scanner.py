@@ -8,7 +8,6 @@ import re
 import json
 import time
 import random
-import urllib.parse
 from PIL import Image
 
 from .metadata_packer import extract_metadata_from_image
@@ -248,21 +247,16 @@ def parse_a1111_parameters(parameters_text):
 def _extract_filename_from_url(file_url):
     """
     Extract the image filename from a manifest item's file URL.
-    Handles both generated URLs (/view?filename=xxx&...) and external URLs (/config_tester/view_external?path=...).
+    Handles /view?filename=xxx&... URLs (both generated and external scan).
     """
     if not file_url:
         return None
 
-    # Generated session format: /view?filename=img_xxx.webp&type=output&subfolder=...
+    # Standard ComfyUI format: /view?filename=img_xxx.webp&type=output&subfolder=...
     match = re.search(r'filename=([^&]+)', file_url)
     if match:
-        return urllib.parse.unquote(match.group(1))
-
-    # External scan format: /config_tester/view_external?path=...
-    match = re.search(r'path=([^&]+)', file_url)
-    if match:
-        decoded = urllib.parse.unquote(match.group(1))
-        return os.path.basename(decoded)
+        from urllib.parse import unquote
+        return unquote(match.group(1))
 
     return None
 
@@ -325,13 +319,15 @@ def _load_existing_manifest_items(directory_path):
 IMAGE_EXTENSIONS = {".png", ".jpg", ".jpeg", ".webp", ".bmp"}
 
 
-def scan_directory_for_images(directory_path, max_items=5000):
+def scan_directory_for_images(directory_path, max_items=5000, view_subfolder=""):
     """
     Scan a directory for image files and build manifest-compatible items.
 
     Args:
         directory_path: Absolute path to the directory to scan
         max_items: Maximum number of images to process
+        view_subfolder: Subfolder path for ComfyUI's /view endpoint
+                        (e.g. "benchmarks/session/external_images")
 
     Returns:
         tuple: (items_list, stats_dict)
@@ -377,9 +373,9 @@ def scan_directory_for_images(directory_path, max_items=5000):
         # If we have manifest data for this image, use it (much richer metadata)
         if filename in manifest_items:
             item = manifest_items[filename].copy()
-            # Rewrite file URL to use the external view endpoint
-            encoded_path = urllib.parse.quote(file_path, safe="")
-            item["file"] = f"/config_tester/view_external?path={encoded_path}"
+            # Use ComfyUI's built-in /view endpoint with subfolder
+            from urllib.parse import quote
+            item["file"] = f"/view?filename={quote(filename, safe='')}&type=output&subfolder={quote(view_subfolder, safe='/')}"
             item["source_file"] = filename
             # Ensure it has an ID
             if "id" not in item:
@@ -390,7 +386,7 @@ def scan_directory_for_images(directory_path, max_items=5000):
 
         # No manifest entry — fall through to normal image processing
         try:
-            item = _process_single_image(file_path, directory_path)
+            item = _process_single_image(file_path, directory_path, view_subfolder)
             if item:
                 items.append(item)
         except Exception as e:
@@ -409,7 +405,7 @@ def scan_directory_for_images(directory_path, max_items=5000):
     return items, stats
 
 
-def _process_single_image(file_path, directory_path):
+def _process_single_image(file_path, directory_path, view_subfolder=""):
     """
     Process a single image file into a manifest-compatible item dict.
     """
@@ -418,9 +414,9 @@ def _process_single_image(file_path, directory_path):
     # Generate unique ID (matching existing manifest pattern)
     ts = int(time.time() * 100000) + random.randint(0, 1000)
 
-    # Build the external view URL
-    encoded_path = urllib.parse.quote(file_path, safe="")
-    file_url = f"/config_tester/view_external?path={encoded_path}"
+    # Build URL using ComfyUI's built-in /view endpoint
+    from urllib.parse import quote
+    file_url = f"/view?filename={quote(filename, safe='')}&type=output&subfolder={quote(view_subfolder, safe='/')}"
 
     # Get image dimensions from PIL
     try:
