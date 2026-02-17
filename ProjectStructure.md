@@ -1,3 +1,29 @@
+### **ComfyUI Registry Security Requirements**
+
+This node is published to the ComfyUI Registry. Every version is scanned by an automated
+security scanner. Versions that fail the scan receive `NodeVersionStatusFlagged` status and
+are hidden from ComfyUI Manager. **All contributors must follow these rules:**
+
+1. **No `import requests`** — Use `urllib.request` (stdlib) instead. The scanner flags
+   outbound HTTP libraries as potential data exfiltration vectors.
+2. **No `subprocess`, `os.system`, `eval()`, `exec()`** — These are blocked as arbitrary
+   code execution risks.
+3. **No runtime `pip install`** — Package installation must go through `requirements.txt`
+   only, never called at runtime.
+4. **No code obfuscation** — No encoded strings, multi-statement tricks, or undefined
+   variable patterns.
+5. **No custom file-serving endpoints** — Use ComfyUI's built-in `WEB_DIRECTORY` mechanism
+   for serving JS. Never create custom routes that serve arbitrary files from disk.
+6. **Path containment on all filesystem operations** — Every endpoint that touches the
+   filesystem must validate that resolved paths stay within the expected base directory
+   (e.g., `output/benchmarks/`). Use `os.path.realpath()` + `startswith()` checks.
+7. **Sanitize all user-supplied path components** — Session names, filenames, etc. must be
+   sanitized with `re.sub(r'[^\w\-]', '', name)` or `os.path.basename()` before use.
+
+Reference: https://blog.comfy.org/p/comfyui-2025-jan-security-update
+
+---
+
 ### **Updated Project File Structure**
 
 ```text

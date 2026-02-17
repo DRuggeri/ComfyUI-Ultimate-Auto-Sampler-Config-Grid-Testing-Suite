@@ -1,11 +1,13 @@
 import torch
-import requests
+import urllib.request
+import urllib.parse
+import urllib.error
 import hashlib
 import queue
 import os
 import threading
 import time
-from safetensors.torch import _tobytes 
+from safetensors.torch import _tobytes
 import numpy as np
 from PIL import Image
 from diffusers.image_processor import VaeImageProcessor
@@ -98,79 +100,65 @@ def detect_model_type(model, latent_channels):
 def remote_decode_hf(endpoint, tensor, height, width):
     """
     Send latent to HuggingFace Remote VAE endpoint for decoding
-    (Simpler version using requests params)
+    Uses urllib.request instead of requests library.
     """
     try:
-        import requests
-        
+        import json as _json
+
         # Ensure tensor is on CPU and contiguous
         tensor = tensor.cpu().contiguous()
-        
-        #print(f"[GridTester] 🌐 Remote decode:")
-        #print(f"  Tensor shape: {tensor.shape}")
-        #print(f"  Tensor dtype: {tensor.dtype}")
-        #print(f"  Height: {height}, Width: {width}")
-        
-        headers = {
-            "Content-Type": "tensor/binary",
-            "Accept": "tensor/binary"
-        }
-        
-        # Build parameters - requests will handle repeated 'shape' params
-        # by passing shape as a list in params dict
-        params = {
-            "do_scaling": False,
-            "output_type": "pt",
-            "partial_postprocess": False,
-            "shape": [int(dim) for dim in tensor.shape],  # List creates repeated params!
-            "dtype": str(tensor.dtype).split(".")[-1],
-            "height": int(height),
-            "width": int(width)
-        }
-        
-        #print(f"[GridTester] 🌐 Parameters: {params}")
-        
+
+        # Build query parameters - urllib needs repeated params built manually
+        # shape=[1,2,3] becomes ?shape=1&shape=2&shape=3
+        shape_values = [int(dim) for dim in tensor.shape]
+        query_parts = [
+            ("do_scaling", "False"),
+            ("output_type", "pt"),
+            ("partial_postprocess", "False"),
+            ("dtype", str(tensor.dtype).split(".")[-1]),
+            ("height", str(int(height))),
+            ("width", str(int(width))),
+        ]
+        # Add repeated shape params
+        for s in shape_values:
+            query_parts.append(("shape", str(s)))
+
+        query_string = urllib.parse.urlencode(query_parts)
+        full_url = f"{endpoint}?{query_string}"
+
         # Convert tensor to bytes
         tensor_data = _tobytes(tensor, "tensor")
-        #print(f"[GridTester] 🌐 Tensor bytes size: {len(tensor_data)}")
-        
-        # requests automatically converts list params to repeated query params!
-        # shape=[1,2,3] becomes ?shape=1&shape=2&shape=3
-        response = requests.post(
-            endpoint,
-            params=params,  # ← requests handles the shape list properly
-            data=tensor_data, 
-            headers=headers,
-            timeout=60
+
+        # Build request
+        req = urllib.request.Request(
+            full_url,
+            data=tensor_data,
+            headers={
+                "Content-Type": "tensor/binary",
+                "Accept": "tensor/binary",
+            },
+            method="POST",
         )
-        
-        if not response.ok:
-            error_text = response.text
-            #print(f"[GridTester] ❌ Remote VAE error: {error_text}")
-            #print(f"[GridTester] 🌐 Request URL was: {response.request.url}")
-            raise RuntimeError(f"Remote VAE decode failed: {error_text}")
-        
-        # Parse response
-        output_tensor = response.content
-        response_headers = response.headers
-        
-        #print(f"[GridTester] 🌐 Response headers: {dict(response_headers)}")
-        
+
+        with urllib.request.urlopen(req, timeout=60) as response:
+            if response.status != 200:
+                error_text = response.read().decode("utf-8", errors="replace")
+                raise RuntimeError(f"Remote VAE decode failed: {error_text}")
+
+            output_tensor = response.read()
+            response_headers = response.headers
+
         # The response should have shape and dtype in headers
-        # But format might vary - let's handle both cases
         shape_header = response_headers.get("shape", "")
-        
+
         if shape_header:
             try:
-                # Try JSON parsing first
-                import json
-                shape = json.loads(shape_header)
-            except:
-                # Fallback: parse comma-separated values
+                shape = _json.loads(shape_header)
+            except Exception:
                 shape = [int(x.strip()) for x in shape_header.split(",")]
         else:
             raise RuntimeError("No shape header in response")
-        
+
         dtype_str = response_headers.get("dtype", "float32")
         dtype_map = {
             "float32": torch.float32,
@@ -178,7 +166,7 @@ def remote_decode_hf(endpoint, tensor, height, width):
             "bfloat16": torch.bfloat16,
         }
         dtype = dtype_map.get(dtype_str, torch.float32)
-        
+
         # Map to numpy dtype for frombuffer
         numpy_dtype_map = {
             "float32": np.float32,
@@ -186,19 +174,14 @@ def remote_decode_hf(endpoint, tensor, height, width):
             "bfloat16": np.float32,  # NumPy doesn't support bfloat16
         }
         numpy_dtype = numpy_dtype_map.get(dtype_str, np.float32)
-        
-        #print(f"[GridTester] 🌐 Parsed shape: {shape}, dtype: {dtype}, numpy_dtype: {numpy_dtype}")
-        
+
         # Convert bytes back to tensor using correct dtype
         tensor_np = np.frombuffer(output_tensor, dtype=numpy_dtype)
         result = torch.from_numpy(tensor_np).reshape(shape).to(dtype)
-        
-        #print(f"[GridTester] 🌐 Result tensor shape: {result.shape}")
-        
+
         return result
-        
+
     except Exception as e:
-        #print(f"[GridTester] ❌ Remote decode error: {e}")
         import traceback
         traceback.print_exc()
         raise

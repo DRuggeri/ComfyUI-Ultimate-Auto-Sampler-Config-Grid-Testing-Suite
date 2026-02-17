@@ -19,6 +19,18 @@ from .directory_scanner import scan_directory_for_images
 _whitelisted_directories = set()
 
 
+# --- PATH SECURITY HELPERS ---
+def _get_benchmarks_base():
+    """Return the canonical benchmarks base directory."""
+    return os.path.realpath(os.path.join(folder_paths.get_output_directory(), "benchmarks"))
+
+def _is_path_within(path, base):
+    """Check that *path* is contained within *base* after resolving symlinks."""
+    real_path = os.path.realpath(path)
+    real_base = os.path.realpath(base)
+    return real_path == real_base or real_path.startswith(real_base + os.sep)
+
+
 # --- CONFIG MANAGEMENT PATH ---
 CONFIGS_DIR = os.path.join(folder_paths.get_output_directory(), "ultimate-configs")
 os.makedirs(CONFIGS_DIR, exist_ok=True)
@@ -53,10 +65,13 @@ async def save_config(request):
         if not filename.endswith(".json"):
             filename += ".json"
             
-        # Basic sanitization
+        # Sanitize: strip to basename to prevent directory traversal
         filename = os.path.basename(filename)
         filepath = os.path.join(CONFIGS_DIR, filename)
-        
+
+        if not _is_path_within(filepath, CONFIGS_DIR):
+            return web.Response(status=403, text="Forbidden")
+
         with open(filepath, "w") as f:
             json.dump(config_data, f, indent=4)
             
@@ -79,7 +94,10 @@ async def load_config(request):
 
         filename = os.path.basename(filename)
         filepath = os.path.join(CONFIGS_DIR, filename)
-        
+
+        if not _is_path_within(filepath, CONFIGS_DIR):
+            return web.Response(status=403, text="Forbidden")
+
         if not os.path.exists(filepath):
             return web.Response(status=404, text="Config not found")
             
@@ -105,15 +123,18 @@ async def delete_session(request):
         # Sanitize
         if session_name:
             session_name = re.sub(r'[^\w\-]', '', session_name)
-        
+
         if not session_name or session_name == "default_session":
              return web.Response(status=400, text="Invalid session name")
 
-        # Path construction
+        # Path construction with containment check
         base_dir = os.path.join(folder_paths.get_output_directory(), "benchmarks", session_name)
-        
+
+        if not _is_path_within(base_dir, _get_benchmarks_base()):
+            return web.Response(status=403, text="Forbidden: path outside benchmarks directory")
+
         if os.path.exists(base_dir):
-            shutil.rmtree(base_dir) # Deletes the folder and images
+            shutil.rmtree(base_dir)
             return web.Response(status=200, text="Deleted")
         else:
             return web.Response(status=404, text="Session not found")
@@ -156,15 +177,19 @@ async def save_changes(request):
             return web.Response(status=400, text="Missing session_name or changed_items")
         
         base_dir = os.path.join(folder_paths.get_output_directory(), "benchmarks", session_name)
+
+        if not _is_path_within(base_dir, _get_benchmarks_base()):
+            return web.Response(status=403, text="Forbidden: path outside benchmarks directory")
+
         manifest_path = os.path.join(base_dir, "manifest.json")
-        
+
         # Load current manifest
         if not os.path.exists(manifest_path):
             return web.Response(status=404, text=f"Session '{session_name}' not found")
-        
+
         with open(manifest_path, "r") as f:
             manifest = json.load(f)
-        
+
         # Create lookup of changed items by ID
         changed_by_id = {item.get("id"): item for item in changed_items if "id" in item}
         
@@ -216,6 +241,10 @@ async def save_manifest(request):
             return web.Response(status=400, text="Missing session_name or manifest")
 
         base_dir = os.path.join(folder_paths.get_output_directory(), "benchmarks", session_name)
+
+        if not _is_path_within(base_dir, _get_benchmarks_base()):
+            return web.Response(status=403, text="Forbidden: path outside benchmarks directory")
+
         manifest_path = os.path.join(base_dir, "manifest.json")
 
         # --- MERGE STRATEGY: Preserve server data ---
@@ -291,6 +320,10 @@ async def get_session_html(request):
             return web.Response(status=400, text="Missing session_name")
 
         base_dir = os.path.join(folder_paths.get_output_directory(), "benchmarks", session_name)
+
+        if not _is_path_within(base_dir, _get_benchmarks_base()):
+            return web.Response(status=403, text="Forbidden: path outside benchmarks directory")
+
         manifest_path = os.path.join(base_dir, "manifest.json")
 
         if not os.path.exists(manifest_path):
@@ -330,12 +363,16 @@ async def export_favorites(request):
         
         if not session_name:
             return web.Response(status=400, text="Missing session_name")
-        
+
         # Paths
         base_dir = os.path.join(folder_paths.get_output_directory(), "benchmarks", session_name)
+
+        if not _is_path_within(base_dir, _get_benchmarks_base()):
+            return web.Response(status=403, text="Forbidden: path outside benchmarks directory")
+
         manifest_path = os.path.join(base_dir, "manifest.json")
         images_dir = os.path.join(base_dir, "images")
-        
+
         # Load manifest
         if not os.path.exists(manifest_path):
             return web.Response(status=404, text=f"Session '{session_name}' not found")
@@ -546,6 +583,10 @@ async def scan_directory_route(request):
 
         # Save manifest to benchmarks session directory
         base_dir = os.path.join(folder_paths.get_output_directory(), "benchmarks", session_name)
+
+        if not _is_path_within(base_dir, _get_benchmarks_base()):
+            return web.json_response({"error": "Forbidden: path outside benchmarks directory"}, status=403)
+
         os.makedirs(base_dir, exist_ok=True)
         manifest_path = os.path.join(base_dir, "manifest.json")
 
@@ -679,6 +720,7 @@ async def whitelist_directory_route(request):
     """
     Re-whitelist a directory for serving images after server restart.
     Called automatically when loading a scan-type session.
+    Only image files (checked by extension) can be served from whitelisted dirs.
     """
     try:
         data = await request.json()
@@ -694,6 +736,10 @@ async def whitelist_directory_route(request):
 
         if not os.path.isdir(directory_path):
             return web.Response(status=404, text="Directory not found")
+
+        # Cap whitelist size to prevent unbounded growth
+        if len(_whitelisted_directories) >= 50:
+            return web.Response(status=429, text="Too many whitelisted directories (max 50)")
 
         real_dir = os.path.realpath(directory_path)
         _whitelisted_directories.add(real_dir)

@@ -11,7 +11,8 @@ from typing import List, Dict, Any
 import server
 from aiohttp import web
 import hashlib
-import requests
+import urllib.request
+import urllib.error
 
 
 
@@ -58,11 +59,14 @@ def get_model_version_info(hash_value):
     """Fetch model version info from Civitai API using hash"""
     api_url = f"https://civitai.com/api/v1/model-versions/by-hash/{hash_value}"
     try:
-        response = requests.get(api_url, timeout=10)
-        if response.status_code == 200:
-            return response.json()
-        else:
-            return None
+        req = urllib.request.Request(api_url, headers={"User-Agent": "ComfyUI-ConfigBuilder"})
+        with urllib.request.urlopen(req, timeout=10) as response:
+            if response.status == 200:
+                return json.loads(response.read().decode("utf-8"))
+            else:
+                return None
+    except urllib.error.HTTPError:
+        return None
     except Exception as e:
         print(f"[ConfigBuilder] Error fetching from CivitAI: {e}")
         return None
