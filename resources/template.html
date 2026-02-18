@@ -45,7 +45,13 @@
             </div>
         </div>
 
-        <button class="action-btn" onclick="resetZoom();" title="Center Grid (0)">
+        <button class="fs-btn" onclick="loadSession()" title="Load Session">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path>
+            </svg>
+        </button>
+
+        <button class="fs-btn" onclick="resetZoom();" title="Center Grid (0)">
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
                 <circle cx="12" cy="12" r="10"></circle>
                 <line x1="22" y1="12" x2="18" y2="12"></line>
@@ -83,7 +89,6 @@
                     placeholder="Session name...">
                 <div class="session-actions" style="margin-top: 6px;">
                     <button class="session-action-btn save-btn" onclick="saveState()">SAVE</button>
-                    <button class="session-action-btn load-btn" onclick="loadSession()">LOAD</button>
                 </div>
             </div>
 
@@ -99,10 +104,6 @@
                     <span class="meta-label">Number Of Columns In Grid: </span>
                     <input type="text" inputmode="numeric" id="col-count" min="0" placeholder="Auto"
                         title="Set grid columns (0 = Auto)">
-                </div>
-                <div class="cog-menu-item">
-                    <button class="action-btn" onclick="resetZoom();" title="Reset Zoom (0)"
-                        style="width: 100%; justify-content: center;">&#8857; Center Grid</button>
                 </div>
             </div>
 
