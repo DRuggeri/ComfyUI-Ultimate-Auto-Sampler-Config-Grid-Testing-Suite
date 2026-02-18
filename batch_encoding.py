@@ -303,7 +303,11 @@ def batch_encode_with_cache(clip_model, prompts, cond_cache, prompt_type="positi
                         raise  # Re-raise to stop all encoding
 
                     except Exception as e:
-                        print(f"[GridTester] ⚠️ Failed to encode: {e}")
+                        print(f"[GridTester] ⚠️ Failed to encode {prompt_type} prompt: {e}")
+                        print(f"[GridTester] ⚠️ Prompt was: {prompt[:80]}...")
+                        import traceback
+                        traceback.print_exc()
+                        # Store None so we can detect this downstream with a clear error
                         results[prompt] = None
                 
                 # Progress

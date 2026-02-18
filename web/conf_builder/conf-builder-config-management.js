@@ -1773,10 +1773,11 @@ export function renderVAEsSection(node, div, configArray, arrayIdx, modelLists) 
 
 function createVAEElement(node, vaeName, arrayIdx, vaeIdx, vaeList, vFolders) {
     const isFolder = vaeName && vaeName.endsWith("/");
+    const isRemote = vaeName && vaeName.startsWith("remote:");
 
     const div = document.createElement("div");
     div.className = "cb-item-card";
-    div.style.borderLeft = "3px solid #9900cc";
+    div.style.borderLeft = isRemote ? "3px solid #00b894" : "3px solid #9900cc";
     const uid = `vae_${arrayIdx}_${vaeIdx}`;
 
     const isCollapsed = node.uiState.vaesCollapsed?.[uid] || false;
@@ -1797,14 +1798,21 @@ function createVAEElement(node, vaeName, arrayIdx, vaeIdx, vaeList, vFolders) {
 
     const label = document.createElement("span");
     label.textContent = `VAE #${vaeIdx + 1}`;
-    label.style.color = "#9900cc";
+    label.style.color = isRemote ? "#00b894" : "#9900cc";
     label.style.fontSize = "10px";
     label.style.marginRight = "6px";
     leftGroup.appendChild(label);
 
     const nameSpan = document.createElement("span");
     nameSpan.className = "cb-header-name";
-    nameSpan.textContent = getShortName(vaeName || "None");
+    // Remote URLs would be mangled by getShortName() which splits on "/",
+    // so display them directly instead
+    if (isRemote) {
+        const remoteUrl = vaeName.replace(/^remote:/, "");
+        nameSpan.textContent = remoteUrl || "Remote URL (empty)";
+    } else {
+        nameSpan.textContent = getShortName(vaeName || "None");
+    }
     leftGroup.appendChild(nameSpan);
 
     header.appendChild(leftGroup);
@@ -1841,59 +1849,91 @@ function createVAEElement(node, vaeName, arrayIdx, vaeIdx, vaeList, vFolders) {
         node.uiState.vaesCollapsed[uid] = isNowCollapsed;
     };
 
-    // File/Folder Type Select
+    // File/Folder/Remote Type Select
     const typeSelect = document.createElement("select");
     typeSelect.className = "cb-select";
     typeSelect.innerHTML = `
-        <option value="file" ${!isFolder ? 'selected' : ''}>VAE File</option>
+        <option value="file" ${(!isFolder && !isRemote) ? 'selected' : ''}>VAE File</option>
         <option value="folder" ${isFolder ? 'selected' : ''}>Folder</option>
+        <option value="remote" ${isRemote ? 'selected' : ''}>Remote URL</option>
     `;
     typeSelect.onchange = () => {
-        const newVal = typeSelect.value === "folder" ? "/" : "None";
+        let newVal;
+        if (typeSelect.value === "folder") {
+            newVal = "/";
+        } else if (typeSelect.value === "remote") {
+            newVal = "remote:";
+        } else {
+            newVal = "None";
+        }
         node.state.config_arrays[arrayIdx].vaes[vaeIdx] = newVal;
         node.saveState();
         node.renderUI();
     };
     contentDiv.appendChild(typeSelect);
 
-    // Searchable Select for VAE
-    const options = isFolder ? vFolders : vaeList;
-    const currentVal = vaeName || "None";
-    const optionsList = (options && options.includes(currentVal)) || currentVal === "None" || currentVal === "/"
-        ? options || ["None"]
-        : [currentVal, ...(options || ["None"])];
-
-    const nameSearchable = createSearchableSelect(
-        optionsList,
-        currentVal,
-        (value) => {
-            node.state.config_arrays[arrayIdx].vaes[vaeIdx] = normalizePath(value);
+    if (isRemote) {
+        // Text input for remote VAE endpoint URL
+        const urlInput = document.createElement("input");
+        urlInput.className = "cb-input";
+        urlInput.type = "text";
+        urlInput.placeholder = "http://192.168.1.100:8080/decode";
+        urlInput.value = vaeName.replace(/^remote:/, "");
+        urlInput.style.fontFamily = "monospace";
+        urlInput.style.fontSize = "12px";
+        urlInput.onchange = () => {
+            const url = urlInput.value.trim();
+            node.state.config_arrays[arrayIdx].vaes[vaeIdx] = url ? `remote:${url}` : "remote:";
             node.saveState();
-            node.renderUI();
-        },
-        isFolder ? "Search folders..." : "Search VAEs..."
-    );
-    contentDiv.appendChild(nameSearchable);
+        };
+        urlInput.onblur = urlInput.onchange;
+        contentDiv.appendChild(urlInput);
 
-    // Folder expand button
-    if (isFolder && vaeName !== "None" && vaeName !== "/") {
-        const expandBtn = document.createElement("button");
-        expandBtn.className = "cb-button";
-        expandBtn.style.cssText = "width: 100%; border-left: 3px solid #9900cc; font-size: 11px; margin-top: 4px;";
-        expandBtn.textContent = "📂 Add all individually";
-        expandBtn.onclick = () => {
-            const normalize = (str) => str.replace(/\\/g, "/");
-            const folderPrefix = normalize(vaeName);
-            const matchingVAEs = vaeList ? vaeList.filter(v => normalize(v).startsWith(folderPrefix)) : [];
-            if (matchingVAEs.length > 0) {
-                node.state.config_arrays[arrayIdx].vaes.splice(vaeIdx, 1, ...matchingVAEs);
+        // Helper text
+        const helperText = document.createElement("div");
+        helperText.style.cssText = "font-size: 9px; color: #666; padding: 2px 4px;";
+        helperText.textContent = "Enter the endpoint URL for your remote VAE decode server";
+        contentDiv.appendChild(helperText);
+    } else {
+        // Searchable Select for VAE file or folder
+        const options = isFolder ? vFolders : vaeList;
+        const currentVal = vaeName || "None";
+        const optionsList = (options && options.includes(currentVal)) || currentVal === "None" || currentVal === "/"
+            ? options || ["None"]
+            : [currentVal, ...(options || ["None"])];
+
+        const nameSearchable = createSearchableSelect(
+            optionsList,
+            currentVal,
+            (value) => {
+                node.state.config_arrays[arrayIdx].vaes[vaeIdx] = normalizePath(value);
                 node.saveState();
                 node.renderUI();
-            } else {
-                alert(`No VAEs found in folder: ${folderPrefix}`);
-            }
-        };
-        contentDiv.appendChild(expandBtn);
+            },
+            isFolder ? "Search folders..." : "Search VAEs..."
+        );
+        contentDiv.appendChild(nameSearchable);
+
+        // Folder expand button
+        if (isFolder && vaeName !== "None" && vaeName !== "/") {
+            const expandBtn = document.createElement("button");
+            expandBtn.className = "cb-button";
+            expandBtn.style.cssText = "width: 100%; border-left: 3px solid #9900cc; font-size: 11px; margin-top: 4px;";
+            expandBtn.textContent = "📂 Add all individually";
+            expandBtn.onclick = () => {
+                const normalize = (str) => str.replace(/\\/g, "/");
+                const folderPrefix = normalize(vaeName);
+                const matchingVAEs = vaeList ? vaeList.filter(v => normalize(v).startsWith(folderPrefix)) : [];
+                if (matchingVAEs.length > 0) {
+                    node.state.config_arrays[arrayIdx].vaes.splice(vaeIdx, 1, ...matchingVAEs);
+                    node.saveState();
+                    node.renderUI();
+                } else {
+                    alert(`No VAEs found in folder: ${folderPrefix}`);
+                }
+            };
+            contentDiv.appendChild(expandBtn);
+        }
     }
 
     div.appendChild(contentDiv);
