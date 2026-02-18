@@ -191,115 +191,136 @@ def _import_gguf():
     Raises RuntimeError if ComfyUI-GGUF is not installed.
 
     ComfyUI registers custom nodes in sys.modules using mangled path-based keys
-    (not standard Python package names), so normal 'from ComfyUI_GGUF import ...'
-    won't work. We find the module by scanning sys.modules or loading from disk.
+    (the full filesystem path with dots replaced by '_x_'), so normal
+    'from ComfyUI_GGUF import ...' won't work. We find the already-loaded
+    submodules by scanning sys.modules for file paths inside the ComfyUI-GGUF dir.
     """
     import sys
     import os
-    import importlib
-    import importlib.util
 
-    gguf_module = None
-
-    # Strategy 1: Check sys.modules for any key containing 'ComfyUI-GGUF' or 'ComfyUI_GGUF'
-    # ComfyUI registers custom nodes with path-based keys like
-    # '/path/to/custom_nodes/ComfyUI-GGUF' (with dots replaced by '_x_')
-    for key, mod in sys.modules.items():
-        if mod is not None and ('ComfyUI-GGUF' in key or 'ComfyUI_GGUF' in key):
-            gguf_module = mod
-            break
-
-    # Strategy 2: Try standard import names (in case a future ComfyUI version fixes this)
-    if gguf_module is None:
-        for module_name in ['ComfyUI_GGUF', 'ComfyUI-GGUF', 'custom_nodes.ComfyUI-GGUF']:
-            try:
-                gguf_module = importlib.import_module(module_name)
+    # Step 1: Find the ComfyUI-GGUF directory by locating any loaded module whose
+    # __file__ lives inside a 'ComfyUI-GGUF' directory.
+    gguf_dir = None
+    for _key, mod in sys.modules.items():
+        if mod is None:
+            continue
+        mod_file = getattr(mod, '__file__', None)
+        if mod_file and 'ComfyUI-GGUF' in mod_file:
+            candidate = os.path.dirname(os.path.abspath(mod_file))
+            if os.path.basename(candidate) == 'ComfyUI-GGUF':
+                gguf_dir = candidate
                 break
-            except ImportError:
-                continue
+            # Could be in a subdirectory like tools/
+            parent = os.path.dirname(candidate)
+            if os.path.basename(parent) == 'ComfyUI-GGUF':
+                gguf_dir = parent
+                break
 
-    # Strategy 3: Load directly from the custom_nodes directory on disk
-    if gguf_module is None:
+    # Step 2: If not found via sys.modules, try to find the directory on disk
+    if gguf_dir is None:
+        candidates = []
+        # Check relative to our own custom_nodes directory
+        candidates.append(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "ComfyUI-GGUF"))
+        # Check via folder_paths
         try:
-            custom_nodes_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), '')
-            # __file__ is inside our node, parent of parent = custom_nodes dir
-            # But we may be in a worktree, so also try folder_paths
-            gguf_candidates = []
-            try:
-                cn_paths = folder_paths.folder_names_and_paths.get("custom_nodes", ([],{}))[0]
-                if isinstance(cn_paths, list):
-                    for cn_path in cn_paths:
-                        gguf_candidates.append(os.path.join(cn_path, "ComfyUI-GGUF"))
-                elif isinstance(cn_paths, str):
-                    gguf_candidates.append(os.path.join(cn_paths, "ComfyUI-GGUF"))
-            except Exception:
-                pass
-            # Also check relative to our own location
-            gguf_candidates.append(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "ComfyUI-GGUF"))
-
-            for gguf_dir in gguf_candidates:
-                init_file = os.path.join(gguf_dir, "__init__.py")
-                if os.path.isfile(init_file):
-                    spec = importlib.util.spec_from_file_location("ComfyUI_GGUF", init_file,
-                        submodule_search_locations=[gguf_dir])
-                    gguf_module = importlib.util.module_from_spec(spec)
-                    sys.modules["ComfyUI_GGUF"] = gguf_module
-                    spec.loader.exec_module(gguf_module)
-                    break
+            cn_paths = folder_paths.folder_names_and_paths.get("custom_nodes", ([],{}))[0]
+            if isinstance(cn_paths, list):
+                for cn_path in cn_paths:
+                    candidates.append(os.path.join(cn_path, "ComfyUI-GGUF"))
+            elif isinstance(cn_paths, str):
+                candidates.append(os.path.join(cn_paths, "ComfyUI-GGUF"))
         except Exception:
             pass
 
-    if gguf_module is None:
+        for candidate in candidates:
+            if os.path.isfile(os.path.join(candidate, "ops.py")):
+                gguf_dir = candidate
+                break
+
+    if gguf_dir is None:
         raise RuntimeError(
             "ComfyUI-GGUF is required for GGUF model loading but is not installed.\n"
             "Install it from: https://github.com/city96/ComfyUI-GGUF"
         )
 
-    # Now import the specific submodules we need from the resolved module's package directory
+    # Step 3: Find the already-loaded submodules (ops, loader, nodes) in sys.modules.
+    # ComfyUI already executed these files during node loading, so they're in sys.modules
+    # under mangled path-based keys. We match by __file__ path.
+    ops_mod = None
+    loader_mod = None
+    nodes_mod = None
+
+    ops_path = os.path.abspath(os.path.join(gguf_dir, "ops.py"))
+    loader_path = os.path.abspath(os.path.join(gguf_dir, "loader.py"))
+    nodes_path = os.path.abspath(os.path.join(gguf_dir, "nodes.py"))
+
+    for _key, mod in sys.modules.items():
+        if mod is None:
+            continue
+        mod_file = getattr(mod, '__file__', None)
+        if not mod_file:
+            continue
+        mod_file_abs = os.path.abspath(mod_file)
+        if mod_file_abs == ops_path:
+            ops_mod = mod
+        elif mod_file_abs == loader_path:
+            loader_mod = mod
+        elif mod_file_abs == nodes_path:
+            nodes_mod = mod
+        if ops_mod and loader_mod and nodes_mod:
+            break
+
+    # Step 4: If submodules aren't in sys.modules yet (unlikely but possible),
+    # load them from disk using the GGUF __init__.py which handles relative imports.
+    if ops_mod is None or loader_mod is None or nodes_mod is None:
+        import importlib
+        import importlib.util
+        try:
+            init_file = os.path.join(gguf_dir, "__init__.py")
+            if os.path.isfile(init_file):
+                spec = importlib.util.spec_from_file_location(
+                    "ComfyUI_GGUF", init_file,
+                    submodule_search_locations=[gguf_dir]
+                )
+                gguf_pkg = importlib.util.module_from_spec(spec)
+                sys.modules["ComfyUI_GGUF"] = gguf_pkg
+                gguf_pkg.__path__ = [gguf_dir]
+                gguf_pkg.__package__ = "ComfyUI_GGUF"
+
+                # Load submodules with proper package context for relative imports
+                for sub_name, sub_file in [("ops", "ops.py"), ("dequant", "dequant.py"),
+                                           ("loader", "loader.py"), ("nodes", "nodes.py")]:
+                    sub_path = os.path.join(gguf_dir, sub_file)
+                    if os.path.isfile(sub_path) and f"ComfyUI_GGUF.{sub_name}" not in sys.modules:
+                        sub_spec = importlib.util.spec_from_file_location(
+                            f"ComfyUI_GGUF.{sub_name}", sub_path,
+                            submodule_search_locations=[]
+                        )
+                        sub_mod = importlib.util.module_from_spec(sub_spec)
+                        sub_mod.__package__ = "ComfyUI_GGUF"
+                        sys.modules[f"ComfyUI_GGUF.{sub_name}"] = sub_mod
+                        setattr(gguf_pkg, sub_name, sub_mod)
+                        sub_spec.loader.exec_module(sub_mod)
+
+                ops_mod = sys.modules.get("ComfyUI_GGUF.ops", ops_mod)
+                loader_mod = sys.modules.get("ComfyUI_GGUF.loader", loader_mod)
+                nodes_mod = sys.modules.get("ComfyUI_GGUF.nodes", nodes_mod)
+        except Exception as e:
+            raise RuntimeError(
+                f"ComfyUI-GGUF was found at {gguf_dir} but failed to load: {e}\n"
+                "Try updating ComfyUI-GGUF from: https://github.com/city96/ComfyUI-GGUF"
+            )
+
+    # Step 5: Extract the specific classes/functions we need
     try:
-        gguf_dir = os.path.dirname(gguf_module.__file__) if hasattr(gguf_module, '__file__') and gguf_module.__file__ else None
-
-        # Try direct attribute access first (if module already has them loaded)
-        GGMLOps = getattr(gguf_module, 'ops', None)
-        if GGMLOps is not None and hasattr(GGMLOps, 'GGMLOps'):
-            # gguf_module.ops is the ops submodule
-            ops_mod = GGMLOps
-            GGMLOps = ops_mod.GGMLOps
-        else:
-            GGMLOps = None
-
-        # If direct access didn't work, import submodules from disk
-        if GGMLOps is None and gguf_dir:
-            ops_spec = importlib.util.spec_from_file_location("ComfyUI_GGUF.ops", os.path.join(gguf_dir, "ops.py"))
-            ops_mod = importlib.util.module_from_spec(ops_spec)
-            ops_spec.loader.exec_module(ops_mod)
-            GGMLOps = ops_mod.GGMLOps
-
-        loader_mod = getattr(gguf_module, 'loader', None)
-        if loader_mod is not None and hasattr(loader_mod, 'gguf_sd_loader'):
-            gguf_sd_loader = loader_mod.gguf_sd_loader
-            gguf_clip_loader = loader_mod.gguf_clip_loader
-        elif gguf_dir:
-            loader_spec = importlib.util.spec_from_file_location("ComfyUI_GGUF.loader", os.path.join(gguf_dir, "loader.py"))
-            loader_mod = importlib.util.module_from_spec(loader_spec)
-            loader_spec.loader.exec_module(loader_mod)
-            gguf_sd_loader = loader_mod.gguf_sd_loader
-            gguf_clip_loader = loader_mod.gguf_clip_loader
-
-        nodes_mod = getattr(gguf_module, 'nodes', None)
-        if nodes_mod is not None and hasattr(nodes_mod, 'GGUFModelPatcher'):
-            GGUFModelPatcher = nodes_mod.GGUFModelPatcher
-        elif gguf_dir:
-            nodes_spec = importlib.util.spec_from_file_location("ComfyUI_GGUF.nodes", os.path.join(gguf_dir, "nodes.py"))
-            nodes_mod = importlib.util.module_from_spec(nodes_spec)
-            nodes_spec.loader.exec_module(nodes_mod)
-            GGUFModelPatcher = nodes_mod.GGUFModelPatcher
-
+        GGMLOps = ops_mod.GGMLOps
+        gguf_sd_loader = loader_mod.gguf_sd_loader
+        gguf_clip_loader = loader_mod.gguf_clip_loader
+        GGUFModelPatcher = nodes_mod.GGUFModelPatcher
         return GGMLOps, gguf_sd_loader, gguf_clip_loader, GGUFModelPatcher
-
-    except Exception as e:
+    except AttributeError as e:
         raise RuntimeError(
-            f"ComfyUI-GGUF was found but failed to import required components: {e}\n"
+            f"ComfyUI-GGUF was found but is missing required components: {e}\n"
             "Try updating ComfyUI-GGUF from: https://github.com/city96/ComfyUI-GGUF"
         )
 
