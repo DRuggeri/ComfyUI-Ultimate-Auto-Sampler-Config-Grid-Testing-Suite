@@ -242,6 +242,7 @@ function renderVisibleItems(forcePositionUpdate = false) {
 
     itemsToShow.forEach((data, offsetIndex) => {
         const globalIndex = visibleRange.start + offsetIndex;
+        const displayNumber = globalIndex + 1; // 1-based position in current sorted view
 
         const row = Math.floor(globalIndex / columnsCount);
         const col = globalIndex % columnsCount;
@@ -257,6 +258,10 @@ function renderVisibleItems(forcePositionUpdate = false) {
             card.style.top = `${y}px`;
             card.style.width = `${itemWidth - 10}px`;
             card.style.zIndex = globalIndex;
+
+            // Update card number to reflect sorted position
+            const indexTag = card.querySelector('.index-tag');
+            if (indexTag) indexTag.textContent = `#${displayNumber}`;
 
             nodeMap.set(data.id, card);
             fragment.appendChild(card);
@@ -278,6 +283,10 @@ function renderVisibleItems(forcePositionUpdate = false) {
                 card.style.top = `${y}px`;
                 card.style.zIndex = globalIndex;
                 positionsUpdated++;
+
+                // Update card number when position changes (sort/filter changed)
+                const indexTag = card.querySelector('.index-tag');
+                if (indexTag) indexTag.textContent = `#${displayNumber}`;
             }
         }
     });
@@ -434,19 +443,15 @@ function goToImage(imageNumber) {
     let targetItem = null;
     let targetIndex = -1;
 
-    for (let i = 0; i < processedData.length; i++) {
-        const item = processedData[i];
-        const itemIndex = idToIndexMap.get(item.id) || 0;
-        if (itemIndex === imageNumber) {
-            targetItem = item;
-            targetIndex = i;
-            break;
-        }
+    // Card numbers reflect sorted position (1-based), so #N = processedData[N-1]
+    if (imageNumber >= 1 && imageNumber <= processedData.length) {
+        targetIndex = imageNumber - 1;
+        targetItem = processedData[targetIndex];
     }
 
     if (!targetItem || targetIndex === -1) {
         console.log(`[Grid] Image #${imageNumber} not found`);
-        alert(`Image #${imageNumber} not found in current view`);
+        alert(`Image #${imageNumber} not found in current view (${processedData.length} items visible)`);
         return;
     }
 

@@ -7,31 +7,20 @@
 const ASYNC_PIPELINE_THRESHOLD = 500;
 
 // RESTORED: Helper to update index map
-// OPTIMIZED: Avoid creating a full sorted copy for large datasets
+// Maps each item's ID to its sequential position (1-based) when sorted by ID.
+// This provides a stable "original order" number for each card regardless of
+// current sort/filter, used for "Go To Card #" and the #N tag on cards.
 function refreshIndices() {
     if (!activeData) return;
-
-    if (activeData.length > ASYNC_PIPELINE_THRESHOLD) {
-        // For large datasets, build the map by finding min ID and computing offsets
-        // Since IDs are sequential integers, we can avoid sorting entirely
-        let minId = Infinity;
-        for (let i = 0; i < activeData.length; i++) {
-            if (activeData[i].id < minId) minId = activeData[i].id;
-        }
-        idToIndexMap = new Map();
-        for (let i = 0; i < activeData.length; i++) {
-            idToIndexMap.set(activeData[i].id, activeData[i].id - minId + 1);
-        }
-    } else {
-        const sorted = activeData.slice().sort((a, b) => a.id - b.id);
-        idToIndexMap = new Map(sorted.map((item, index) => [item.id, index + 1]));
-    }
+    const sorted = activeData.slice().sort((a, b) => a.id - b.id);
+    idToIndexMap = new Map(sorted.map((item, index) => [item.id, index + 1]));
 }
 
 // Generate cache key from current filters
 function getFilterKey() {
     const parts = [
         currentSort,
+        currentSecondarySort,
         topFilters.showFavorites ? '1' : '0',
         topFilters.showNonFavorited ? '1' : '0',
         topFilters.showRejected ? '1' : '0',
@@ -323,48 +312,25 @@ function executePipeline() {
         return true;
     });
 
-    // For large datasets, use async sorting to avoid blocking the UI
-    if (processedData.length > ASYNC_PIPELINE_THRESHOLD) {
-        // Cancel any previous async sort
-        const thisRunId = ++pipelineAbortId;
-
-        // For "oldest" and "newest" sorts, we can use a fast path since items from
-        // activeData are already ordered by insertion (id order)
-        if ((currentSort === 'oldest' || currentSort === 'newest') && currentSecondarySort === 'none') {
-            // Fast path: items from activeData are already in insertion order
-            // For oldest: a.id - b.id (natural order from activeData)
-            // For newest: reverse
-            if (currentSort === 'newest') {
-                processedData.reverse();
-            }
-            // No expensive sort needed!
-        } else {
-            // Async sort: sort in a yielding fashion to keep UI responsive
-            runMultiSort(processedData);
-        }
-
-        const elapsed = (performance.now() - startTime).toFixed(1);
-        console.log(`[Pipeline] Processed ${processedData.length} items in ${elapsed}ms (large dataset mode)`);
-        updateJSONs(processedData);
-
-        if (filtersChanged) {
-            if(typeof renderDOM === 'function') renderDOM();
-        } else {
-            if (typeof updateVisibleItems === 'function') updateVisibleItems();
+    // Apply sorting
+    // Fast path: for oldest/newest with no secondary sort, items from activeData.filter()
+    // are already in ID order — just reverse for newest
+    if ((currentSort === 'oldest' || currentSort === 'newest') && currentSecondarySort === 'none') {
+        if (currentSort === 'newest') {
+            processedData.reverse();
         }
     } else {
-        // Small dataset: synchronous sort (fast enough)
         runMultiSort(processedData);
+    }
 
-        const elapsed = (performance.now() - startTime).toFixed(1);
-        console.log(`[Pipeline] Processed ${processedData.length} items in ${elapsed}ms`);
-        updateJSONs(processedData);
+    const elapsed = (performance.now() - startTime).toFixed(1);
+    console.log(`[Pipeline] Processed ${processedData.length} items in ${elapsed}ms`);
+    updateJSONs(processedData);
 
-        if (filtersChanged) {
-            if(typeof renderDOM === 'function') renderDOM();
-        } else {
-            if (typeof updateVisibleItems === 'function') updateVisibleItems();
-        }
+    if (filtersChanged) {
+        if(typeof renderDOM === 'function') renderDOM();
+    } else {
+        if (typeof updateVisibleItems === 'function') updateVisibleItems();
     }
 }
 
