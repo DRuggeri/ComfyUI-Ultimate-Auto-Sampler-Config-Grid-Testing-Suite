@@ -499,15 +499,49 @@ def run_generation_loop(
             clip_hash=clip_hash, 
             enable_disk_cache=save_conditioning_cache_to_file)
         
+        # Filter configs to only collect prompts from jobs that actually need to run
+        # This avoids wasting time encoding prompts for jobs that will be skipped in resume mode
         print(f"[GridTester] 🧠 Collecting unique prompts...")
-        unique_positives, unique_negatives = collect_unique_prompts_with_triggers(
-            expanded, lora_triggerwords_mode
-        )
-        
+        if not overwrite_existing and existing_data.get("items"):
+            configs_needing_work = []
+            for conf in expanded:
+                conf_positive, _ = build_prompt_with_triggers(conf, lora_triggerwords_mode)
+                conf_negative = conf["negative"]
+                conf_seed = conf["seed"]
+                # Check if ANY resolution/batch needs this config
+                needs_work = False
+                for job in input_jobs:
+                    if check_if_job_completed(
+                        existing_data["items"], conf, conf_seed,
+                        job["width"], job["height"], job["batch_idx"],
+                        conf_positive, conf_negative,
+                        has_optional_inputs=has_optional_inputs
+                    ) == -1:
+                        needs_work = True
+                        break
+                if needs_work:
+                    configs_needing_work.append(conf)
+
+            skippable = len(expanded) - len(configs_needing_work)
+            if skippable > 0:
+                print(f"[GridTester] ⏭️ {skippable}/{len(expanded)} configs already completed, encoding only {len(configs_needing_work)} needed")
+
+            if not configs_needing_work:
+                print(f"[GridTester] ⏭️ All configs already completed, skipping encoding entirely")
+                unique_positives, unique_negatives = set(), set()
+            else:
+                unique_positives, unique_negatives = collect_unique_prompts_with_triggers(
+                    configs_needing_work, lora_triggerwords_mode
+                )
+        else:
+            unique_positives, unique_negatives = collect_unique_prompts_with_triggers(
+                expanded, lora_triggerwords_mode
+            )
+
         clip_skip = first_conf.get("clip_skip", 0)
         if clip_skip != 0:
             print(f"[GridTester] 🔧 Using clip_skip={clip_skip}")
-        
+
         try:
             conditioning_cache = batch_encode_prompts(
                 patched_clip, unique_positives, unique_negatives, cond_cache, clip_skip, enable_disk_cache=save_conditioning_cache_to_file
@@ -519,8 +553,8 @@ def run_generation_loop(
             gc.collect()
             if torch.cuda.is_available():
                 torch.cuda.empty_cache()
-            html = get_html_template(session_name, existing_data, unique_id)
-            return (html,)
+            # Re-raise so ComfyUI knows execution was interrupted (not completed)
+            raise
 
         cached_model_key = get_model_cache_key(first_conf)
         cached_lora_key = first_conf["lora_expanded"]
@@ -566,7 +600,7 @@ def run_generation_loop(
                     if remote_vae_worker:
                         remote_vae_worker.wait_completion()
                         remote_vae_worker.stop()
-                    
+
                     existing_data["meta"] = {
                         "positive": positive_text,
                         "negative": negative_text,
@@ -577,16 +611,18 @@ def run_generation_loop(
                         "resolutions_json": resolutions_json
                     }
                     save_manifest(paths["manifest"], existing_data)
-                    
+
                     loaded_model, loaded_clip, loaded_vae = None, None, None
                     patched_model, patched_clip = None, None
                     conditioning_cache.clear()
                     gc.collect()
                     if torch.cuda.is_available():
                         torch.cuda.empty_cache()
-                    
-                    html = get_html_template(session_name, existing_data, unique_id)
-                    return (html,)
+
+                    # Re-raise so ComfyUI knows execution was interrupted (not completed)
+                    raise InterruptProcessingException()
+            except InterruptProcessingException:
+                raise
             except:
                 pass
             
@@ -746,6 +782,22 @@ def run_generation_loop(
                             future_positive, _ = build_prompt_with_triggers(
                                 future_conf, lora_triggerwords_mode
                             )
+                            # Skip encoding prompts for configs that are already completed
+                            # (avoids wasting time on prompts only used by skipped jobs)
+                            if not overwrite_existing and existing_data.get("items"):
+                                future_seed = future_conf["seed"]
+                                all_done = True
+                                for fj in input_jobs:
+                                    if check_if_job_completed(
+                                        existing_data["items"], future_conf, future_seed,
+                                        fj["width"], fj["height"], fj["batch_idx"],
+                                        future_positive, future_conf["negative"],
+                                        has_optional_inputs=has_optional_inputs
+                                    ) == -1:
+                                        all_done = False
+                                        break
+                                if all_done:
+                                    continue
                             model_unique_positives.add(future_positive)
                             model_unique_negatives.add(future_conf["negative"])
 
@@ -807,8 +859,8 @@ def run_generation_loop(
                             if torch.cuda.is_available():
                                 torch.cuda.empty_cache()
 
-                            html = get_html_template(session_name, existing_data, unique_id)
-                            return (html,)
+                            # Re-raise so ComfyUI knows execution was interrupted (not completed)
+                            raise
 
                         print(f"[GridTester] ✅ Encoded {len(conditioning_cache['positive'])} positive, {len(conditioning_cache['negative'])} negative")
 
@@ -995,7 +1047,7 @@ def run_generation_loop(
                     if remote_vae_worker:
                         remote_vae_worker.wait_completion()
                         remote_vae_worker.stop()
-                            
+
                     existing_data["meta"] = {
                         "positive": positive_text,
                         "negative": negative_text,
@@ -1006,16 +1058,16 @@ def run_generation_loop(
                         "resolutions_json": resolutions_json
                     }
                     save_manifest(paths["manifest"], existing_data)
-                    
+
                     loaded_model, loaded_clip, loaded_vae = None, None, None
                     patched_model, patched_clip = None, None
                     conditioning_cache.clear()
                     gc.collect()
                     if torch.cuda.is_available():
                         torch.cuda.empty_cache()
-                    
-                    html = get_html_template(session_name, existing_data, unique_id)
-                    return (html,)
+
+                    # Re-raise so ComfyUI knows execution was interrupted (not completed)
+                    raise
                 else:
                     print(f"[GridTester] ❌ Generation failed: {e}")
                     if result_latent is not None:

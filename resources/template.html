@@ -14,7 +14,9 @@
     <!-- COMPACT SINGLE-LINE HEADER -->
     <div id="header">
         <button class="filter-popup-btn" onclick="toggleFiltersPopup()" title="Open Filters & Info">
-            FILTERS
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                <polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3"></polygon>
+            </svg>
         </button>
 
         <div style="flex-grow: 1;"></div>
@@ -42,6 +44,16 @@
                 </div>
             </div>
         </div>
+
+        <button class="action-btn" onclick="resetZoom();" title="Center Grid (0)">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                <circle cx="12" cy="12" r="10"></circle>
+                <line x1="22" y1="12" x2="18" y2="12"></line>
+                <line x1="6" y1="12" x2="2" y2="12"></line>
+                <line x1="12" y1="6" x2="12" y2="2"></line>
+                <line x1="12" y1="22" x2="12" y2="18"></line>
+            </svg>
+        </button>
 
         <!-- COG WHEEL MENU -->
         <div class="cog-menu-container">
@@ -90,7 +102,7 @@
                 </div>
                 <div class="cog-menu-item">
                     <button class="action-btn" onclick="resetZoom();" title="Reset Zoom (0)"
-                        style="width: 100%; justify-content: center;">&#8857; Reset Zoom</button>
+                        style="width: 100%; justify-content: center;">&#8857; Center Grid</button>
                 </div>
             </div>
 
