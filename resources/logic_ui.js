@@ -101,6 +101,13 @@ document.addEventListener('keydown', (e) => {
             return;
         }
 
+        // Close analytics results modal
+        const analyticsModal = document.getElementById('analytics-results-modal');
+        if (analyticsModal) {
+            analyticsModal.remove();
+            return;
+        }
+
         // Close settings panel
         const cogPanel = document.getElementById('cog-menu-dropdown');
         if (cogPanel && cogPanel.style.display !== 'none') {
@@ -1201,5 +1208,251 @@ function matchesSearchFilters(item) {
 
         // Case-insensitive search
         return value.toLowerCase().includes(filter.term.toLowerCase());
+    });
+}
+
+
+// ============================================================
+// MANIFEST ANALYTICS
+// ============================================================
+
+/**
+ * Dispatch to the correct analysis function based on type.
+ * type: 'lora' | 'model' | 'prompt' | 'tags'
+ */
+function runManifestAnalysis(type) {
+    const statusEl = document.getElementById('analytics-status');
+
+    // Guard: fullManifest must exist
+    if (!fullManifest || !Array.isArray(fullManifest.items) || fullManifest.items.length === 0) {
+        if (statusEl) {
+            statusEl.innerText = 'No manifest data available.';
+            statusEl.style.color = '#ff3860';
+        }
+        return;
+    }
+
+    const items = fullManifest.items;
+    let results = [];
+    let title = '';
+
+    if (type === 'lora') {
+        title = 'LoRA Usage Stats (Favorited)';
+        results = analyzeFieldStats(items, 'lora', true);
+    } else if (type === 'model') {
+        title = 'Model Usage Stats (Favorited)';
+        results = analyzeFieldStats(items, 'model', true);
+    } else if (type === 'prompt') {
+        title = 'Full Prompt Stats (All Items)';
+        results = analyzePromptStats(items);
+    } else if (type === 'tags') {
+        title = 'Prompt Tag Stats (Favorited)';
+        results = analyzeTagStats(items);
+    }
+
+    if (results.length === 0) {
+        if (statusEl) {
+            statusEl.innerText = 'No data found (check favorited items).';
+            statusEl.style.color = '#ffaa00';
+        }
+        return;
+    }
+
+    if (statusEl) {
+        statusEl.innerText = results.length + ' unique entries found.';
+        statusEl.style.color = '#4caf50';
+        setTimeout(() => { if (statusEl) statusEl.innerText = ''; }, 4000);
+    }
+
+    showAnalyticsModal(title, results, type);
+}
+
+/**
+ * Generic counter for lora and model fields.
+ * Splits field value by " + " to handle combined entries.
+ * @param {Array} items - all manifest items
+ * @param {string} field - 'lora' or 'model'
+ * @param {boolean} favoritedOnly - true to count only favorited items
+ * @returns {Array} sorted [{count, name}] descending
+ */
+function analyzeFieldStats(items, field, favoritedOnly) {
+    const counter = new Map();
+
+    for (const item of items) {
+        if (favoritedOnly && !item.favorited) continue;
+
+        const raw = item[field];
+        if (!raw || raw === 'None') continue;
+
+        // Split by " + " to handle combined loras/models
+        const entries = String(raw).split(' + ').map(s => s.trim()).filter(Boolean);
+        for (const entry of entries) {
+            counter.set(entry, (counter.get(entry) || 0) + 1);
+        }
+    }
+
+    return Array.from(counter.entries())
+        .map(([name, count]) => ({ count, name }))
+        .sort((a, b) => b.count - a.count || a.name.localeCompare(b.name));
+}
+
+/**
+ * Full Prompt Stats (unique behavior):
+ * - ALL items register their prompt with count 0
+ * - Only favorited items increment the count
+ * @param {Array} items - all manifest items
+ * @returns {Array} sorted [{count, name}] descending by count
+ */
+function analyzePromptStats(items) {
+    const counter = new Map();
+
+    // Pass 1: register ALL prompts with count 0
+    for (const item of items) {
+        const prompt = item.positive;
+        if (prompt && !counter.has(prompt)) {
+            counter.set(prompt, 0);
+        }
+    }
+
+    // Pass 2: increment for favorited items
+    for (const item of items) {
+        if (!item.favorited) continue;
+        const prompt = item.positive;
+        if (prompt && counter.has(prompt)) {
+            counter.set(prompt, counter.get(prompt) + 1);
+        }
+    }
+
+    return Array.from(counter.entries())
+        .map(([name, count]) => ({ count, name }))
+        .sort((a, b) => b.count - a.count || a.name.localeCompare(b.name));
+}
+
+/**
+ * Tag Stats: splits item.positive by comma, trims, counts occurrences.
+ * Only favorited items.
+ * @param {Array} items - all manifest items
+ * @returns {Array} sorted [{count, name}] descending
+ */
+function analyzeTagStats(items) {
+    const counter = new Map();
+
+    for (const item of items) {
+        if (!item.favorited) continue;
+        const prompt = item.positive;
+        if (!prompt) continue;
+
+        const tags = prompt.split(',').map(t => t.trim()).filter(Boolean);
+        for (const tag of tags) {
+            counter.set(tag, (counter.get(tag) || 0) + 1);
+        }
+    }
+
+    return Array.from(counter.entries())
+        .map(([name, count]) => ({ count, name }))
+        .sort((a, b) => b.count - a.count || a.name.localeCompare(b.name));
+}
+
+/**
+ * Escape HTML entities for safe innerHTML insertion.
+ */
+function escapeHtml(str) {
+    if (!str) return '';
+    return String(str)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;');
+}
+
+/**
+ * Show the analytics results modal.
+ * Follows the same dynamic overlay pattern as showSaveErrorAlert.
+ * @param {string} title - modal title
+ * @param {Array} results - [{count, name}]
+ * @param {string} type - 'lora'|'model'|'prompt'|'tags' (for accent color)
+ */
+function showAnalyticsModal(title, results, type) {
+    // Deduplication: remove existing analytics modal
+    const existing = document.getElementById('analytics-results-modal');
+    if (existing) existing.remove();
+
+    // Accent color per type
+    const accentMap = {
+        lora:   '#8b5cf6',
+        model:  '#6366f1',
+        prompt: '#00d1b2',
+        tags:   '#d0873e'
+    };
+    const accent = accentMap[type] || '#00d1b2';
+
+    // Build table rows HTML (limit to 500 rows max for performance)
+    const displayResults = results.slice(0, 500);
+    const totalItems = results.length;
+    const truncated = results.length > 500;
+
+    const rowsHtml = displayResults.map((r, i) => {
+        // For long strings, show truncated in cell but full in tooltip
+        const isLongName = r.name.length > 80;
+        const displayName = isLongName ? r.name.substring(0, 78) + '...' : r.name;
+        const rank = i + 1;
+        return '<tr class="analytics-row">' +
+            '<td class="analytics-rank">' + rank + '</td>' +
+            '<td class="analytics-count" style="color:' + accent + ';">' + r.count + '</td>' +
+            '<td class="analytics-name" title="' + escapeHtml(r.name) + '">' + escapeHtml(displayName) + '</td>' +
+        '</tr>';
+    }).join('');
+
+    const truncatedNote = truncated
+        ? '<div style="text-align:center; font-size:10px; color:#666; padding:8px 0;">' +
+              'Showing top 500 of ' + totalItems + ' entries.' +
+          '</div>'
+        : '';
+
+    // Count summary
+    const favCount = results.filter(r => r.count > 0).length;
+    const totalCount = results.reduce((s, r) => s + r.count, 0);
+    const summaryHtml =
+        '<div class="analytics-summary">' +
+            '<span>' + totalItems + ' unique entries</span>' +
+            '<span style="color:#666;">|</span>' +
+            '<span>' + totalCount + ' total occurrences</span>' +
+            (type === 'prompt' ? '<span style="color:#666;">|</span><span>' + favCount + ' with favorites</span>' : '') +
+        '</div>';
+
+    // Create overlay
+    const overlay = document.createElement('div');
+    overlay.id = 'analytics-results-modal';
+    overlay.className = 'analytics-modal-overlay';
+
+    overlay.innerHTML =
+        '<div class="analytics-modal-popup">' +
+            '<div class="analytics-modal-header" style="border-bottom-color:' + accent + ';">' +
+                '<span class="analytics-modal-title" style="color:' + accent + ';">' + escapeHtml(title) + '</span>' +
+                '<button class="close-popup-btn" onclick="document.getElementById(\'analytics-results-modal\').remove()">&#10005;</button>' +
+            '</div>' +
+            summaryHtml +
+            '<div class="analytics-modal-body">' +
+                '<table class="analytics-table">' +
+                    '<thead>' +
+                        '<tr>' +
+                            '<th class="analytics-th">#</th>' +
+                            '<th class="analytics-th" style="color:' + accent + ';">Count</th>' +
+                            '<th class="analytics-th">Name</th>' +
+                        '</tr>' +
+                    '</thead>' +
+                    '<tbody>' +
+                        rowsHtml +
+                    '</tbody>' +
+                '</table>' +
+                truncatedNote +
+            '</div>' +
+        '</div>';
+
+    document.body.appendChild(overlay);
+
+    // Click-outside-to-close
+    overlay.addEventListener('click', (e) => {
+        if (e.target === overlay) overlay.remove();
     });
 }

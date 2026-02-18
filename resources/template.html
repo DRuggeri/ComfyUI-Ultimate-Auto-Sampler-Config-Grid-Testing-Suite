@@ -142,7 +142,36 @@
                 <div id="export-status" style="margin-top: 8px; font-size: 10px; color: #666; min-height: 16px;"></div>
             </div>
 
-            <!-- Section 4: Scan External Directory -->
+            <!-- Section 4: Manifest Analytics -->
+            <div class="cog-panel-section">
+                <div class="cog-panel-section-title">MANIFEST ANALYTICS</div>
+                <div style="font-size: 9px; color: #666; margin-bottom: 8px;">
+                    Analyze favorited items in the current session manifest.
+                </div>
+                <button class="session-action-btn"
+                    style="background: #8b5cf6; width: 100%; font-size: 11px; padding: 10px; margin-bottom: 6px;"
+                    onclick="runManifestAnalysis('lora')" title="Count LoRA usage across favorited items">
+                    LORA USAGE STATS
+                </button>
+                <button class="session-action-btn"
+                    style="background: #6366f1; width: 100%; font-size: 11px; padding: 10px; margin-bottom: 6px;"
+                    onclick="runManifestAnalysis('model')" title="Count model/checkpoint usage across favorited items">
+                    MODEL USAGE STATS
+                </button>
+                <button class="session-action-btn"
+                    style="background: #00d1b2; color: #000; width: 100%; font-size: 11px; padding: 10px; margin-bottom: 6px;"
+                    onclick="runManifestAnalysis('prompt')" title="Count full prompts with favorited vs total">
+                    FULL PROMPT STATS
+                </button>
+                <button class="session-action-btn"
+                    style="background: #d0873e; width: 100%; font-size: 11px; padding: 10px; margin-bottom: 6px;"
+                    onclick="runManifestAnalysis('tags')" title="Count individual prompt tags from favorited items">
+                    PROMPT TAG STATS
+                </button>
+                <div id="analytics-status" style="margin-top: 4px; font-size: 10px; color: #666; min-height: 16px;"></div>
+            </div>
+
+            <!-- Section 5: Scan External Directory -->
             <div class="cog-panel-section">
                 <div class="cog-panel-section-title">SCAN EXTERNAL DIRECTORY</div>
                 <div style="font-size: 9px; color: #666; margin-bottom: 8px;">
