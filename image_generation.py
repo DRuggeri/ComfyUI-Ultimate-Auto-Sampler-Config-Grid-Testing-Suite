@@ -141,10 +141,10 @@ def save_image_to_disk(image, output_dir, filename):
     return filepath
 
 
-def create_image_metadata(config, width, height, duration, seed, batch_idx, actual_positive_prompt, actual_negative_prompt):
+def create_image_metadata(config, width, height, duration, seed, batch_idx, actual_positive_prompt, actual_negative_prompt, gen_index=None):
     """
     Create metadata dictionary for an image.
-    
+
     Args:
         config: Configuration dictionary
         width: Image width
@@ -154,7 +154,8 @@ def create_image_metadata(config, width, height, duration, seed, batch_idx, actu
         batch_idx: Batch index
         actual_positive_prompt: Final positive prompt (with triggers)
         actual_negative_prompt: Final negative prompt
-        
+        gen_index: Sequential generation index for deterministic sort ordering (optional, backwards-compatible)
+
     Returns:
         dict: Metadata dictionary
     """
@@ -178,7 +179,7 @@ def create_image_metadata(config, width, height, duration, seed, batch_idx, actu
     if meta.get("attention_mode") == "default":
         meta.pop("attention_mode", None)
 
-    meta.update({
+    update_dict = {
         "width": width,
         "height": height,
         "duration": duration,
@@ -186,7 +187,10 @@ def create_image_metadata(config, width, height, duration, seed, batch_idx, actu
         "batch_idx": batch_idx,
         "positive": actual_positive_prompt,
         "negative": actual_negative_prompt
-    })
+    }
+    if gen_index is not None:
+        update_dict["gen_index"] = gen_index
+    meta.update(update_dict)
 
     return meta
 

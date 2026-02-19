@@ -422,6 +422,7 @@ def run_generation_loop(
     pending_batch = []
     current_job = 0
     total_generated = 0
+    gen_index_offset = len(existing_data.get("items", []))  # Sequential index for deterministic sort ordering
     skipped_count = 0
     job_durations = []
     eta_start_time = time.time()
@@ -1020,7 +1021,8 @@ def run_generation_loop(
 
                 meta = create_image_metadata(
                     conf, w, h, duration, current_seed, batch_idx,
-                    actual_positive_prompt, actual_negative_prompt
+                    actual_positive_prompt, actual_negative_prompt,
+                    gen_index=gen_index_offset + total_generated
                 )
                 if pos_hash or neg_hash:
                     meta["conditioning_pos_hash"] = pos_hash

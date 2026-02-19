@@ -12,7 +12,7 @@ const ASYNC_PIPELINE_THRESHOLD = 500;
 // current sort/filter, used for "Go To Card #" and the #N tag on cards.
 function refreshIndices() {
     if (!activeData) return;
-    const sorted = activeData.slice().sort((a, b) => a.id - b.id);
+    const sorted = activeData.slice().sort((a, b) => (a.gen_index ?? a.id) - (b.gen_index ?? b.id));
     idToIndexMap = new Map(sorted.map((item, index) => [item.id, index + 1]));
 }
 
@@ -167,8 +167,8 @@ function setSecondarySort(id) {
 // Unified Comparison Helper
 function compareItems(a, b, sortKey) {
     switch (sortKey) {
-        case 'newest': return b.id - a.id;
-        case 'oldest': return a.id - b.id;
+        case 'newest': return (b.gen_index ?? b.id) - (a.gen_index ?? a.id);
+        case 'oldest': return (a.gen_index ?? a.id) - (b.gen_index ?? b.id);
         case 'fastest': return a.duration - b.duration;
         case 'favorited': return (b.favorited ? 1 : 0) - (a.favorited ? 1 : 0);
         case 'cfg': return a.cfg - b.cfg;
@@ -199,9 +199,9 @@ function runMultiSort(list) {
             res = compareItems(a, b, currentSecondarySort);
         }
         
-        // 3. Fallback to ID (Stable sort)
+        // 3. Fallback to gen_index/ID (Stable sort, backwards-compatible)
         if (res === 0) {
-            return a.id - b.id;
+            return (a.gen_index ?? a.id) - (b.gen_index ?? b.id);
         }
         return res;
     });
@@ -313,10 +313,11 @@ function executePipeline() {
     });
 
     // Apply sorting
-    // Fast path: for oldest/newest with no secondary sort, items from activeData.filter()
-    // are already in ID order — just reverse for newest
+    // Fast path: for oldest/newest with no secondary sort, activeData is stored newest-first
+    // (items are inserted/unshifted at position 0), so processedData after filter() is also newest-first.
+    // For 'oldest' we reverse; for 'newest' it's already correct.
     if ((currentSort === 'oldest' || currentSort === 'newest') && currentSecondarySort === 'none') {
-        if (currentSort === 'newest') {
+        if (currentSort === 'oldest') {
             processedData.reverse();
         }
     } else {
@@ -402,7 +403,7 @@ function binaryInsert(arr, item) {
             cmp = compareItems(arr[mid], item, currentSecondarySort);
         }
         if (cmp === 0) {
-            cmp = arr[mid].id - item.id; // Stable sort fallback
+            cmp = (arr[mid].gen_index ?? arr[mid].id) - (item.gen_index ?? item.id); // Stable sort fallback
         }
         if (cmp <= 0) {
             low = mid + 1;

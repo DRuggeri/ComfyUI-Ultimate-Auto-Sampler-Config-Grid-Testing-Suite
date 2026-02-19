@@ -242,7 +242,7 @@ function renderVisibleItems(forcePositionUpdate = false) {
 
     itemsToShow.forEach((data, offsetIndex) => {
         const globalIndex = visibleRange.start + offsetIndex;
-        const displayNumber = globalIndex + 1; // 1-based position in current sorted view
+        const genOrderNumber = idToIndexMap.get(data.id) || (globalIndex + 1); // Generation order number (backwards-compatible)
 
         const row = Math.floor(globalIndex / columnsCount);
         const col = globalIndex % columnsCount;
@@ -259,9 +259,9 @@ function renderVisibleItems(forcePositionUpdate = false) {
             card.style.width = `${itemWidth - 10}px`;
             card.style.zIndex = globalIndex;
 
-            // Update card number to reflect sorted position
+            // Update card number to reflect generation order
             const indexTag = card.querySelector('.index-tag');
-            if (indexTag) indexTag.textContent = `#${displayNumber}`;
+            if (indexTag) indexTag.textContent = `#${genOrderNumber}`;
 
             nodeMap.set(data.id, card);
             fragment.appendChild(card);
@@ -286,7 +286,7 @@ function renderVisibleItems(forcePositionUpdate = false) {
 
                 // Update card number when position changes (sort/filter changed)
                 const indexTag = card.querySelector('.index-tag');
-                if (indexTag) indexTag.textContent = `#${displayNumber}`;
+                if (indexTag) indexTag.textContent = `#${genOrderNumber}`;
             }
         }
     });
