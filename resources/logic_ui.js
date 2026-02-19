@@ -1392,14 +1392,12 @@ function showAnalyticsModal(title, results, type) {
     const truncated = results.length > 500;
 
     const rowsHtml = displayResults.map((r, i) => {
-        // For long strings, show truncated in cell but full in tooltip
-        const isLongName = r.name.length > 80;
-        const displayName = isLongName ? r.name.substring(0, 78) + '...' : r.name;
+        // Show full prompt text - no truncation
         const rank = i + 1;
         return '<tr class="analytics-row">' +
             '<td class="analytics-rank">' + rank + '</td>' +
             '<td class="analytics-count" style="color:' + accent + ';">' + r.count + '</td>' +
-            '<td class="analytics-name" title="' + escapeHtml(r.name) + '">' + escapeHtml(displayName) + '</td>' +
+            '<td class="analytics-name">' + escapeHtml(r.name) + '</td>' +
         '</tr>';
     }).join('');
 
@@ -1420,6 +1418,15 @@ function showAnalyticsModal(title, results, type) {
             (type === 'prompt' ? '<span style="color:#666;">|</span><span>' + favCount + ' with favorites</span>' : '') +
         '</div>';
 
+    // For prompt type: build "Copy Favorited Prompts as JSON" button
+    const copyFavBtnHtml = (type === 'prompt')
+        ? '<button id="analytics-copy-fav-btn" style="' +
+              'background:#00d1b2; color:#000; border:none; border-radius:5px;' +
+              'padding:6px 12px; font-size:11px; font-weight:bold; cursor:pointer;' +
+              'margin-right:8px; white-space:nowrap;' +
+          '" title="Copy all favorited prompts as a JSON array">📋 Copy Favorited Prompts as JSON</button>'
+        : '';
+
     // Create overlay
     const overlay = document.createElement('div');
     overlay.id = 'analytics-results-modal';
@@ -1429,7 +1436,10 @@ function showAnalyticsModal(title, results, type) {
         '<div class="analytics-modal-popup">' +
             '<div class="analytics-modal-header" style="border-bottom-color:' + accent + ';">' +
                 '<span class="analytics-modal-title" style="color:' + accent + ';">' + escapeHtml(title) + '</span>' +
-                '<button class="close-popup-btn" onclick="document.getElementById(\'analytics-results-modal\').remove()">&#10005;</button>' +
+                '<div style="display:flex; align-items:center; gap:4px;">' +
+                    copyFavBtnHtml +
+                    '<button class="close-popup-btn" onclick="document.getElementById(\'analytics-results-modal\').remove()">&#10005;</button>' +
+                '</div>' +
             '</div>' +
             summaryHtml +
             '<div class="analytics-modal-body">' +
@@ -1450,6 +1460,38 @@ function showAnalyticsModal(title, results, type) {
         '</div>';
 
     document.body.appendChild(overlay);
+
+    // Wire up "Copy Favorited Prompts as JSON" button (prompt type only)
+    if (type === 'prompt') {
+        const copyFavBtn = document.getElementById('analytics-copy-fav-btn');
+        if (copyFavBtn) {
+            copyFavBtn.addEventListener('click', async () => {
+                // All results with count > 0 are favorited prompts; include all (not just displayResults slice)
+                const favoritedPrompts = results.filter(r => r.count > 0).map(r => r.name);
+                const jsonStr = JSON.stringify(favoritedPrompts, null, 2);
+                try {
+                    await navigator.clipboard.writeText(jsonStr);
+                } catch {
+                    // Fallback for browsers that block async clipboard
+                    const ta = document.createElement('textarea');
+                    ta.value = jsonStr;
+                    ta.style.position = 'fixed';
+                    ta.style.opacity = '0';
+                    document.body.appendChild(ta);
+                    ta.select();
+                    document.execCommand('copy');
+                    document.body.removeChild(ta);
+                }
+                const orig = copyFavBtn.textContent;
+                copyFavBtn.textContent = '✅ Copied ' + favoritedPrompts.length + ' prompts!';
+                copyFavBtn.style.background = '#00aa88';
+                setTimeout(() => {
+                    copyFavBtn.textContent = orig;
+                    copyFavBtn.style.background = '#00d1b2';
+                }, 2000);
+            });
+        }
+    }
 
     // Click-outside-to-close
     overlay.addEventListener('click', (e) => {
