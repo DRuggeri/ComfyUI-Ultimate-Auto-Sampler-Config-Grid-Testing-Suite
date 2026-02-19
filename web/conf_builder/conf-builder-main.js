@@ -99,6 +99,8 @@ app.registerExtension({
                         lora_bypass_states: {},
                         lora_strength_lock: {},
                         model_bypass_states: {},
+                        vae_bypass_states: {},
+                        te_bypass_states: {},
                         combine: false,
                         positive_prompt_groups: [],
                         negative_prompt: "",

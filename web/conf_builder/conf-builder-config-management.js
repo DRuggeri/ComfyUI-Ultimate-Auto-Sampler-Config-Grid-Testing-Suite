@@ -233,6 +233,17 @@ function createChipListBuilder({ label, stateKey, options, node, arrayIdx, confi
     };
     populateSelect();
 
+    // Add item immediately when clicking a dropdown option
+    select.onchange = () => {
+        const val = select.value;
+        if (val && !configArray[stateKey].includes(val)) {
+            node.state.config_arrays[arrayIdx][stateKey].push(val);
+            node.saveState();
+            renderChips();
+            populateSelect();
+        }
+    };
+
     const addBtn = document.createElement("button");
     addBtn.className = "cb-button primary";
     addBtn.textContent = "+";
@@ -1170,6 +1181,17 @@ async function showLoraMetadataModal(node, arrayIdx, loraName) {
         // Display metadata
         content.innerHTML = "";
 
+        // Cache warning banner (shown prominently when data is from disk cache)
+        if (data.cached) {
+            const cacheBanner = document.createElement("div");
+            cacheBanner.style.cssText = "background: #553300; border: 2px solid #ffaa00; border-radius: 6px; padding: 10px 14px; margin-bottom: 15px; text-align: center;";
+            cacheBanner.innerHTML = `
+                <div style="font-size: 14px; font-weight: bold; color: #ffaa00;">⚠️ READ FROM DISK CACHE</div>
+                <div style="font-size: 12px; color: #ccaa66; margin-top: 4px;">Last looked up on: <strong>${data.cache_date || 'Unknown'}</strong></div>
+            `;
+            content.appendChild(cacheBanner);
+        }
+
         // Model name and creator
         const headerSection = document.createElement("div");
         headerSection.style.cssText = "margin-bottom: 15px; padding-bottom: 10px; border-bottom: 2px solid #444;";
@@ -1189,7 +1211,7 @@ async function showLoraMetadataModal(node, arrayIdx, loraName) {
         infoSection.innerHTML = `
             <div style="margin-bottom: 8px;"><strong style="color: #9966cc;">Base Model:</strong> ${metadata.base_model}</div>
             <div style="margin-bottom: 8px;">
-                <strong style="color: #9966cc;">Tags:</strong> 
+                <strong style="color: #9966cc;">Tags:</strong>
                 <div style="margin-top: 4px; display: flex; flex-wrap: wrap; gap: 4px;">
                     ${metadata.tags.slice(0, 10).map(tag => `<span style="background: #444; padding: 2px 8px; border-radius: 10px; font-size: 11px;">${tag}</span>`).join('')}
                 </div>
@@ -1254,6 +1276,46 @@ async function showLoraMetadataModal(node, arrayIdx, loraName) {
         linksSection.appendChild(civitaiLink);
         linksSection.appendChild(savedPath);
         content.appendChild(linksSection);
+
+        // --- Full JSON Response Section ---
+        const jsonSection = document.createElement("div");
+        jsonSection.style.cssText = "margin-top: 15px; padding-top: 10px; border-top: 2px solid #444;";
+
+        // Toggle button to show/hide full JSON
+        const jsonToggleBtn = document.createElement("button");
+        jsonToggleBtn.className = "cb-button";
+        jsonToggleBtn.style.cssText = "margin-bottom: 8px; background: #333; border-left: 3px solid #9966cc;";
+        jsonToggleBtn.textContent = "📋 Show Full JSON Response";
+        const jsonPre = document.createElement("pre");
+        jsonPre.style.cssText = "display: none; background: #111; color: #aaffaa; padding: 10px; border-radius: 4px; font-size: 11px; max-height: 400px; overflow: auto; white-space: pre-wrap; word-break: break-all; border: 1px solid #333;";
+        jsonPre.textContent = JSON.stringify(metadata, null, 2);
+        jsonToggleBtn.onclick = () => {
+            const isHidden = jsonPre.style.display === "none";
+            jsonPre.style.display = isHidden ? "block" : "none";
+            jsonToggleBtn.textContent = isHidden ? "📋 Hide Full JSON Response" : "📋 Show Full JSON Response";
+        };
+        jsonSection.appendChild(jsonToggleBtn);
+        jsonSection.appendChild(jsonPre);
+
+        // Save Full JSON button
+        const saveJsonBtn = document.createElement("button");
+        saveJsonBtn.className = "cb-button";
+        saveJsonBtn.style.cssText = "background: #333; border-left: 3px solid #00aa88; margin-top: 4px;";
+        saveJsonBtn.textContent = "💾 Save Full JSON to File";
+        saveJsonBtn.onclick = () => {
+            const blob = new Blob([JSON.stringify(metadata, null, 2)], { type: "application/json" });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement("a");
+            a.href = url;
+            a.download = `${loraName.split('/').pop().replace(/\.\w+$/, '')}_metadata.json`;
+            a.click();
+            URL.revokeObjectURL(url);
+            saveJsonBtn.textContent = "✅ Saved!";
+            setTimeout(() => { saveJsonBtn.textContent = "💾 Save Full JSON to File"; }, 2000);
+        };
+        jsonSection.appendChild(saveJsonBtn);
+
+        content.appendChild(jsonSection);
 
     } catch (e) {
         status.textContent = "❌ Error: " + e.message;
@@ -1349,6 +1411,17 @@ async function showModelMetadataModal(node, arrayIdx, modelName, modelType) {
         // Display metadata
         content.innerHTML = "";
 
+        // Cache warning banner (shown prominently when data is from disk cache)
+        if (data.cached) {
+            const cacheBanner = document.createElement("div");
+            cacheBanner.style.cssText = "background: #553300; border: 2px solid #ffaa00; border-radius: 6px; padding: 10px 14px; margin-bottom: 15px; text-align: center;";
+            cacheBanner.innerHTML = `
+                <div style="font-size: 14px; font-weight: bold; color: #ffaa00;">⚠️ READ FROM DISK CACHE</div>
+                <div style="font-size: 12px; color: #ccaa66; margin-top: 4px;">Last looked up on: <strong>${data.cache_date || 'Unknown'}</strong></div>
+            `;
+            content.appendChild(cacheBanner);
+        }
+
         // Model name and creator
         const headerSection = document.createElement("div");
         headerSection.style.cssText = "margin-bottom: 15px; padding-bottom: 10px; border-bottom: 2px solid #444;";
@@ -1433,6 +1506,46 @@ async function showModelMetadataModal(node, arrayIdx, modelName, modelType) {
         linksSection.appendChild(civitaiLink);
         linksSection.appendChild(savedPath);
         content.appendChild(linksSection);
+
+        // --- Full JSON Response Section ---
+        const jsonSection = document.createElement("div");
+        jsonSection.style.cssText = "margin-top: 15px; padding-top: 10px; border-top: 2px solid #444;";
+
+        // Toggle button to show/hide full JSON
+        const jsonToggleBtn = document.createElement("button");
+        jsonToggleBtn.className = "cb-button";
+        jsonToggleBtn.style.cssText = "margin-bottom: 8px; background: #333; border-left: 3px solid #cc6600;";
+        jsonToggleBtn.textContent = "📋 Show Full JSON Response";
+        const jsonPre = document.createElement("pre");
+        jsonPre.style.cssText = "display: none; background: #111; color: #aaffaa; padding: 10px; border-radius: 4px; font-size: 11px; max-height: 400px; overflow: auto; white-space: pre-wrap; word-break: break-all; border: 1px solid #333;";
+        jsonPre.textContent = JSON.stringify(metadata, null, 2);
+        jsonToggleBtn.onclick = () => {
+            const isHidden = jsonPre.style.display === "none";
+            jsonPre.style.display = isHidden ? "block" : "none";
+            jsonToggleBtn.textContent = isHidden ? "📋 Hide Full JSON Response" : "📋 Show Full JSON Response";
+        };
+        jsonSection.appendChild(jsonToggleBtn);
+        jsonSection.appendChild(jsonPre);
+
+        // Save Full JSON button
+        const saveJsonBtn = document.createElement("button");
+        saveJsonBtn.className = "cb-button";
+        saveJsonBtn.style.cssText = "background: #333; border-left: 3px solid #00aa88; margin-top: 4px;";
+        saveJsonBtn.textContent = "💾 Save Full JSON to File";
+        saveJsonBtn.onclick = () => {
+            const blob = new Blob([JSON.stringify(metadata, null, 2)], { type: "application/json" });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement("a");
+            a.href = url;
+            a.download = `${modelName.split('/').pop().replace(/\.\w+$/, '')}_metadata.json`;
+            a.click();
+            URL.revokeObjectURL(url);
+            saveJsonBtn.textContent = "✅ Saved!";
+            setTimeout(() => { saveJsonBtn.textContent = "💾 Save Full JSON to File"; }, 2000);
+        };
+        jsonSection.appendChild(saveJsonBtn);
+
+        content.appendChild(jsonSection);
 
     } catch (e) {
         status.textContent = "❌ Error: " + e.message;
@@ -1581,11 +1694,56 @@ function renderTextEncodersSection(node, container, configArray, arrayIdx, model
     clipRow.appendChild(clipSelect);
     section.appendChild(clipRow);
 
+    // Initialize text encoder bypass states if they don't exist
+    if (!node.state.config_arrays[arrayIdx].te_bypass_states) {
+        node.state.config_arrays[arrayIdx].te_bypass_states = {};
+    }
+
     // Text encoder entries
     const teList = configArray.text_encoders || [];
     teList.forEach((te, teIdx) => {
+        const tePath = te || "None";
+
+        // Get bypass state
+        const isTeBypassed = node.state.config_arrays[arrayIdx].te_bypass_states[tePath] || false;
+
         const teRow = document.createElement("div");
         teRow.style.cssText = "display: flex; gap: 4px; align-items: center; margin-bottom: 4px;";
+
+        // Apply bypass visual state
+        if (isTeBypassed) {
+            teRow.style.opacity = "0.5";
+            teRow.style.filter = "grayscale(0.7)";
+        }
+
+        // Bypass Checkbox - same pattern as model bypass
+        if (tePath !== "None") {
+            const teBypassLabel = document.createElement("label");
+            teBypassLabel.style.cssText = "display: flex; align-items: center; gap: 4px; cursor: pointer; margin-right: 4px;";
+            teBypassLabel.title = "Bypass (disable) this Text Encoder";
+
+            const teBypassCheck = document.createElement("input");
+            teBypassCheck.type = "checkbox";
+            teBypassCheck.checked = !isTeBypassed; // Inverted: checked = enabled
+            teBypassCheck.style.cssText = "cursor: pointer;";
+            teBypassCheck.onclick = (e) => {
+                e.stopPropagation();
+                const newBypassState = !teBypassCheck.checked;
+                node.state.config_arrays[arrayIdx].te_bypass_states[tePath] = newBypassState;
+                node.saveState();
+                // Visual feedback
+                teRow.style.opacity = newBypassState ? "0.5" : "1.0";
+                teRow.style.filter = newBypassState ? "grayscale(0.7)" : "none";
+            };
+
+            const teBypassText = document.createElement("span");
+            teBypassText.textContent = "On";
+            teBypassText.style.cssText = "font-size: 11px; color: #44aaff;";
+
+            teBypassLabel.appendChild(teBypassCheck);
+            teBypassLabel.appendChild(teBypassText);
+            teRow.appendChild(teBypassLabel);
+        }
 
         const teSearchable = createSearchableSelect(
             modelLists.textEncoders || ["None"],
@@ -1782,12 +1940,48 @@ function createVAEElement(node, vaeName, arrayIdx, vaeIdx, vaeList, vFolders) {
 
     const isCollapsed = node.uiState.vaesCollapsed?.[uid] || false;
 
+    // Initialize VAE bypass states if they don't exist
+    if (!node.state.config_arrays[arrayIdx].vae_bypass_states) {
+        node.state.config_arrays[arrayIdx].vae_bypass_states = {};
+    }
+
+    // Get bypass state
+    const isBypassed = node.state.config_arrays[arrayIdx].vae_bypass_states[vaeName] || false;
+
     // Header
     const header = document.createElement("div");
     header.className = "cb-header-bar";
 
     const leftGroup = document.createElement("div");
     leftGroup.className = "cb-header-left";
+
+    // Bypass Checkbox (in header, before toggle arrow) - same pattern as model bypass
+    if (vaeName && vaeName !== "None") {
+        const bypassLabel = document.createElement("label");
+        bypassLabel.style.cssText = "display: flex; align-items: center; gap: 4px; cursor: pointer; margin-right: 8px;";
+        bypassLabel.title = "Bypass (disable) this VAE";
+
+        const bypassCheck = document.createElement("input");
+        bypassCheck.type = "checkbox";
+        bypassCheck.checked = !isBypassed; // Inverted: checked = enabled
+        bypassCheck.style.cssText = "cursor: pointer;";
+        bypassCheck.onclick = (e) => {
+            e.stopPropagation(); // Prevent header collapse
+            const newBypassState = !bypassCheck.checked;
+            node.state.config_arrays[arrayIdx].vae_bypass_states[vaeName] = newBypassState;
+            node.saveState();
+            // Visual feedback
+            div.style.opacity = newBypassState ? "0.5" : "1.0";
+            div.style.filter = newBypassState ? "grayscale(0.7)" : "none";
+        };
+
+        bypassLabel.appendChild(bypassCheck);
+        const bypassText = document.createElement("span");
+        bypassText.textContent = "On";
+        bypassText.style.cssText = "font-size: 11px; color: #9900cc;";
+        bypassLabel.appendChild(bypassText);
+        leftGroup.appendChild(bypassLabel);
+    }
 
     const toggleArrow = document.createElement("span");
     toggleArrow.textContent = isCollapsed ? "▶" : "▼";
@@ -1833,6 +2027,12 @@ function createVAEElement(node, vaeName, arrayIdx, vaeIdx, vaeList, vFolders) {
     header.appendChild(deleteBtn);
     div.appendChild(header);
 
+    // Apply bypass visual state
+    if (isBypassed) {
+        div.style.opacity = "0.5";
+        div.style.filter = "grayscale(0.7)";
+    }
+
     // Content container
     const contentDiv = document.createElement("div");
     contentDiv.style.display = isCollapsed ? "none" : "flex";
@@ -1841,7 +2041,7 @@ function createVAEElement(node, vaeName, arrayIdx, vaeIdx, vaeList, vFolders) {
     contentDiv.style.width = "100%";
 
     header.onclick = (e) => {
-        if (e.target.tagName === 'BUTTON') return;
+        if (e.target.tagName === 'BUTTON' || e.target.tagName === 'INPUT' || e.target.tagName === 'LABEL') return;
         const isNowCollapsed = contentDiv.style.display !== "none";
         contentDiv.style.display = isNowCollapsed ? "none" : "flex";
         toggleArrow.textContent = isNowCollapsed ? "▶" : "▼";
@@ -2937,6 +3137,8 @@ export async function renderUI(node, availableLoras, modelLists, loraFolders, av
             lora_bypass_states: {},
             lora_strength_lock: {},
             model_bypass_states: {},
+            vae_bypass_states: {},
+            te_bypass_states: {},
             combine: false,
             positive_prompt_groups: [],
             negative_prompt: "",

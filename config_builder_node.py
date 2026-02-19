@@ -6,6 +6,7 @@ Python reads everything from that widget
 
 import os
 import json
+import time
 import folder_paths
 from typing import List, Dict, Any
 import server
@@ -685,11 +686,15 @@ async def lookup_lora_metadata_endpoint(request):
             try:
                 cached = load_json_from_file(metadata_file)
                 if cached and cached.get("name"):
-                    print(f"[ConfigBuilder] ✅ Using cached metadata for: {lora_name}")
+                    # Get file modification time for cache date display
+                    cache_mtime = os.path.getmtime(metadata_file)
+                    cache_date = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(cache_mtime))
+                    print(f"[ConfigBuilder] ✅ Using cached metadata for: {lora_name} (cached on {cache_date})")
                     return web.json_response({
                         "metadata": cached,
                         "saved_to": metadata_file,
-                        "cached": True
+                        "cached": True,
+                        "cache_date": cache_date
                     })
             except Exception:
                 pass  # Cache miss or corrupt file - fall through to fresh lookup
@@ -795,11 +800,15 @@ async def lookup_model_metadata_endpoint(request):
             try:
                 cached = load_json_from_file(metadata_file)
                 if cached and cached.get("name"):
-                    print(f"[ConfigBuilder] ✅ Using cached metadata for model: {model_name}")
+                    # Get file modification time for cache date display
+                    cache_mtime = os.path.getmtime(metadata_file)
+                    cache_date = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(cache_mtime))
+                    print(f"[ConfigBuilder] ✅ Using cached metadata for model: {model_name} (cached on {cache_date})")
                     return web.json_response({
                         "metadata": cached,
                         "saved_to": metadata_file,
-                        "cached": True
+                        "cached": True,
+                        "cache_date": cache_date
                     })
             except Exception:
                 pass  # Cache miss or corrupt file - fall through to fresh lookup

@@ -428,6 +428,7 @@ export function getIterationCount(configArray) {
         v_count = 1; // Default VAE
     } else {
         configArray.vaes.forEach(v => {
+            if (configArray.vae_bypass_states?.[v]) return; // Skip bypassed
             if (!v || v === "None") {
                 v_count += 1; // "None" = use Default
             } else {
@@ -495,8 +496,8 @@ export function convertStateToConfigs(state) {
             }
         });
 
-        // Process VAEs
-        const vaes = (configArray.vaes || []).filter(v => v && v !== "None");
+        // Process VAEs - filter out bypassed entries
+        const vaes = (configArray.vaes || []).filter(v => v && v !== "None" && !configArray.vae_bypass_states?.[v]);
 
         const config = {
             sampler: split(configArray.samplers),
@@ -521,7 +522,7 @@ export function convertStateToConfigs(state) {
         // Add model_type and related fields for non-checkpoint models
         if (modelType !== "checkpoint") {
             config.model_type = modelType;
-            const textEncoders = (configArray.text_encoders || []).filter(te => te && te !== "None");
+            const textEncoders = (configArray.text_encoders || []).filter(te => te && te !== "None" && !configArray.te_bypass_states?.[te]);
             if (textEncoders.length > 0) config.text_encoders = textEncoders;
             if (configArray.clip_type) config.clip_type = configArray.clip_type;
             if (modelType === "gguf" && configArray.gguf_options) {
@@ -560,6 +561,16 @@ export function convertStateToConfigs(state) {
         // Add lora_strength_lock if any are set
         if (configArray.lora_strength_lock && Object.keys(configArray.lora_strength_lock).length > 0) {
             config.lora_strength_lock = configArray.lora_strength_lock;
+        }
+
+        // Add vae_bypass_states if any are set
+        if (configArray.vae_bypass_states && Object.keys(configArray.vae_bypass_states).length > 0) {
+            config.vae_bypass_states = configArray.vae_bypass_states;
+        }
+
+        // Add te_bypass_states if any are set
+        if (configArray.te_bypass_states && Object.keys(configArray.te_bypass_states).length > 0) {
+            config.te_bypass_states = configArray.te_bypass_states;
         }
 
         // Add seed_behavior if set to randomize
@@ -614,6 +625,8 @@ export function convertConfigsToConfigArrays(configs) {
             lora_bypass_states: {},
             lora_strength_lock: {},
             model_bypass_states: {},
+            vae_bypass_states: {},
+            te_bypass_states: {},
             combine: false,
             positive_prompt_groups: [],
             negative_prompt: "",
@@ -696,6 +709,18 @@ export function convertConfigsToConfigArrays(configs) {
             modelBypassStates = { ...config.model_bypass_states };
         }
 
+        // Load vae_bypass_states
+        let vaeBypassStates = {};
+        if (config.vae_bypass_states && typeof config.vae_bypass_states === 'object') {
+            vaeBypassStates = { ...config.vae_bypass_states };
+        }
+
+        // Load te_bypass_states
+        let teBypassStates = {};
+        if (config.te_bypass_states && typeof config.te_bypass_states === 'object') {
+            teBypassStates = { ...config.te_bypass_states };
+        }
+
         // Parse VAE
         let vaes = ["None"];
         if (config.vae) {
@@ -757,6 +782,8 @@ export function convertConfigsToConfigArrays(configs) {
             lora_bypass_states: bypassStates,
             lora_strength_lock: strengthLock,
             model_bypass_states: modelBypassStates,
+            vae_bypass_states: vaeBypassStates,
+            te_bypass_states: teBypassStates,
             combine: hasCombined,
             positive_prompt_groups: positivePromptGroups,
             negative_prompt: negativePrompt,
@@ -787,6 +814,8 @@ export function convertConfigsToConfigArrays(configs) {
         lora_bypass_states: {},
         lora_strength_lock: {},
         model_bypass_states: {},
+        vae_bypass_states: {},
+        te_bypass_states: {},
         combine: false,
         positive_prompt_groups: [],
         negative_prompt: "",
