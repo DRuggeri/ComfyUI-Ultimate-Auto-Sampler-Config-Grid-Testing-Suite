@@ -34,7 +34,9 @@ But seriously, after updating your code see if it works. If it didn't send the e
 ---
 
 !!!!
-Check Roadmap.md for some tasks and do them. If you think you can do the ones marked as New to-do items, needs more info/explaining/numbering those are good. There is some info on the project in README.md and info on the file structure and notes on each files functions in the ProjectStructure.md 
+Check Roadmap.md for some tasks and do them. If you think you can do the ones marked as New to-do items, needs more info/explaining/numbering those are good.
+
+There is info on the project in README.md and info on the file structure and notes on each files functions in the ProjectStructure.md 
 !!!!
 ProjectStructure.md has notes to assist AI in developing this project
 !!!!
@@ -42,7 +44,10 @@ ProjectStructure.md has notes to assist AI in developing this project
 ### **ComfyUI Ultimate Sampler Grid – Development Roadmap**
 
 
-## BUG: There are a couple thing wrong with the dashboard virtual canvas, toggling fullscreen causes the loss of panning location, panning location (specifically y / height) should be persistant. I believe its stored in local storage to allow for persistance but I think the new filter system broke it. Additionally, when the new filter system and dynamic card sizing based on input images was introduced sometimes cards show up as the wrong size or the grid even shows blank and empty spots. not sure why, we need to check the filter and sorting systems and dynamic height adjustment system and virtual canvas for any possible issues. It also seems like the sorting system caauses lag when dealing with thousands of images, is there any way we could do async loading optimize it to work better with thousands of images?
+## Add on off switches in builder ui to text encoder selection and vae selection
+
+
+## Add more info to the lora and model civitai lookups in the builderUI, option to show full API response, show full JSON response, save full JSON resposne, if lookup data is cached, show a big warning on the very top that says READ FROM DISK CACHE, LAST LOOKED UP ON {lookup date}
 
 
 ## When you click a sampler or scheduler in the dropdown it should add it to the list right away.
@@ -61,7 +66,7 @@ Replace revise button in dashboard with edit emoji
 
 ## ~~Fix: Manifest doesn't need lora omit triggers list in every item~~ (DONE - already stripped in create_image_metadata via .pop())
 
-# Needs Testing: Batch encoding doesnt seem to be working for optional inputs possibly, or maybe its very large models, I get loading messages after every single encoding instead of once per batch and it takes a long time (low priority)
+# Needs Testing: Batch encoding doesnt seem to be working for optional inputs possibly, or maybe its very large models, maybe ggufs, I get loading messages after every single encoding instead of once per batch and it takes a long time (low priority)
 Symptom: each encoding fills the GPU more and more and eventually it becomes 0 usable, 0 loaded all offloaded.
 loaded partially; 5585.34 MB usable, 5543.55 MB loaded, 628.32 MB offloaded, 41.79 MB buffer reserved, lowvram patches: 0
 loaded partially; 5569.51 MB usable, 5527.72 MB loaded, 644.90 MB offloaded, 41.79 MB buffer reserved, lowvram patches: 0
