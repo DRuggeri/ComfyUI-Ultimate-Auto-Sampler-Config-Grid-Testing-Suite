@@ -120,6 +120,32 @@ app.registerExtension({
             window.__ultimateGridProgressListenerInstalled = true;
         }
 
+        // DISTRIBUTION STATUS LISTENER (SINGLETON - forward distribution status to dashboard iframe)
+        if (!window.__ultimateGridDistributionStatusListenerInstalled) {
+            api.addEventListener("ultimate_grid.distribution_status", (event) => {
+                const payload = event.detail;
+                const { session_name } = payload;
+
+                const dashboardNodes = app.graph._nodes.filter(n => n.type === "UltimateGridDashboard");
+                dashboardNodes.forEach(dashboardNode => {
+                    const sessionWidget = dashboardNode.widgets.find(w => w.name === "session_name");
+                    if (!sessionWidget) return;
+
+                    if (sessionWidget.value === session_name &&
+                        dashboardNode.loaded_session === session_name &&
+                        dashboardNode.iframe?.contentWindow) {
+                        try {
+                            dashboardNode.iframe.contentWindow.postMessage({
+                                type: 'distribution_status',
+                                data: payload
+                            }, '*');
+                        } catch (e) { /* ignore */ }
+                    }
+                });
+            });
+            window.__ultimateGridDistributionStatusListenerInstalled = true;
+        }
+
         // 3. FULLSCREEN LISTENER (SINGLETON - only register once)
         if (!window.__ultimateGridFullscreenListenerInstalled) {
             window.addEventListener("message", (event) => {

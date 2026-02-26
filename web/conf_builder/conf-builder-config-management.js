@@ -23,6 +23,8 @@ import {
     getStyles
 } from './conf-builder-ui-components.js';
 
+import { renderDistributionSection } from './conf-builder-distribution.js';
+
 // --- SESSION SECTION RENDERER ---
 
 export function renderSessionSection(node, container, availableSessions, refreshAllConfigBuilders) {
@@ -3104,6 +3106,7 @@ export async function renderUI(node, availableLoras, modelLists, loraFolders, av
     topRow.className = "cb-sections-row";
     renderSessionSection(node, topRow, availableSessions, refreshAllConfigBuilders);
     renderConfigSection(node, topRow, availableConfigs);
+    renderDistributionSection(node, topRow);
     root.appendChild(topRow);
 
     // Global Prompts Section (between session/config management and config arrays)

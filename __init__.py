@@ -14,6 +14,8 @@ from .config_builder_node import UltimateConfigBuilder
 from .json_text_node import SmartJSONTextNode
 from .metadata_packer import pack_metadata_into_image
 from .directory_scanner import scan_directory_for_images
+# Import distribution_routes to register /distribution/* API endpoints at module load time
+from . import distribution_routes
 
 
 # --- PATH SECURITY HELPERS ---

@@ -217,8 +217,8 @@ class UltimateConfigBuilder:
             }
         }
     
-    RETURN_TYPES = ("STRING", "STRING")
-    RETURN_NAMES = ("configs_json", "session_name")
+    RETURN_TYPES = ("STRING", "STRING", "STRING")
+    RETURN_NAMES = ("configs_json", "session_name", "distribution_config")
     FUNCTION = "generate_config"
     CATEGORY = "sampling/testing"
     OUTPUT_NODE = True
@@ -632,8 +632,17 @@ class UltimateConfigBuilder:
         print(f"  Total Combinations: {total_combinations}")
         print(f"{'='*80}\n")
         
-        # Return just the essentials
-        return (json_output, actual_session_name)
+        # Build distribution config from state if enabled
+        dist_config = ""
+        if state.get("distribution_enabled") and state.get("worker_urls"):
+            dist_config = json.dumps({
+                "enabled": True,
+                "worker_urls": [u for u in state["worker_urls"] if u and u.strip()],
+                "claim_timeout": state.get("claim_timeout", 300)
+            })
+
+        # Return configs, session name, and distribution config
+        return (json_output, actual_session_name, dist_config)
 
 
 # API endpoint for trigger word lookup

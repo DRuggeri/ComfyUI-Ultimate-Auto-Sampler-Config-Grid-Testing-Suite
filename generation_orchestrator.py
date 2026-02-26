@@ -274,7 +274,8 @@ def run_generation_loop(
     session_name, unique_id, add_random_seeds_to_gens, lora_triggerwords_mode,
     remote_vae_endpoint, save_conditioning_cache_to_file, enable_model_cache,
     optional_model, optional_clip, optional_vae,
-    optional_positive, optional_negative, optional_latent
+    optional_positive, optional_negative, optional_latent,
+    distribution_config=None
 ):
     """Main generation loop orchestrator."""
 
@@ -391,6 +392,28 @@ def run_generation_loop(
         print(f"[GridTester] ⚠️ CANNOT be automatically detected. Jobs matching sampler/scheduler/steps/cfg/denoise/seed")
         print(f"[GridTester] ⚠️ will be SKIPPED even if upstream model/conditioning changed.")
         print(f"[GridTester] ⚠️ Set overwrite_existing=True to force re-generation of all jobs.")
+
+    # ==== DISTRIBUTED PROCESSING BRANCH ====
+    # If distribution_config is provided and enabled, delegate to distributed processing
+    # which handles the generation loop, then jump to finalization
+    dist_enabled = (
+        distribution_config
+        and isinstance(distribution_config, dict)
+        and distribution_config.get("enabled")
+        and distribution_config.get("worker_urls")
+    )
+
+    if dist_enabled:
+        return _run_distributed_generation(
+            self, distribution_config, expanded, input_jobs, existing_data,
+            overwrite_existing, has_optional_inputs, lora_triggerwords_mode,
+            session_name, paths, unique_id, total_jobs, seed, ckpt_name,
+            positive_text, negative_text, vae_batch_size, configs_json,
+            resolutions_json, flush_batch_every, use_remote_vae,
+            remote_vae_endpoint, save_conditioning_cache_to_file,
+            enable_model_cache, optional_model, optional_clip, optional_vae,
+            optional_positive, optional_negative, optional_latent, model_cache
+        )
 
     # ==== OPTIONAL CONDITIONING SETUP ====
     if optional_positive or optional_negative:
@@ -1168,4 +1191,499 @@ def run_generation_loop(
             except Exception:
                 pass
     
+    return (html,)
+
+
+def _get_master_url():
+    """Detect this ComfyUI instance's URL for remote workers to connect to."""
+    import socket
+    try:
+        # Get local IP by connecting to external (doesn't actually send data)
+        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        s.connect(("8.8.8.8", 80))
+        local_ip = s.getsockname()[0]
+        s.close()
+    except Exception:
+        local_ip = "127.0.0.1"
+
+    port = 8188
+    try:
+        import comfy.cli_args
+        port = comfy.cli_args.args.port
+    except Exception:
+        pass
+
+    return f"http://{local_ip}:{port}"
+
+
+def _run_distributed_generation(
+    self, distribution_config, expanded, input_jobs, existing_data,
+    overwrite_existing, has_optional_inputs, lora_triggerwords_mode,
+    session_name, paths, unique_id, total_jobs, seed, ckpt_name,
+    positive_text, negative_text, vae_batch_size, configs_json,
+    resolutions_json, flush_batch_every, use_remote_vae,
+    remote_vae_endpoint, save_conditioning_cache_to_file,
+    enable_model_cache, optional_model, optional_clip, optional_vae,
+    optional_positive, optional_negative, optional_latent, model_cache
+):
+    """
+    Run generation in distributed mode.
+
+    The master acts as both coordinator and local worker:
+    - Creates a DistributionManager with the full job list
+    - Notifies remote workers to start pulling jobs via API
+    - Processes jobs locally by claiming from its own manager
+    - Waits for all remote workers to finish
+    - Returns the final HTML dashboard
+    """
+    from .distribution_manager import DistributionManager
+    from .distribution_routes import (
+        set_distribution_manager, notify_workers_to_start,
+        stop_all_workers, _send_distribution_status
+    )
+
+    worker_urls = distribution_config.get("worker_urls", [])
+    claim_timeout = distribution_config.get("claim_timeout", 300)
+
+    # Inject trigger word mode into configs so workers can use it
+    for conf in expanded:
+        conf["_lora_triggerwords_mode"] = lora_triggerwords_mode
+
+    # === Create and populate distribution manager ===
+    manager = DistributionManager(
+        session_name=session_name,
+        paths=paths,
+        unique_id=unique_id,
+        existing_data=existing_data,
+        claim_timeout_seconds=claim_timeout
+    )
+
+    manager.populate_jobs(
+        expanded, input_jobs, existing_data,
+        overwrite_existing, has_optional_inputs, lora_triggerwords_mode
+    )
+
+    # Make manager accessible to API endpoints
+    set_distribution_manager(manager)
+    _send_distribution_status(manager)
+
+    # === Notify remote workers ===
+    master_url = _get_master_url()
+    print(f"[Distribution] 🌐 Master URL: {master_url}")
+    print(f"[Distribution] 🌐 Notifying {len(worker_urls)} worker(s)...")
+
+    worker_results = notify_workers_to_start(worker_urls, master_url, session_name)
+    successful_workers = sum(1 for _, ok, _ in worker_results if ok)
+    print(f"[Distribution] ✅ {successful_workers}/{len(worker_urls)} workers started")
+
+    # === Master local processing state ===
+    loaded_model, loaded_clip, loaded_vae = None, None, None
+    patched_model, patched_clip = None, None
+    cached_model_key = None
+    cached_lora_key = None
+    cached_vae_key = None
+    default_model_vae = None
+    conditioning_cache = {"positive": {}, "negative": {}}
+    incompatible_loras = {}
+    pending_batch = []
+    pending_job_ids = []  # Track job_ids for items in pending_batch
+    total_generated = 0
+    gen_index_offset = len(existing_data.get("items", []))
+    job_durations = []
+    eta_start_time = time.time()
+    master_jobs_processed = 0
+
+    # Remote VAE setup for master's local processing
+    remote_vae_worker = None
+    if use_remote_vae and expanded:
+        remote_vae_worker = initialize_remote_vae(
+            remote_vae_endpoint, paths["images"], paths["manifest"],
+            existing_data, session_name, unique_id
+        )
+    per_config_remote_workers = {}
+    current_vae_is_remote = False
+    current_remote_vae_url = None
+
+    try:
+        if PromptServer is not None:
+            pbar = PromptServer.instance.progress_bar_pool.get_progress_bar(unique_id)
+        else:
+            pbar = None
+    except:
+        pbar = None
+
+    dist_total = manager.get_status()["total"]
+
+    # === Master local processing loop ===
+    # Master claims jobs from its own distribution manager and processes them
+    # using the same model loading, encoding, and generation code paths as the
+    # normal (non-distributed) generation loop.
+    try:
+        while True:
+            # Check for interrupt
+            try:
+                import comfy.model_management as mm
+                if mm.processing_interrupted():
+                    print(f"\n[Distribution/Master] 🛑 INTERRUPTED")
+                    raise InterruptProcessingException()
+            except InterruptProcessingException:
+                raise
+            except:
+                pass
+
+            # Claim next job from manager
+            batch = manager.claim_batch_for_local(1)
+            if not batch:
+                break  # No more pending jobs for master
+
+            claimed_job = batch[0]
+            conf = claimed_job["config"]
+            input_job = claimed_job["input_job"]
+            job_id = claimed_job["job_id"]
+            w = input_job["width"]
+            h = input_job["height"]
+            batch_idx = input_job.get("batch_idx", 0)
+            current_seed = conf["seed"]
+
+            master_jobs_processed += 1
+            completed_total = manager.total_completed
+            print(f"[Distribution/Master] 📊 Processing job {job_id} | "
+                  f"{conf['sampler']} @ {conf['steps']} steps | {w}x{h} | "
+                  f"Progress: {completed_total}/{dist_total}")
+
+            if pbar:
+                try:
+                    pbar.update_absolute(completed_total, dist_total)
+                except:
+                    pass
+
+            # Build prompts with trigger words
+            actual_positive_prompt, _ = build_prompt_with_triggers(conf, lora_triggerwords_mode)
+            actual_negative_prompt = conf["negative"]
+
+            # --- Model Switching ---
+            target_model_key = get_model_cache_key(conf)
+            if target_model_key != cached_model_key:
+                if cached_model_key is not None:
+                    patched_model, patched_clip = cleanup_model_references(
+                        patched_model, patched_clip, conditioning_cache
+                    )
+                    conditioning_cache = {"positive": {}, "negative": {}}
+
+                loaded_model, loaded_clip, loaded_vae = load_model_by_type(
+                    conf, ckpt_name, use_remote_vae,
+                    optional_model, optional_clip, optional_vae,
+                    optional_positive, optional_negative, loaded_clip, loaded_vae,
+                    model_cache=model_cache
+                )
+                if loaded_vae is None and optional_vae is not None:
+                    loaded_vae = optional_vae
+                default_model_vae = loaded_vae
+                cached_model_key = target_model_key
+                cached_lora_key = None
+                cached_vae_key = "Default"
+                current_vae_is_remote = False
+                current_remote_vae_url = None
+
+            # --- VAE Switching ---
+            target_vae = conf.get("vae", "Default")
+            if target_vae != cached_vae_key:
+                # Flush pending batch before switching VAE
+                if pending_batch:
+                    _flush_pending_batch(
+                        pending_batch, current_vae_is_remote, current_remote_vae_url,
+                        per_config_remote_workers, use_remote_vae, remote_vae_worker,
+                        loaded_vae, paths, existing_data, session_name,
+                        paths["manifest"], unique_id
+                    )
+                    for jid in pending_job_ids:
+                        manager.complete_job(jid)
+                    pending_batch = []
+                    pending_job_ids = []
+
+                if target_vae == "Default":
+                    loaded_vae = default_model_vae
+                    current_vae_is_remote = False
+                    current_remote_vae_url = None
+                elif is_remote_vae(target_vae):
+                    url = extract_remote_vae_url(target_vae)
+                    current_vae_is_remote = True
+                    current_remote_vae_url = url
+                    loaded_vae = None
+                    if url not in per_config_remote_workers:
+                        per_config_remote_workers[url] = RemoteVAEDecodeWorker(
+                            endpoint=url, img_dir=paths["images"],
+                            manifest_path=paths["manifest"],
+                            existing_data=existing_data,
+                            session_name=session_name, unique_id=unique_id
+                        )
+                else:
+                    current_vae_is_remote = False
+                    current_remote_vae_url = None
+                    loaded_vae = load_vae_by_name(target_vae)
+                cached_vae_key = target_vae
+
+            # --- LoRA Switching ---
+            current_lora_string = conf.get("lora_expanded", conf.get("lora", "None"))
+            if current_lora_string != cached_lora_key or patched_model is None:
+                patched_model, patched_clip, should_skip = load_loras(
+                    loaded_model, loaded_clip, current_lora_string,
+                    target_model_key, incompatible_loras, model_cache=model_cache
+                )
+                if should_skip:
+                    manager.fail_job(job_id, "LoRA incompatible")
+                    continue
+                cached_lora_key = current_lora_string
+
+            # --- Prompt Encoding ---
+            if optional_positive:
+                final_positive = optional_positive
+            else:
+                if actual_positive_prompt not in conditioning_cache["positive"]:
+                    clip_skip = conf.get("clip_skip", 0)
+                    conditioning_cache["positive"][actual_positive_prompt] = \
+                        encode_prompt_with_combinators(patched_clip, actual_positive_prompt, clip_skip)
+                final_positive = conditioning_cache["positive"][actual_positive_prompt]
+
+            if optional_negative:
+                final_negative = optional_negative
+            else:
+                if actual_negative_prompt not in conditioning_cache["negative"]:
+                    clip_skip = conf.get("clip_skip", 0)
+                    conditioning_cache["negative"][actual_negative_prompt] = \
+                        encode_prompt_with_combinators(patched_clip, actual_negative_prompt, clip_skip)
+                final_negative = conditioning_cache["negative"][actual_negative_prompt]
+
+            # --- Create Latent ---
+            latent_channels = get_latent_channels(loaded_model, optional_latent)
+            if optional_latent is not None:
+                latent_in = {"samples": optional_latent["samples"].clone()}
+            else:
+                latent_in = {"samples": torch.zeros([1, latent_channels, h // 8, w // 8])}
+
+            # --- Generate Image ---
+            try:
+                attention_mode = conf.get("attention_mode", "default")
+                result_latent, duration = generate_image(
+                    patched_model, current_seed, conf["steps"], conf["cfg"],
+                    conf["sampler"], conf["scheduler"], final_positive, final_negative,
+                    latent_in, conf["denoise"], attention_mode=attention_mode
+                )
+
+                job_durations.append(duration)
+                eta_info = calculate_eta(job_durations, completed_total + 1, dist_total)
+                if eta_info:
+                    print_generation_progress(
+                        completed_total + 1, dist_total, conf, w, h, duration, eta_info
+                    )
+
+                meta = create_image_metadata(
+                    conf, w, h, duration, current_seed, batch_idx,
+                    actual_positive_prompt, actual_negative_prompt,
+                    gen_index=gen_index_offset + total_generated
+                )
+
+                pending_batch.append((result_latent["samples"].clone(), meta))
+                pending_job_ids.append(job_id)
+                total_generated += 1
+
+                del result_latent, latent_in
+
+            except InterruptProcessingException:
+                raise
+            except Exception as e:
+                print(f"[Distribution/Master] ❌ Generation failed: {e}")
+                manager.fail_job(job_id, str(e))
+                del latent_in
+                continue
+
+            # --- Flush batch at threshold ---
+            threshold = vae_batch_size if flush_batch_every <= 0 else flush_batch_every
+            if len(pending_batch) >= threshold:
+                _flush_pending_batch(
+                    pending_batch, current_vae_is_remote, current_remote_vae_url,
+                    per_config_remote_workers, use_remote_vae, remote_vae_worker,
+                    loaded_vae, paths, existing_data, session_name,
+                    paths["manifest"], unique_id
+                )
+                for jid in pending_job_ids:
+                    manager.complete_job(jid)
+                pending_batch = []
+                pending_job_ids = []
+                _send_distribution_status(manager)
+
+            # Periodic cleanup
+            if master_jobs_processed % 10 == 0:
+                gc.collect()
+                if torch.cuda.is_available():
+                    torch.cuda.empty_cache()
+
+        # Flush remaining master batch
+        if pending_batch:
+            _flush_pending_batch(
+                pending_batch, current_vae_is_remote, current_remote_vae_url,
+                per_config_remote_workers, use_remote_vae, remote_vae_worker,
+                loaded_vae, paths, existing_data, session_name,
+                paths["manifest"], unique_id
+            )
+            for jid in pending_job_ids:
+                manager.complete_job(jid)
+            pending_batch = []
+            pending_job_ids = []
+            _send_distribution_status(manager)
+
+    except InterruptProcessingException:
+        # Flush any remaining batch before cleanup
+        if pending_batch:
+            _flush_pending_batch(
+                pending_batch, current_vae_is_remote, current_remote_vae_url,
+                per_config_remote_workers, use_remote_vae, remote_vae_worker,
+                loaded_vae, paths, existing_data, session_name,
+                paths["manifest"], unique_id
+            )
+            for jid in pending_job_ids:
+                manager.complete_job(jid)
+
+        # Stop remote workers and deactivate manager
+        stop_all_workers(worker_urls)
+        manager.deactivate()
+        set_distribution_manager(None)
+
+        _cleanup_per_config_remote_workers(per_config_remote_workers)
+        if remote_vae_worker:
+            remote_vae_worker.wait_completion()
+            remote_vae_worker.stop()
+
+        existing_data["meta"] = {
+            "positive": positive_text, "negative": negative_text,
+            "model": ckpt_name, "seed": seed,
+            "vae_batch_size": vae_batch_size,
+            "configs_json": configs_json, "resolutions_json": resolutions_json
+        }
+        save_manifest(paths["manifest"], existing_data)
+
+        loaded_model, loaded_clip, loaded_vae = None, None, None
+        patched_model, patched_clip = None, None
+        conditioning_cache.clear()
+        gc.collect()
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+
+        # Re-raise so ComfyUI knows execution was interrupted (not completed)
+        raise
+
+    # === Wait for remote workers to finish ===
+    if manager.has_pending_or_claimed:
+        print(f"[Distribution] ⏳ Waiting for remote workers to finish...")
+        while manager.has_pending_or_claimed:
+            # Check for interrupt while waiting
+            try:
+                import comfy.model_management as mm
+                if mm.processing_interrupted():
+                    print(f"\n[Distribution] 🛑 INTERRUPTED while waiting for workers")
+                    stop_all_workers(worker_urls)
+                    manager.deactivate()
+                    set_distribution_manager(None)
+
+                    _cleanup_per_config_remote_workers(per_config_remote_workers)
+                    if remote_vae_worker:
+                        remote_vae_worker.wait_completion()
+                        remote_vae_worker.stop()
+
+                    existing_data["meta"] = {
+                        "positive": positive_text, "negative": negative_text,
+                        "model": ckpt_name, "seed": seed,
+                        "vae_batch_size": vae_batch_size,
+                        "configs_json": configs_json, "resolutions_json": resolutions_json
+                    }
+                    save_manifest(paths["manifest"], existing_data)
+
+                    loaded_model, loaded_clip, loaded_vae = None, None, None
+                    patched_model, patched_clip = None, None
+                    conditioning_cache.clear()
+                    gc.collect()
+                    if torch.cuda.is_available():
+                        torch.cuda.empty_cache()
+
+                    raise InterruptProcessingException()
+            except InterruptProcessingException:
+                raise
+            except:
+                pass
+
+            time.sleep(5)
+            _send_distribution_status(manager)
+            status = manager.get_status()
+            print(f"[Distribution] ⏳ Pending: {status['pending']}, "
+                  f"Claimed: {status['claimed']}, "
+                  f"Completed: {status['completed']}/{status['total']}")
+
+    # === Finalization ===
+    stop_all_workers(worker_urls)
+    manager.deactivate()
+    set_distribution_manager(None)
+
+    _cleanup_per_config_remote_workers(per_config_remote_workers)
+    if remote_vae_worker:
+        print(f"[Distribution] 🌐 Waiting for remote VAE...")
+        remote_vae_worker.wait_completion()
+        remote_vae_worker.stop()
+
+    print_incompatible_loras_summary(incompatible_loras)
+
+    existing_data["meta"] = {
+        "positive": positive_text, "negative": negative_text,
+        "model": ckpt_name, "seed": seed,
+        "vae_batch_size": vae_batch_size,
+        "configs_json": configs_json, "resolutions_json": resolutions_json
+    }
+    save_manifest(paths["manifest"], existing_data)
+
+    print(f"[Distribution] 🧹 Cleaning up...")
+    loaded_model, loaded_clip, loaded_vae = None, None, None
+    patched_model, patched_clip = None, None
+    conditioning_cache.clear()
+    gc.collect()
+    if torch.cuda.is_available():
+        torch.cuda.empty_cache()
+
+    html = get_html_template(session_name, existing_data, unique_id)
+
+    final_status = manager.get_status()
+    if job_durations:
+        total_elapsed = time.time() - eta_start_time
+        total_hours = int(total_elapsed // 3600)
+        total_minutes = int((total_elapsed % 3600) // 60)
+        total_seconds = int(total_elapsed % 60)
+        avg_per_job = sum(job_durations) / len(job_durations)
+
+        print(f"\n{'='*80}")
+        print(f"[Distribution] 🎉 DISTRIBUTED GENERATION COMPLETE!")
+        print(f"[Distribution] ✅ {final_status.get('completed', total_generated)} total images generated")
+        print(f"[Distribution] 📊 Master processed: {total_generated} images ({avg_per_job:.1f}s avg)")
+        print(f"[Distribution] ⏱️  {total_hours}h {total_minutes}m {total_seconds}s total")
+        if final_status.get('failed', 0) > 0:
+            print(f"[Distribution] ❌ {final_status['failed']} jobs failed permanently")
+        print(f"{'='*80}\n")
+
+        # Send completion event to dashboard
+        if PromptServer is not None:
+            try:
+                PromptServer.instance.send_sync("ultimate_grid.progress", {
+                    "node": unique_id,
+                    "session_name": session_name,
+                    "current_job": dist_total,
+                    "total_jobs": dist_total,
+                    "progress_pct": 100,
+                    "eta_str": "Done",
+                    "finish_time": time.strftime("%H:%M:%S"),
+                    "avg_duration": round(avg_per_job, 1),
+                    "last_duration": 0,
+                    "complete": True,
+                    "total_elapsed": f"{total_hours}h {total_minutes}m {total_seconds}s",
+                    "total_generated": final_status.get("completed", total_generated)
+                })
+            except Exception:
+                pass
+
     return (html,)

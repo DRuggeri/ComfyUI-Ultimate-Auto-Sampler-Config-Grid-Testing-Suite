@@ -5,6 +5,11 @@ Handles saving and merging manifest.json with user modifications
 
 import json
 import os
+import threading
+
+# Thread-safe lock for manifest file writes.
+# Required when multiple distributed workers submit results concurrently.
+_manifest_lock = threading.Lock()
 
 
 def merge_manifest_user_changes(manifest_path, existing_data):
@@ -72,19 +77,21 @@ def merge_manifest_user_changes(manifest_path, existing_data):
 def save_manifest(manifest_path, manifest_data):
     """
     Save manifest data to disk, merging user changes first.
-    
+    Thread-safe: uses _manifest_lock for concurrent access from distributed workers.
+
     Args:
         manifest_path: Path to the manifest.json file
         manifest_data: Manifest data dictionary to save
     """
-    # Merge user changes from disk first
-    merge_manifest_user_changes(manifest_path, manifest_data)
-    
-    # Save merged data
-    with open(manifest_path, "w") as f:
-        json.dump(manifest_data, f, indent=4)
-    
-    print(f"[GridTester] 💾 Manifest saved: {manifest_path}")
+    with _manifest_lock:
+        # Merge user changes from disk first
+        merge_manifest_user_changes(manifest_path, manifest_data)
+
+        # Save merged data
+        with open(manifest_path, "w") as f:
+            json.dump(manifest_data, f, indent=4)
+
+        print(f"[GridTester] 💾 Manifest saved: {manifest_path}")
 
 
 def load_existing_manifest(manifest_path):

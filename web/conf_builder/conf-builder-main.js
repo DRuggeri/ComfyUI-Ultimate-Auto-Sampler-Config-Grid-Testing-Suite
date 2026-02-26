@@ -9,7 +9,7 @@ import { app } from "../../../scripts/app.js";
 const CACHE_BUST = Date.now();
 
 // Module storage
-let utilities, uiComponents, configManagement;
+let utilities, uiComponents, configManagement, distributionModule;
 
 // Singleton promise to ensure we only trigger the load once
 let moduleLoadPromise = null;
@@ -22,12 +22,14 @@ function ensureModulesLoaded() {
         const utilitiesModule = await import(`./conf-builder-utilities.js?v=${CACHE_BUST}`);
         const uiComponentsModule = await import(`./conf-builder-ui-components.js?v=${CACHE_BUST}`);
         const configManagementModule = await import(`./conf-builder-config-management.js?v=${CACHE_BUST}`);
+        const distributionMod = await import(`./conf-builder-distribution.js?v=${CACHE_BUST}`);
 
         utilities = utilitiesModule;
         uiComponents = uiComponentsModule;
         configManagement = configManagementModule;
+        distributionModule = distributionMod;
 
-        return { utilities, uiComponents, configManagement };
+        return { utilities, uiComponents, configManagement, distributionModule };
     })();
     return moduleLoadPromise;
 }
@@ -82,6 +84,9 @@ app.registerExtension({
                     label_mode: false,
                     global_positive_groups: [],
                     global_negative: "",
+                    distribution_enabled: false,
+                    worker_urls: [],
+                    claim_timeout: 300,
                     config_arrays: [{
                         name: "Config 1",
                         samplers: ["euler", "dpmpp_2m"],
@@ -351,6 +356,11 @@ app.registerExtension({
                             // Migration: ensure global prompt fields exist
                             if (!this.state.global_positive_groups) this.state.global_positive_groups = [];
                             if (this.state.global_negative === undefined) this.state.global_negative = "";
+
+                            // Migration: ensure distribution fields exist
+                            if (this.state.distribution_enabled === undefined) this.state.distribution_enabled = false;
+                            if (!this.state.worker_urls) this.state.worker_urls = [];
+                            if (this.state.claim_timeout === undefined) this.state.claim_timeout = 300;
 
                             // Migration logic requiring utilities
                             this.state.config_arrays.forEach(arr => {
