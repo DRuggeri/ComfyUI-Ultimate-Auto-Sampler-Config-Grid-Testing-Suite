@@ -21,6 +21,11 @@ class LoRAFileNotFoundError(Exception):
 def save_dict_to_json(data_dict, file_path):
     """Save dictionary to JSON file"""
     try:
+        # Ensure parent directory exists (handles first-run on distributed workers
+        # where the benchmarks/ folder may not yet exist)
+        parent_dir = os.path.dirname(file_path)
+        if parent_dir:
+            os.makedirs(parent_dir, exist_ok=True)
         with open(file_path, 'w') as json_file:
             json.dump(data_dict, json_file, indent=4)
             print(f"Data saved to {file_path}")

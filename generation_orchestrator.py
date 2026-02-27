@@ -1276,6 +1276,24 @@ def _run_distributed_generation(
     set_distribution_manager(manager)
     _send_distribution_status(manager)
 
+    # Early exit if all jobs were already completed (resume with nothing to do)
+    initial_status = manager.get_status()
+    if initial_status["total"] == 0:
+        print(f"[Distribution] ⏭️ All jobs already completed, nothing to distribute")
+        manager.deactivate()
+        set_distribution_manager(None)
+
+        existing_data["meta"] = {
+            "positive": positive_text, "negative": negative_text,
+            "model": ckpt_name, "seed": seed,
+            "vae_batch_size": vae_batch_size,
+            "configs_json": configs_json, "resolutions_json": resolutions_json
+        }
+        save_manifest(paths["manifest"], existing_data)
+
+        html = get_html_template(session_name, existing_data, unique_id)
+        return (html,)
+
     # === Notify remote workers ===
     master_url = _get_master_url()
     print(f"[Distribution] 🌐 Master URL: {master_url}")
@@ -1362,6 +1380,9 @@ def _run_distributed_generation(
             h = input_job["height"]
             batch_idx = input_job.get("batch_idx", 0)
             current_seed = conf["seed"]
+            if conf.get("seed_behavior") == "randomize":
+                import random
+                current_seed = random.randint(0, 2**63 - 1)
 
             master_jobs_processed += 1
             completed_total = manager.total_completed

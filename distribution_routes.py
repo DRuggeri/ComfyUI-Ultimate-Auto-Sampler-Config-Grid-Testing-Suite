@@ -125,6 +125,9 @@ async def submit_result(request):
         paths = manager.paths
         session_name = manager.session_name
 
+        # Ensure images directory exists (defensive - should already be created by orchestrator)
+        os.makedirs(paths["images"], exist_ok=True)
+
         filename = f"img_{meta['id']}.webp"
         filepath = os.path.join(paths["images"], filename)
 
@@ -140,7 +143,18 @@ async def submit_result(request):
             meta["rejected"] = False
 
         # Mark job as completed in the distribution manager
-        manager.complete_job(job_id, meta)
+        # complete_job returns False if already completed (double-submit guard)
+        was_completed = manager.complete_job(job_id, meta)
+
+        if not was_completed:
+            # Job was already completed (duplicate submission after timeout+reclaim)
+            # Clean up the duplicate image file
+            try:
+                if os.path.exists(filepath):
+                    os.remove(filepath)
+            except Exception:
+                pass
+            return web.Response(status=200, text="Duplicate (ignored)")
 
         # Update manifest on disk (thread-safe)
         from .manifest_utils import save_manifest

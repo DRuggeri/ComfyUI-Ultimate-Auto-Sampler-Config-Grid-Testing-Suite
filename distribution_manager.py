@@ -175,6 +175,9 @@ class DistributionManager:
         """
         Mark a job as completed.
 
+        Guards against double-completion (can happen if a job times out and is
+        reclaimed by another worker, then the original worker finishes late).
+
         Args:
             job_id: The job ID string
             metadata: Optional metadata dict (not stored in job, just for logging)
@@ -186,6 +189,11 @@ class DistributionManager:
             job = self._jobs.get(job_id)
             if not job:
                 print(f"[Distribution] ⚠️ complete_job: unknown job_id {job_id}")
+                return False
+
+            # Prevent double-completion (job may have been reclaimed after timeout)
+            if job.state == JobState.COMPLETED:
+                print(f"[Distribution] ⚠️ complete_job: job {job_id} already completed, ignoring duplicate")
                 return False
 
             job.state = JobState.COMPLETED
@@ -261,6 +269,9 @@ class DistributionManager:
                 job.worker_id = "master"
                 job.claimed_at = time.time()
                 batch.append(self._job_to_dict(job))
+
+            if batch:
+                self._persist_state()
 
             return batch
 

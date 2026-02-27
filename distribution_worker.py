@@ -95,18 +95,40 @@ class WorkerThread(threading.Thread):
 
             self.consecutive_empty = 0
 
+            # Validate job has required fields
+            if not all(k in job for k in ("job_id", "config", "input_job")):
+                print(f"[Worker {self.worker_id}] ⚠️ Malformed job, skipping: {list(job.keys())}")
+                continue
+
             # Process the job
             try:
                 image_bytes, meta = self._process_job(job)
 
-                # Submit result
+                # Submit result (with retry on network error)
                 self._submit_result(job["job_id"], image_bytes, meta)
                 self.jobs_processed += 1
 
                 print(f"[Worker {self.worker_id}] ✅ Job {job['job_id']} complete "
                       f"(total: {self.jobs_processed})")
 
+                # Periodic VRAM cleanup
+                if self.jobs_processed % 5 == 0:
+                    import gc
+                    gc.collect()
+                    if torch.cuda.is_available():
+                        torch.cuda.empty_cache()
+
             except Exception as e:
+                # Check if ComfyUI interrupted processing on this worker
+                try:
+                    from comfy.model_management import InterruptProcessingException
+                    if isinstance(e, InterruptProcessingException):
+                        print(f"[Worker {self.worker_id}] 🛑 Processing interrupted, stopping worker")
+                        self._report_failure(job["job_id"], "Worker interrupted")
+                        break
+                except ImportError:
+                    pass
+
                 print(f"[Worker {self.worker_id}] ❌ Job {job['job_id']} failed: {e}")
                 import traceback
                 traceback.print_exc()
@@ -205,6 +227,10 @@ class WorkerThread(threading.Thread):
         h = input_job["height"]
         batch_idx = input_job.get("batch_idx", 0)
 
+        # Handle seed_behavior: "randomize" (same as main generation loop)
+        if config.get("seed_behavior") == "randomize":
+            config["seed"] = random.randint(0, 2**63 - 1)
+
         # --- Model Loading (with caching between jobs) ---
         target_model_key = get_model_cache_key(config)
         self.current_model = config.get("model", "unknown")
@@ -244,6 +270,14 @@ class WorkerThread(threading.Thread):
             vae = load_vae_by_name(config_vae)
         else:
             vae = self._loaded_vae
+
+        # Validate VAE is available (non-checkpoint models like GGUF may not bundle a VAE)
+        if vae is None:
+            raise RuntimeError(
+                f"No VAE available for model '{config.get('model', 'unknown')}'. "
+                f"Non-checkpoint models (GGUF/diffusion) require a VAE to be specified "
+                f"in the config builder, or connect one via optional_vae on the master."
+            )
 
         # --- LoRA Loading (with caching) ---
         lora_key = config.get("lora_expanded", config.get("lora", "None"))
@@ -292,10 +326,14 @@ class WorkerThread(threading.Thread):
         # --- VAE Decode ---
         image = decode_latent_with_vae(vae, result_latent["samples"])
 
+        # Free latent tensors ASAP (before image conversion, which is CPU-only)
+        del result_latent, latent_in, pos_cond, neg_cond
+
         # --- Convert to bytes ---
         buf = io.BytesIO()
         image.save(buf, format="WEBP", quality=80)
         image_bytes = buf.getvalue()
+        del image, buf  # Free PIL image and buffer
 
         # --- Create metadata ---
         ts = int(time.time() * 100000) + random.randint(0, 1000)
@@ -306,16 +344,20 @@ class WorkerThread(threading.Thread):
         )
         meta["id"] = ts
 
-        # Free latent tensors
-        del result_latent, latent_in, pos_cond, neg_cond
-
         return image_bytes, meta
 
-    def _submit_result(self, job_id, image_bytes, meta):
+    def _submit_result(self, job_id, image_bytes, meta, max_retries=3):
         """
         Upload image + metadata to master via multipart POST.
         Uses urllib (no 'requests' library for ComfyUI Registry compliance).
+        Retries on transient network errors (connection reset, timeout).
         """
+        # JSON-safe meta (ensure no non-serializable types from config round-trip)
+        try:
+            safe_meta = json.loads(json.dumps(meta, default=str))
+        except Exception:
+            safe_meta = meta
+
         boundary = f"----DistWorker{uuid.uuid4().hex[:16]}"
 
         # Build multipart body manually
@@ -327,7 +369,7 @@ class WorkerThread(threading.Thread):
         body += b'Content-Type: application/json\r\n\r\n'
         body += json.dumps({
             "job_id": job_id,
-            "meta": meta,
+            "meta": safe_meta,
             "worker_id": self.worker_id
         }).encode("utf-8")
         body += b"\r\n"
@@ -341,18 +383,32 @@ class WorkerThread(threading.Thread):
 
         body += f"--{boundary}--\r\n".encode()
 
-        req = urllib.request.Request(
-            f"{self.master_url}/distribution/submit_result",
-            data=body,
-            headers={
-                "Content-Type": f"multipart/form-data; boundary={boundary}",
-            },
-            method="POST"
-        )
+        last_error = None
+        for attempt in range(max_retries):
+            try:
+                req = urllib.request.Request(
+                    f"{self.master_url}/distribution/submit_result",
+                    data=body,
+                    headers={
+                        "Content-Type": f"multipart/form-data; boundary={boundary}",
+                    },
+                    method="POST"
+                )
 
-        with urllib.request.urlopen(req, timeout=60) as resp:
-            if resp.status != 200:
-                raise RuntimeError(f"Submit failed: HTTP {resp.status}")
+                with urllib.request.urlopen(req, timeout=60) as resp:
+                    if resp.status != 200:
+                        raise RuntimeError(f"Submit failed: HTTP {resp.status}")
+                return  # Success
+
+            except (urllib.error.URLError, ConnectionError, OSError) as e:
+                last_error = e
+                if attempt < max_retries - 1:
+                    wait = 2 ** attempt  # Exponential backoff: 1s, 2s, 4s
+                    print(f"[Worker {self.worker_id}] ⚠️ Submit retry {attempt + 1}/{max_retries} "
+                          f"for job {job_id}: {e} (waiting {wait}s)")
+                    time.sleep(wait)
+
+        raise RuntimeError(f"Submit failed after {max_retries} attempts: {last_error}")
 
     def _send_heartbeat(self):
         """Send heartbeat to master."""

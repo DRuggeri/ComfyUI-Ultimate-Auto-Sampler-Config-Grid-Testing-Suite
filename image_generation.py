@@ -105,7 +105,10 @@ def decode_latent_with_vae(vae, latent_samples):
     decoded = vae.decode(latent_samples)
     
     # Convert to PIL Image
-    img_np = decoded.cpu().numpy()
+    # .detach() is required because the tensor may have requires_grad=True
+    # (e.g., when called from distributed worker threads outside ComfyUI's
+    # normal execution context where autograd state may differ)
+    img_np = decoded.detach().cpu().numpy()
     
     # Remove extra dimensions (handle shapes like (1, 1, H, W, C) or (1, H, W, C))
     while img_np.ndim > 3:
