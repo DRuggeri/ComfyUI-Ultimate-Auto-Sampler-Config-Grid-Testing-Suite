@@ -296,8 +296,11 @@ async def start_worker(request):
     """
     from .distribution_worker import WorkerThread
 
+    print(f"[Distribution] 📥 start_worker endpoint called")
+
     existing = get_worker_thread()
     if existing and existing.is_alive():
+        print(f"[Distribution] ℹ️ Worker already running: {existing.worker_id}")
         return web.json_response({
             "status": "already_running",
             "worker_id": existing.worker_id,
@@ -307,6 +310,7 @@ async def start_worker(request):
     try:
         data = await request.json()
         master_url = data.get("master_url")
+        print(f"[Distribution] 📥 master_url={master_url}")
 
         if not master_url:
             return web.Response(status=400, text="Missing master_url")

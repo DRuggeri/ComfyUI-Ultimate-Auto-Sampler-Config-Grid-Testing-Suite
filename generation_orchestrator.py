@@ -403,7 +403,16 @@ def run_generation_loop(
         and distribution_config.get("worker_urls")
     )
 
+    if distribution_config:
+        print(f"[GridTester] 🌐 Distribution check: type={type(distribution_config).__name__}, "
+              f"enabled={distribution_config.get('enabled') if isinstance(distribution_config, dict) else 'N/A'}, "
+              f"workers={len(distribution_config.get('worker_urls', [])) if isinstance(distribution_config, dict) else 'N/A'}, "
+              f"dist_enabled={dist_enabled}")
+    else:
+        print(f"[GridTester] ℹ️ distribution_config is None/empty, running normal generation")
+
     if dist_enabled:
+        print(f"[GridTester] 🌐 ENTERING DISTRIBUTED MODE with {len(distribution_config.get('worker_urls', []))} worker(s)")
         return _run_distributed_generation(
             self, distribution_config, expanded, input_jobs, existing_data,
             overwrite_existing, has_optional_inputs, lora_triggerwords_mode,

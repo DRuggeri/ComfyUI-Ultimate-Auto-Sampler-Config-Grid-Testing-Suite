@@ -277,8 +277,11 @@ class SamplerGridTester:
             try:
                 import json
                 dist_config = json.loads(distribution_config)
+                print(f"[GridTester] 🌐 Distribution config received: {len(dist_config.get('worker_urls', []))} worker(s), enabled={dist_config.get('enabled')}")
             except Exception as e:
                 print(f"[GridTester] ⚠️ Invalid distribution_config JSON: {e}")
+        else:
+            print(f"[GridTester] ℹ️ No distribution_config (wire not connected or distribution disabled)")
 
         return run_generation_loop(
             self,

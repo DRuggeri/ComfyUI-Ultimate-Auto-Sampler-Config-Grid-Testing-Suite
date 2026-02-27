@@ -99,13 +99,14 @@ class DistributionManager:
                     total += 1
 
                     # Compute actual prompts (with trigger words applied)
+                    # build_prompt_with_triggers returns (final_positive, trigger_string)
                     try:
-                        actual_positive, actual_negative = build_prompt_with_triggers(
+                        actual_positive, _ = build_prompt_with_triggers(
                             conf, lora_triggerwords_mode
                         )
                     except Exception:
                         actual_positive = conf.get("positive", "")
-                        actual_negative = conf.get("negative", "")
+                    actual_negative = conf.get("negative", "")
 
                     # Skip detection (same logic as main generation loop)
                     if not overwrite_existing:
@@ -387,10 +388,16 @@ class DistributionManager:
         """
         Convert a DistributedJob to a serializable dict for API responses.
         Note: input_job latent tensors are NOT included (workers create their own).
+        Config is round-tripped through JSON to ensure all values are serializable
+        (e.g. numpy int64 → Python int, sets → lists, etc.).
         """
+        try:
+            safe_config = json.loads(json.dumps(job.config, default=str))
+        except Exception:
+            safe_config = job.config
         return {
             "job_id": job.job_id,
-            "config": job.config,
+            "config": safe_config,
             "input_job": job.input_job,
             "gen_index": job.gen_index
         }

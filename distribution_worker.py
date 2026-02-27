@@ -134,6 +134,9 @@ class WorkerThread(threading.Thread):
         url = (f"{self.master_url}/distribution/claim_job"
                f"?worker_id={urllib.parse.quote(self.worker_id)}")
 
+        if self.consecutive_empty == 0 and self.jobs_processed == 0:
+            print(f"[Worker {self.worker_id}] 🔍 Claiming from: {url}")
+
         req = urllib.request.Request(url, method="GET")
         try:
             with urllib.request.urlopen(req, timeout=10) as resp:
