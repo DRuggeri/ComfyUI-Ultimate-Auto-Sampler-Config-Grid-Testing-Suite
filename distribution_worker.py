@@ -57,6 +57,19 @@ class WorkerThread(threading.Thread):
         """Main worker loop."""
         print(f"[Worker {self.worker_id}] 🚀 Starting worker thread, master: {self.master_url}")
 
+        # Worker threads run outside ComfyUI's normal prompt execution context.
+        # The sampling callback (latent_preview.py → comfy/utils.py → main.py hook)
+        # expects PromptServer.instance.last_prompt_id to exist. Set a dummy value
+        # so the progress bar callback doesn't crash with AttributeError.
+        try:
+            from server import PromptServer
+            if PromptServer and hasattr(PromptServer, 'instance') and PromptServer.instance is not None:
+                if not hasattr(PromptServer.instance, 'last_prompt_id'):
+                    PromptServer.instance.last_prompt_id = f"dist_worker_{self.worker_id}"
+                    print(f"[Worker {self.worker_id}] 🔧 Set last_prompt_id for sampling callbacks")
+        except Exception:
+            pass
+
         # Register with master
         self._register()
 

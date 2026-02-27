@@ -1323,6 +1323,15 @@ def _run_distributed_generation(
 
     dist_total = manager.get_status()["total"]
 
+    # Ensure last_prompt_id exists for sampling callbacks (some ComfyUI versions
+    # may not have it set when running inside the distributed code path)
+    try:
+        if PromptServer is not None and PromptServer.instance is not None:
+            if not hasattr(PromptServer.instance, 'last_prompt_id'):
+                PromptServer.instance.last_prompt_id = f"dist_master_{unique_id}"
+    except Exception:
+        pass
+
     # === Master local processing loop ===
     # Master claims jobs from its own distribution manager and processes them
     # using the same model loading, encoding, and generation code paths as the
