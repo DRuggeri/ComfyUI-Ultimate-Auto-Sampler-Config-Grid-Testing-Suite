@@ -298,7 +298,7 @@ class WorkerThread(threading.Thread):
             print(f"[Worker {self.worker_id}] 🔗 Applied LoRA: {lora_key}")
 
         # --- Prompt Encoding ---
-        # Build prompt with trigger words
+        # Build prompt with trigger words (always needed for metadata even if using master encoding)
         lora_triggerwords_mode = config.get("_lora_triggerwords_mode", "None")
         try:
             actual_positive, _ = build_prompt_with_triggers(config, lora_triggerwords_mode)
@@ -306,9 +306,21 @@ class WorkerThread(threading.Thread):
             actual_positive = config.get("positive", "")
         actual_negative = config.get("negative", "")
 
-        clip_skip = config.get("clip_skip", 0)
-        pos_cond = encode_prompt_with_combinators(self._patched_clip, actual_positive, clip_skip)
-        neg_cond = encode_prompt_with_combinators(self._patched_clip, actual_negative, clip_skip)
+        # Check for master pre-encoded conditionings (skip CLIP encoding if available)
+        encoded_pos = job.get("encoded_positive")
+        encoded_neg = job.get("encoded_negative")
+
+        if encoded_pos is not None and encoded_neg is not None:
+            # Master already encoded these prompts — deserialize and use directly
+            from .generation_orchestrator import _serializable_to_conditioning
+            pos_cond = _serializable_to_conditioning(encoded_pos)
+            neg_cond = _serializable_to_conditioning(encoded_neg)
+            print(f"[Worker {self.worker_id}] 🧠 Using master pre-encoded conditionings")
+        else:
+            # Fallback: encode locally with CLIP
+            clip_skip = config.get("clip_skip", 0)
+            pos_cond = encode_prompt_with_combinators(self._patched_clip, actual_positive, clip_skip)
+            neg_cond = encode_prompt_with_combinators(self._patched_clip, actual_negative, clip_skip)
 
         # --- Create Latent ---
         latent_channels = get_latent_channels(self._loaded_model, None)

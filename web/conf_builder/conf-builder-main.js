@@ -86,7 +86,8 @@ app.registerExtension({
                     global_negative: "",
                     distribution_enabled: false,
                     worker_urls: [],
-                    claim_timeout: 300,
+                    claim_timeout: 600,
+                    use_master_encoding: false,
                     config_arrays: [{
                         name: "Config 1",
                         samplers: ["euler", "dpmpp_2m"],
@@ -360,7 +361,8 @@ app.registerExtension({
                             // Migration: ensure distribution fields exist
                             if (this.state.distribution_enabled === undefined) this.state.distribution_enabled = false;
                             if (!this.state.worker_urls) this.state.worker_urls = [];
-                            if (this.state.claim_timeout === undefined) this.state.claim_timeout = 300;
+                            if (this.state.claim_timeout === undefined) this.state.claim_timeout = 600;
+                            if (this.state.use_master_encoding === undefined) this.state.use_master_encoding = false;
 
                             // Migration logic requiring utilities
                             this.state.config_arrays.forEach(arr => {

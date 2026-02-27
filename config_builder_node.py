@@ -638,7 +638,8 @@ class UltimateConfigBuilder:
             dist_config = json.dumps({
                 "enabled": True,
                 "worker_urls": [u for u in state["worker_urls"] if u and u.strip()],
-                "claim_timeout": state.get("claim_timeout", 300)
+                "claim_timeout": state.get("claim_timeout", 600),
+                "use_master_encoding": state.get("use_master_encoding", False)
             })
 
         # Return configs, session name, and distribution config

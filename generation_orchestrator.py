@@ -1225,6 +1225,210 @@ def _get_master_url():
     return f"http://{local_ip}:{port}"
 
 
+# === Conditioning Serialization Helpers ===
+# These convert ComfyUI conditioning tensors to/from JSON-serializable dicts
+# for transmitting pre-encoded conditionings from master to workers.
+# Pattern mirrors ConditioningCache._conditioning_to_dict/_dict_to_conditioning
+# but handles multi-entry conditionings (AND combinator creates multiple entries).
+
+def _conditioning_to_serializable(conditioning):
+    """
+    Convert a ComfyUI conditioning to a JSON-serializable list of dicts.
+
+    Args:
+        conditioning: ComfyUI format [[cond_tensor, {"pooled_output": pooled_tensor}], ...]
+                      May have multiple entries when AND combinator is used.
+
+    Returns:
+        list of dicts, each with base64-encoded tensor data:
+        [{"cond": {"data": ..., "shape": ..., "dtype": ...}, "pooled": {...}}, ...]
+    """
+    import base64
+    import numpy as np
+
+    entries = []
+    for cond_tensor, extra in conditioning:
+        cond_np = cond_tensor.cpu().numpy()
+        entry = {
+            "cond": {
+                "data": base64.b64encode(cond_np.tobytes()).decode('utf-8'),
+                "shape": list(cond_np.shape),
+                "dtype": str(cond_np.dtype)
+            }
+        }
+
+        pooled_tensor = extra.get("pooled_output") if isinstance(extra, dict) else None
+        if pooled_tensor is not None:
+            pooled_np = pooled_tensor.cpu().numpy()
+            entry["pooled"] = {
+                "data": base64.b64encode(pooled_np.tobytes()).decode('utf-8'),
+                "shape": list(pooled_np.shape),
+                "dtype": str(pooled_np.dtype)
+            }
+
+        entries.append(entry)
+
+    return entries
+
+
+def _serializable_to_conditioning(entries):
+    """
+    Convert a serialized list of dicts back to ComfyUI conditioning format.
+
+    Args:
+        entries: list of dicts with base64-encoded tensor data (from _conditioning_to_serializable)
+
+    Returns:
+        ComfyUI conditioning format [[cond_tensor, {"pooled_output": pooled_tensor}], ...]
+    """
+    import base64
+    import numpy as np
+
+    conditioning = []
+    for entry in entries:
+        # Reconstruct main conditioning tensor
+        cond_data = entry["cond"]
+        cond_bytes = base64.b64decode(cond_data["data"])
+        cond_np = np.frombuffer(cond_bytes, dtype=np.dtype(cond_data["dtype"])).reshape(
+            tuple(cond_data["shape"])
+        )
+        # .copy() is required because np.frombuffer returns a read-only array,
+        # and torch.from_numpy cannot send read-only arrays to GPU
+        cond_tensor = torch.from_numpy(cond_np.copy())
+
+        # Reconstruct pooled output if present
+        pooled_tensor = None
+        if "pooled" in entry:
+            pooled_data = entry["pooled"]
+            pooled_bytes = base64.b64decode(pooled_data["data"])
+            pooled_np = np.frombuffer(pooled_bytes, dtype=np.dtype(pooled_data["dtype"])).reshape(
+                tuple(pooled_data["shape"])
+            )
+            pooled_tensor = torch.from_numpy(pooled_np.copy())
+
+        conditioning.append([cond_tensor, {"pooled_output": pooled_tensor}])
+
+    return conditioning
+
+
+def _preencode_all_conditionings(
+    expanded, lora_triggerwords_mode, ckpt_name, use_remote_vae,
+    optional_model, optional_clip, optional_vae,
+    optional_positive, optional_negative, model_cache
+):
+    """
+    Pre-encode all unique prompts across all (model, LoRA) combinations.
+
+    Groups expanded configs by (model_key, lora_key), loads model+LoRA for each group,
+    encodes all unique prompts, serializes the conditionings using base64 encoding,
+    then cleans up.
+
+    Returns:
+        dict: {
+            "model_key|lora_key": {
+                "positive": {prompt_text: serialized_entries_list, ...},
+                "negative": {prompt_text: serialized_entries_list, ...}
+            },
+            ...
+        }
+        Empty dict if encoding fails or no configs to encode.
+    """
+    from collections import defaultdict
+    from .model_loader import load_loras_for_preencoding
+
+    # Group configs by (model_key, lora_key)
+    groups = defaultdict(list)
+    for conf in expanded:
+        model_key = get_model_cache_key(conf)
+        lora_key = conf.get("lora_expanded", conf.get("lora", "None"))
+        group_key = f"{model_key}|{lora_key}"
+        groups[group_key].append(conf)
+
+    print(f"[Distribution] 🧠 Found {len(groups)} unique (model, LoRA) group(s) to pre-encode")
+
+    encoded_all = {}
+
+    for group_key, configs in groups.items():
+        parts = group_key.split("|", 1)
+        lora_key = parts[1] if len(parts) > 1 else "None"
+        first_conf = configs[0]
+
+        print(f"[Distribution] 🧠 Pre-encoding group: model={first_conf['model']}, lora={lora_key}")
+
+        # Collect unique prompts for this group
+        unique_positives = set()
+        unique_negatives = set()
+        for conf in configs:
+            try:
+                actual_positive, _ = build_prompt_with_triggers(conf, lora_triggerwords_mode)
+            except Exception:
+                actual_positive = conf.get("positive", "")
+            actual_negative = conf.get("negative", "")
+            unique_positives.add(actual_positive)
+            unique_negatives.add(actual_negative)
+
+        print(f"[Distribution] 🧠   {len(unique_positives)} unique positive, "
+              f"{len(unique_negatives)} unique negative prompt(s)")
+
+        try:
+            # Load model + CLIP for this group
+            loaded_model, loaded_clip, loaded_vae = load_model_by_type(
+                first_conf, ckpt_name, use_remote_vae,
+                optional_model, optional_clip, optional_vae,
+                optional_positive, optional_negative, None, None,
+                model_cache=model_cache
+            )
+
+            # Apply LoRA to get patched CLIP
+            if lora_key != "None":
+                patched_model, patched_clip = load_loras_for_preencoding(
+                    loaded_model, loaded_clip, lora_key
+                )
+            else:
+                patched_model, patched_clip = loaded_model, loaded_clip
+
+            # Force CLIP onto GPU for encoding
+            import comfy.model_management as mm_enc
+            mm_enc.load_models_gpu([patched_clip.patcher], force_patch_weights=True)
+
+            clip_skip = first_conf.get("clip_skip", 0)
+
+            serialized_positive = {}
+            serialized_negative = {}
+
+            for prompt in unique_positives:
+                cond = encode_prompt_with_combinators(patched_clip, prompt, clip_skip)
+                serialized_positive[prompt] = _conditioning_to_serializable(cond)
+
+            for prompt in unique_negatives:
+                cond = encode_prompt_with_combinators(patched_clip, prompt, clip_skip)
+                serialized_negative[prompt] = _conditioning_to_serializable(cond)
+
+            encoded_all[group_key] = {
+                "positive": serialized_positive,
+                "negative": serialized_negative
+            }
+
+            print(f"[Distribution] 🧠   Encoded {len(serialized_positive)} positive, "
+                  f"{len(serialized_negative)} negative conditioning(s)")
+
+            # Cleanup patched references
+            del patched_model, patched_clip
+
+        except Exception as e:
+            print(f"[Distribution] ⚠️ Pre-encoding failed for group {group_key}: {e}")
+            import traceback
+            traceback.print_exc()
+            continue
+
+    # Final cleanup
+    gc.collect()
+    if torch.cuda.is_available():
+        torch.cuda.empty_cache()
+
+    return encoded_all
+
+
 def _run_distributed_generation(
     self, distribution_config, expanded, input_jobs, existing_data,
     overwrite_existing, has_optional_inputs, lora_triggerwords_mode,
@@ -1275,6 +1479,28 @@ def _run_distributed_generation(
     # Make manager accessible to API endpoints
     set_distribution_manager(manager)
     _send_distribution_status(manager)
+
+    # === Master pre-encoding phase (if enabled) ===
+    # When "Use Master Text Encoding" is on, pre-encode ALL unique prompts for all
+    # (model, LoRA) combinations. Workers will receive these conditionings with their
+    # job claims and skip CLIP encoding entirely.
+    use_master_encoding = distribution_config.get("use_master_encoding", False)
+    if use_master_encoding and not (optional_positive and optional_negative):
+        print(f"[Distribution] 🧠 MASTER PRE-ENCODING: Encoding all unique prompts for workers...")
+
+        encoded_conditionings = _preencode_all_conditionings(
+            expanded, lora_triggerwords_mode, ckpt_name, use_remote_vae,
+            optional_model, optional_clip, optional_vae,
+            optional_positive, optional_negative, model_cache
+        )
+
+        if encoded_conditionings:
+            manager.set_encoded_conditionings(encoded_conditionings)
+            print(f"[Distribution] 🧠 Pre-encoding complete, conditionings will be sent with job claims")
+        else:
+            print(f"[Distribution] ⚠️ Pre-encoding produced no results, workers will encode locally")
+    elif use_master_encoding and (optional_positive and optional_negative):
+        print(f"[Distribution] ⚠️ Master encoding disabled: optional conditioning inputs override prompts")
 
     # Early exit if all jobs were already completed (resume with nothing to do)
     initial_status = manager.get_status()
@@ -1703,6 +1929,18 @@ def _run_distributed_generation(
         print(f"[Distribution] ⏱️  {total_hours}h {total_minutes}m {total_seconds}s total")
         if final_status.get('failed', 0) > 0:
             print(f"[Distribution] ❌ {final_status['failed']} jobs failed permanently")
+
+        # Per-worker breakdown
+        workers = final_status.get("workers", {})
+        if workers:
+            print(f"[Distribution] 👥 Worker breakdown:")
+            print(f"[Distribution]   📌 master: {total_generated} jobs completed")
+            for wid, winfo in workers.items():
+                completed = winfo.get("jobs_completed", 0)
+                failed = winfo.get("jobs_failed", 0)
+                fail_str = f" ({failed} failed)" if failed > 0 else ""
+                print(f"[Distribution]   📌 {wid}: {completed} jobs completed{fail_str}")
+
         print(f"{'='*80}\n")
 
         # Send completion event to dashboard

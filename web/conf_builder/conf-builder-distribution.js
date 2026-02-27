@@ -17,7 +17,8 @@ export function renderDistributionSection(node, container) {
     // Ensure distribution state defaults exist
     if (node.state.distribution_enabled === undefined) node.state.distribution_enabled = false;
     if (!node.state.worker_urls) node.state.worker_urls = [];
-    if (node.state.claim_timeout === undefined) node.state.claim_timeout = 300;
+    if (node.state.claim_timeout === undefined) node.state.claim_timeout = 600;
+    if (node.state.use_master_encoding === undefined) node.state.use_master_encoding = false;
 
     // Enable/Disable toggle
     const toggleRow = document.createElement("div");
@@ -190,6 +191,32 @@ export function renderDistributionSection(node, container) {
             }
         );
         detailsContainer.appendChild(timeoutSlider);
+
+        // Use Master Text Encoding toggle
+        const encodingRow = document.createElement("div");
+        encodingRow.style.cssText = "display: flex; align-items: flex-start; gap: 10px; margin-top: 10px;";
+
+        const encodingLabel = document.createElement("label");
+        encodingLabel.className = "cb-toggle";
+        encodingLabel.style.fontSize = "12px";
+        const encodingCheckbox = document.createElement("input");
+        encodingCheckbox.type = "checkbox";
+        encodingCheckbox.checked = node.state.use_master_encoding;
+        encodingCheckbox.onchange = () => {
+            node.state.use_master_encoding = encodingCheckbox.checked;
+            node.saveState();
+        };
+        encodingLabel.appendChild(encodingCheckbox);
+        encodingLabel.appendChild(document.createTextNode(" Use Master Text Encoding"));
+        encodingRow.appendChild(encodingLabel);
+        detailsContainer.appendChild(encodingRow);
+
+        const encodingInfo = document.createElement("div");
+        encodingInfo.style.cssText = "font-size: 10px; color: #666; margin-top: 4px; line-height: 1.3; padding-left: 2px;";
+        encodingInfo.textContent = "Master pre-encodes all prompts and sends them to workers. "
+            + "Workers skip CLIP loading and text encoding, saving significant time. "
+            + "Disabled when optional conditioning inputs are connected.";
+        detailsContainer.appendChild(encodingInfo);
 
         content.appendChild(detailsContainer);
     }

@@ -52,7 +52,7 @@ class DistributionManager:
     MAX_FAIL_COUNT = 3
 
     def __init__(self, session_name, paths, unique_id, existing_data,
-                 claim_timeout_seconds=300):
+                 claim_timeout_seconds=600):
         self._lock = threading.Lock()
         self._jobs = {}               # job_id -> DistributedJob
         self._pending_queue = []      # List of job_ids in FIFO order
@@ -65,6 +65,10 @@ class DistributionManager:
         self._persistence_path = os.path.join(paths["base"], "distribution_state.json")
         self._active = True
         self._total_completed = 0
+        # Pre-encoded conditionings from master, keyed by "(model_key|lora_key)"
+        # Structure: {"model|lora": {"positive": {prompt: serialized}, "negative": {...}}}
+        # Populated by master pre-encoding phase; attached to job claim responses
+        self._encoded_conditionings = {}
 
     def populate_jobs(self, expanded_configs, input_jobs, existing_data,
                       overwrite_existing, has_optional_inputs, lora_triggerwords_mode):
@@ -349,6 +353,78 @@ class DistributionManager:
         with self._lock:
             return self._total_completed
 
+    def set_encoded_conditionings(self, encoded_dict):
+        """
+        Store pre-encoded conditionings from the master's pre-encoding phase.
+
+        Args:
+            encoded_dict: Dict keyed by "(model_cache_key|lora_key)" with structure:
+                {"positive": {prompt_text: serialized_list}, "negative": {prompt_text: serialized_list}}
+        """
+        with self._lock:
+            self._encoded_conditionings = encoded_dict
+            total_groups = len(encoded_dict)
+            total_prompts = sum(
+                len(v.get("positive", {})) + len(v.get("negative", {}))
+                for v in encoded_dict.values()
+            )
+            print(f"[Distribution] 🧠 Stored pre-encoded conditionings: "
+                  f"{total_groups} model/LoRA groups, {total_prompts} total prompt encodings")
+
+    def get_encoded_conditionings_for_job(self, job):
+        """
+        Look up pre-encoded conditionings for a specific job.
+
+        Uses the job's config to compute the group key and prompt text,
+        then returns the matching serialized positive/negative conditionings.
+
+        Args:
+            job: DistributedJob instance
+
+        Returns:
+            dict with "encoded_positive" and "encoded_negative" keys, or None if not available.
+        """
+        if not self._encoded_conditionings:
+            return None
+
+        try:
+            from .generation_orchestrator import get_model_cache_key
+            from .trigger_words import build_prompt_with_triggers
+
+            config = job.config
+
+            # Build the group key: "model_cache_key|lora_key"
+            model_key = get_model_cache_key(config)
+            lora_key = config.get("lora_expanded", config.get("lora", "None"))
+            group_key = f"{model_key}|{lora_key}"
+
+            group = self._encoded_conditionings.get(group_key)
+            if not group:
+                return None
+
+            # Build the actual prompt text (with trigger words applied)
+            lora_triggerwords_mode = config.get("_lora_triggerwords_mode", "None")
+            try:
+                actual_positive, _ = build_prompt_with_triggers(config, lora_triggerwords_mode)
+            except Exception:
+                actual_positive = config.get("positive", "")
+            actual_negative = config.get("negative", "")
+
+            encoded_positive = group.get("positive", {}).get(actual_positive)
+            encoded_negative = group.get("negative", {}).get(actual_negative)
+
+            if encoded_positive is not None and encoded_negative is not None:
+                return {
+                    "encoded_positive": encoded_positive,
+                    "encoded_negative": encoded_negative
+                }
+
+            return None
+
+        except Exception as e:
+            print(f"[Distribution] ⚠️ Error looking up conditionings for job {job.job_id}: {e}")
+            return None
+
     def _release_timed_out_jobs(self):
         """
         Release jobs that have been claimed but not completed within timeout.
@@ -401,14 +477,25 @@ class DistributionManager:
         Note: input_job latent tensors are NOT included (workers create their own).
         Config is round-tripped through JSON to ensure all values are serializable
         (e.g. numpy int64 → Python int, sets → lists, etc.).
+        If pre-encoded conditionings are available, they are attached to the response
+        so workers can skip CLIP encoding entirely.
         """
         try:
             safe_config = json.loads(json.dumps(job.config, default=str))
         except Exception:
             safe_config = job.config
-        return {
+
+        result = {
             "job_id": job.job_id,
             "config": safe_config,
             "input_job": job.input_job,
             "gen_index": job.gen_index
         }
+
+        # Attach pre-encoded conditionings if available (master encoding feature)
+        encoded = self.get_encoded_conditionings_for_job(job)
+        if encoded:
+            result["encoded_positive"] = encoded["encoded_positive"]
+            result["encoded_negative"] = encoded["encoded_negative"]
+
+        return result
