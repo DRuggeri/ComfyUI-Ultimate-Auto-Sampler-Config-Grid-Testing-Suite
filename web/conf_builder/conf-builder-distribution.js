@@ -137,28 +137,36 @@ export function renderDistributionSection(node, container) {
                 if (dot) dot.style.background = "#cc0"; // yellow = testing
 
                 try {
-                    const resp = await fetch(
-                        `${url.replace(/\/$/, "")}/distribution/worker_status`,
-                        { signal: AbortSignal.timeout(5000) }
-                    );
+                    // Proxy through master backend to avoid CORS issues
+                    // (browser can't fetch cross-origin worker URLs directly)
+                    const resp = await fetch("/distribution/test_worker", {
+                        method: "POST",
+                        headers: { "Content-Type": "application/json" },
+                        body: JSON.stringify({ worker_url: url })
+                    });
                     if (resp.ok) {
                         const data = await resp.json();
                         if (dot) {
-                            dot.style.background = "#0c0"; // green = reachable
-                            dot.title = data.status === "busy"
-                                ? `Busy (${data.jobs_processed} jobs done)`
-                                : "Idle - Ready";
+                            if (data.reachable) {
+                                dot.style.background = "#0c0"; // green = reachable
+                                dot.title = data.status === "busy"
+                                    ? `Busy (${data.jobs_processed} jobs done)`
+                                    : "Idle - Ready";
+                            } else {
+                                dot.style.background = "#c00"; // red = error
+                                dot.title = `Unreachable: ${data.error}`;
+                            }
                         }
                     } else {
                         if (dot) {
                             dot.style.background = "#c00"; // red = error
-                            dot.title = `HTTP ${resp.status}`;
+                            dot.title = `Proxy error: HTTP ${resp.status}`;
                         }
                     }
                 } catch (e) {
                     if (dot) {
                         dot.style.background = "#c00";
-                        dot.title = `Unreachable: ${e.message}`;
+                        dot.title = `Error: ${e.message}`;
                     }
                 }
             }

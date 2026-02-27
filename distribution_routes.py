@@ -348,6 +348,60 @@ async def stop_worker(request):
 
 
 # =============================================================================
+# PROXY ENDPOINT - Avoids CORS when browser tests worker connections
+# =============================================================================
+
+@server.PromptServer.instance.routes.post("/distribution/test_worker")
+async def test_worker_connection(request):
+    """
+    Proxy endpoint for the Config Builder UI to test if a remote worker is reachable.
+    The browser cannot fetch cross-origin worker URLs directly (CORS), so this
+    server-side route makes the request on behalf of the frontend.
+
+    Request body:
+        worker_url: The worker's base URL to test (e.g., "http://192.168.1.10:8188")
+
+    Returns:
+        200 + JSON with worker status on success
+        200 + JSON with error info on failure (so the UI always gets a parseable response)
+    """
+    import urllib.request
+    import urllib.error
+
+    try:
+        data = await request.json()
+        worker_url = data.get("worker_url", "").strip().rstrip("/")
+
+        if not worker_url:
+            return web.json_response({"reachable": False, "error": "Empty URL"})
+
+        req = urllib.request.Request(
+            f"{worker_url}/distribution/worker_status",
+            method="GET"
+        )
+
+        with urllib.request.urlopen(req, timeout=5) as resp:
+            result = json.loads(resp.read().decode("utf-8"))
+            return web.json_response({
+                "reachable": True,
+                "status": result.get("status", "unknown"),
+                "worker_id": result.get("worker_id", ""),
+                "jobs_processed": result.get("jobs_processed", 0)
+            })
+
+    except urllib.error.HTTPError as e:
+        return web.json_response({
+            "reachable": False,
+            "error": f"HTTP {e.code}"
+        })
+    except Exception as e:
+        return web.json_response({
+            "reachable": False,
+            "error": str(e)
+        })
+
+
+# =============================================================================
 # HELPERS
 # =============================================================================
 
