@@ -514,6 +514,26 @@ export function convertStateToConfigs(state) {
             config.attention_mode = attentionModes.length > 1 ? attentionModes : attentionModes[0];
         }
 
+        // Add extra model & sampling options if enabled
+        if (configArray.model_sampling_override && configArray.model_sampling_override !== "none") {
+            config.model_sampling_override = configArray.model_sampling_override;
+            if (configArray.model_sampling_override === "flux") {
+                config.model_sampling_flux_max_shift = configArray.model_sampling_flux_max_shift || "1.15";
+                config.model_sampling_flux_base_shift = configArray.model_sampling_flux_base_shift || "0.5";
+            } else {
+                config.model_sampling_shift = configArray.model_sampling_shift || "1.73";
+            }
+        }
+        if (configArray.use_advanced_sampling) {
+            config.use_advanced_sampling = true;
+            config.advanced_guider = configArray.advanced_guider || "cfg_guider";
+            config.advanced_scheduler = configArray.advanced_scheduler || "basic";
+        }
+        if (configArray.use_flux_guidance) {
+            config.use_flux_guidance = true;
+            config.flux_guidance_value = configArray.flux_guidance_value || "3.5";
+        }
+
         // Add VAE if any are selected (not "None")
         if (vaes.length > 0) {
             config.vae = vaes.length > 1 ? vaes : vaes[0];
@@ -792,7 +812,17 @@ export function convertConfigsToConfigArrays(configs) {
             model_prompt_suffix: config.model_prompt_suffix || "",
             attention_modes: config.attention_mode
                 ? (Array.isArray(config.attention_mode) ? config.attention_mode : [config.attention_mode])
-                : ["default"]
+                : ["default"],
+            // Extra model & sampling options
+            model_sampling_override: config.model_sampling_override || "none",
+            model_sampling_shift: config.model_sampling_shift || "1.73",
+            model_sampling_flux_max_shift: config.model_sampling_flux_max_shift || "1.15",
+            model_sampling_flux_base_shift: config.model_sampling_flux_base_shift || "0.5",
+            use_advanced_sampling: config.use_advanced_sampling || false,
+            advanced_guider: config.advanced_guider || "cfg_guider",
+            advanced_scheduler: config.advanced_scheduler || "basic",
+            use_flux_guidance: config.use_flux_guidance || false,
+            flux_guidance_value: config.flux_guidance_value || "3.5"
         });
     });
 
