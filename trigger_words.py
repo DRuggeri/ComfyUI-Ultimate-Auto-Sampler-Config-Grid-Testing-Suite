@@ -176,6 +176,9 @@ def collect_unique_prompts_with_triggers(expanded_configs, lora_triggerwords_mod
                 lookup_triggers=True
             )
 
+            if not trigger_list:
+                print(f"[GridTester] ℹ️ No trigger words found for LoRA: {conf['lora'][:60]}")
+
             if trigger_list:
                 # Parse the lora string to get individual loras
                 active_loras = parse_lora_definition(conf["lora"])
@@ -239,6 +242,21 @@ def collect_unique_prompts_with_triggers(expanded_configs, lora_triggerwords_mod
 
 
 _build_prompt_cache = {}
+
+
+def clear_trigger_caches():
+    """
+    Clear all trigger word caches. Must be called at the start of each generation run
+    to ensure trigger words are re-read from loras_tags.json (which may have been updated
+    by a previous run's CivitAI fetch or manual edit).
+
+    Without this, @lru_cache on _get_filtered_lora_triggers_cached and the module-level
+    _build_prompt_cache dict persist stale results across runs within the same ComfyUI session.
+    """
+    global _build_prompt_cache
+    _build_prompt_cache.clear()
+    _get_filtered_lora_triggers_cached.cache_clear()
+    print("[GridTester] 🔄 Trigger word caches cleared")
 
 
 def _apply_model_prompt_affixes(prompt, config):
@@ -334,6 +352,8 @@ def build_prompt_with_triggers(config, lora_triggerwords_mode):
     trigger_string = ""
     if all_triggers:
         trigger_string = ", " + ", ".join(all_triggers)
+        print(f"[GridTester] 🏷️ Trigger words for {config['lora'][:40]}: {', '.join(all_triggers[:5])}" +
+              (f" (+{len(all_triggers)-5} more)" if len(all_triggers) > 5 else ""))
 
     # Build the full prompt with triggers in correct positions
     parts = []

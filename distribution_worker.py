@@ -18,6 +18,12 @@ import urllib.parse
 import torch
 
 
+class _MasterFinishedError(Exception):
+    """Raised when the master has deactivated (503 on submit).
+    Not a real error — means master already completed all jobs."""
+    pass
+
+
 class WorkerThread(threading.Thread):
     """
     Background thread that polls master for jobs and processes them.
@@ -73,14 +79,16 @@ class WorkerThread(threading.Thread):
         # Register with master
         self._register()
 
-        last_heartbeat = time.time()
+        # Start background heartbeat thread so heartbeats flow even during
+        # long-running job processing (model loading, generation, etc.).
+        # Without this, the main loop blocks on _process_job() and no heartbeats
+        # are sent, causing the master to wrongly reclaim jobs from slow workers.
+        self._heartbeat_thread = threading.Thread(
+            target=self._heartbeat_loop, daemon=True
+        )
+        self._heartbeat_thread.start()
 
         while not self._stop_event.is_set():
-            # Periodic heartbeat
-            if time.time() - last_heartbeat > self.heartbeat_interval:
-                self._send_heartbeat()
-                last_heartbeat = time.time()
-
             # Claim a job
             job = self._claim_job()
 
@@ -117,6 +125,14 @@ class WorkerThread(threading.Thread):
                     gc.collect()
                     if torch.cuda.is_available():
                         torch.cuda.empty_cache()
+
+            except _MasterFinishedError:
+                # Master has shut down (503 on submit). This is NOT a failure —
+                # the master already finished all jobs (possibly reclaimed ours).
+                # Stop gracefully instead of reporting failure.
+                print(f"[Worker {self.worker_id}] 🏁 Master finished before we could submit "
+                      f"job {job['job_id']} — stopping gracefully")
+                break
 
             except Exception as e:
                 # Check if ComfyUI interrupted processing on this worker
@@ -412,6 +428,20 @@ class WorkerThread(threading.Thread):
                         raise RuntimeError(f"Submit failed: HTTP {resp.status}")
                 return  # Success
 
+            except urllib.error.HTTPError as e:
+                # 503 = master deactivated (all jobs done). Don't retry — it won't help.
+                # Raise a special exception so the main loop can stop gracefully.
+                if e.code == 503:
+                    raise _MasterFinishedError(
+                        f"Master distribution is no longer active (HTTP 503)"
+                    )
+                last_error = e
+                if attempt < max_retries - 1:
+                    wait = 2 ** attempt  # Exponential backoff: 1s, 2s, 4s
+                    print(f"[Worker {self.worker_id}] ⚠️ Submit retry {attempt + 1}/{max_retries} "
+                          f"for job {job_id}: {e} (waiting {wait}s)")
+                    time.sleep(wait)
+
             except (urllib.error.URLError, ConnectionError, OSError) as e:
                 last_error = e
                 if attempt < max_retries - 1:
@@ -435,6 +465,17 @@ class WorkerThread(threading.Thread):
             urllib.request.urlopen(req, timeout=5)
         except Exception:
             pass
+
+    def _heartbeat_loop(self):
+        """
+        Background heartbeat loop. Runs in a separate daemon thread so that
+        heartbeats are sent continuously even while _process_job() blocks the
+        main worker loop. This prevents the master from incorrectly reclaiming
+        jobs from slow-but-alive workers.
+        """
+        while not self._stop_event.is_set():
+            self._send_heartbeat()
+            self._stop_event.wait(self.heartbeat_interval)
 
     def _report_failure(self, job_id, error):
         """Report job failure to master."""

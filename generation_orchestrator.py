@@ -8,13 +8,14 @@ import json
 import time
 import re
 import gc
+import threading
 import torch
 import hashlib
 import folder_paths
 import comfy.sd  # Required for async workers
 from comfy.model_management import InterruptProcessingException
 
-from .trigger_words import collect_unique_prompts_with_triggers, build_prompt_with_triggers
+from .trigger_words import collect_unique_prompts_with_triggers, build_prompt_with_triggers, clear_trigger_caches
 from .batch_encoding import batch_encode_prompts, encode_prompt_with_combinators
 from .manifest_utils import load_existing_manifest, save_manifest
 from .model_loader import (
@@ -278,6 +279,11 @@ def run_generation_loop(
     distribution_config=None
 ):
     """Main generation loop orchestrator."""
+
+    # Clear stale trigger word caches from previous runs (within same ComfyUI session).
+    # Without this, @lru_cache and _build_prompt_cache can serve outdated results
+    # if loras_tags.json was updated by a CivitAI fetch in a prior run.
+    clear_trigger_caches()
 
     from .model_cache import ModelCache
 
@@ -1886,7 +1892,17 @@ def _run_distributed_generation(
     # === Finalization ===
     stop_all_workers(worker_urls)
     manager.deactivate()
-    set_distribution_manager(None)
+
+    # Don't set_distribution_manager(None) immediately — a slow worker may still
+    # be in the middle of submitting a result. The submit_result route only needs
+    # manager != None (it does NOT check is_active). Deactivation already prevents
+    # new job claims (claim_job returns 503). Delay the cleanup with a daemon thread
+    # so in-flight submissions can still be processed as duplicates.
+    def _delayed_manager_cleanup():
+        time.sleep(30)
+        set_distribution_manager(None)
+
+    threading.Thread(target=_delayed_manager_cleanup, daemon=True).start()
 
     _cleanup_per_config_remote_workers(per_config_remote_workers)
     if remote_vae_worker:
@@ -1938,8 +1954,14 @@ def _run_distributed_generation(
             for wid, winfo in workers.items():
                 completed = winfo.get("jobs_completed", 0)
                 failed = winfo.get("jobs_failed", 0)
-                fail_str = f" ({failed} failed)" if failed > 0 else ""
-                print(f"[Distribution]   📌 {wid}: {completed} jobs completed{fail_str}")
+                duplicated = winfo.get("jobs_duplicated", 0)
+                parts = []
+                if failed > 0:
+                    parts.append(f"{failed} failed")
+                if duplicated > 0:
+                    parts.append(f"{duplicated} late/duplicate")
+                extra_str = f" ({', '.join(parts)})" if parts else ""
+                print(f"[Distribution]   📌 {wid}: {completed} jobs completed{extra_str}")
 
         print(f"{'='*80}\n")
 

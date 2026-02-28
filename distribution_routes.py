@@ -154,6 +154,12 @@ async def submit_result(request):
                     os.remove(filepath)
             except Exception:
                 pass
+            # Track that this worker did real work (even though result was a duplicate)
+            submit_worker_id = metadata_json.get("worker_id")
+            if submit_worker_id:
+                manager.record_late_submission(submit_worker_id)
+                print(f"[Distribution] ℹ️ Late submission from worker {submit_worker_id} "
+                      f"for job {job_id} (already completed, duplicate cleaned up)")
             return web.Response(status=200, text="Duplicate (ignored)")
 
         # Update manifest on disk (thread-safe)

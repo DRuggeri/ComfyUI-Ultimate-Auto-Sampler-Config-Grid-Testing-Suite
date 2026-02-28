@@ -299,9 +299,25 @@ class DistributionManager:
                 "last_heartbeat": time.time(),
                 "jobs_completed": 0,
                 "jobs_failed": 0,
+                "jobs_duplicated": 0,
                 "status": "idle"
             }
             print(f"[Distribution] 🤝 Worker registered: {worker_id} ({worker_url})")
+
+    def record_late_submission(self, worker_id):
+        """
+        Record a duplicate/late submission from a worker.
+
+        Called when a worker submits a result for a job that was already completed
+        (e.g. because the job timed out, was reclaimed by master, and completed
+        before the worker finished). The worker did real work — this tracks it.
+
+        Args:
+            worker_id: The worker that submitted late
+        """
+        with self._lock:
+            if worker_id in self._workers:
+                self._workers[worker_id]["jobs_duplicated"] += 1
 
     def get_status(self):
         """Return overall progress status."""
@@ -429,6 +445,11 @@ class DistributionManager:
         """
         Release jobs that have been claimed but not completed within timeout.
         Must be called with lock held.
+
+        Uses the worker's last heartbeat timestamp (not just job claimed_at) to
+        determine if the worker is still alive. A slow-but-alive worker that
+        sends heartbeats will NOT have its jobs reclaimed. Only workers that
+        have stopped heartbeating (crash/disconnect) will have jobs reclaimed.
         """
         now = time.time()
         released = 0
@@ -437,8 +458,19 @@ class DistributionManager:
                     and job.worker_id != "master"
                     and job.claimed_at
                     and now - job.claimed_at > self.claim_timeout):
+
+                # Check if the worker is still heartbeating — if so, it's alive
+                # and just slow (e.g. slow GPU, first-time model loading).
+                # Only reclaim if the worker has gone silent.
+                worker = self._workers.get(job.worker_id)
+                if worker:
+                    last_hb = worker.get("last_heartbeat", 0)
+                    if now - last_hb < self.claim_timeout:
+                        # Worker is still alive — don't reclaim
+                        continue
+
                 print(f"[Distribution] ⏰ Job {job.job_id} timed out "
-                      f"from worker {job.worker_id}, re-queuing")
+                      f"from worker {job.worker_id} (no heartbeat), re-queuing")
                 job.state = JobState.PENDING
                 job.worker_id = None
                 job.claimed_at = None
