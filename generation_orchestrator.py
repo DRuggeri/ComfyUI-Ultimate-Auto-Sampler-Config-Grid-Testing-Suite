@@ -1023,12 +1023,33 @@ def run_generation_loop(
                 if attention_mode != "default":
                     print(f"[GridTester] 🧠 Using attention mode: {attention_mode}")
 
+                # Log active extra options
+                extra_opts = []
+                if conf.get("model_sampling_override", "none") != "none":
+                    extra_opts.append(f"model_sampling={conf['model_sampling_override']}")
+                if conf.get("use_advanced_sampling", False):
+                    extra_opts.append(f"advanced({conf.get('advanced_guider','cfg_guider')}/{conf.get('advanced_scheduler','basic')})")
+                if conf.get("flux_guidance_value", 0) and float(conf.get("flux_guidance_value", 0)) > 0:
+                    extra_opts.append(f"flux_guidance={conf['flux_guidance_value']}")
+                if extra_opts:
+                    print(f"[GridTester] ⚙️ Extra options: {', '.join(extra_opts)}")
+
                 result_latent, duration = generate_image(
                     patched_model, current_seed, conf["steps"], conf["cfg"],
                     conf["sampler"], conf["scheduler"], final_positive, final_negative,
-                    latent_in, conf["denoise"], attention_mode=attention_mode
+                    latent_in, conf["denoise"], attention_mode=attention_mode,
+                    model_sampling_override=conf.get("model_sampling_override", "none"),
+                    model_sampling_shift=conf.get("model_sampling_shift", 1.73),
+                    model_sampling_flux_max_shift=conf.get("model_sampling_flux_max_shift", 1.15),
+                    model_sampling_flux_base_shift=conf.get("model_sampling_flux_base_shift", 0.5),
+                    use_advanced_sampling=conf.get("use_advanced_sampling", False),
+                    advanced_guider=conf.get("advanced_guider", "cfg_guider"),
+                    advanced_scheduler=conf.get("advanced_scheduler", "basic"),
+                    flux_guidance_value=conf.get("flux_guidance_value", 0.0),
+                    width=w,
+                    height=h
                 )
-                
+
                 job_durations.append(duration)
                 eta_info = calculate_eta(job_durations, current_job, total_jobs)
                 if eta_info:
@@ -1735,10 +1756,32 @@ def _run_distributed_generation(
             # --- Generate Image ---
             try:
                 attention_mode = conf.get("attention_mode", "default")
+
+                # Log active extra options
+                extra_opts = []
+                if conf.get("model_sampling_override", "none") != "none":
+                    extra_opts.append(f"model_sampling={conf['model_sampling_override']}")
+                if conf.get("use_advanced_sampling", False):
+                    extra_opts.append(f"advanced({conf.get('advanced_guider','cfg_guider')}/{conf.get('advanced_scheduler','basic')})")
+                if conf.get("flux_guidance_value", 0) and float(conf.get("flux_guidance_value", 0)) > 0:
+                    extra_opts.append(f"flux_guidance={conf['flux_guidance_value']}")
+                if extra_opts:
+                    print(f"[GridTester] ⚙️ Extra options: {', '.join(extra_opts)}")
+
                 result_latent, duration = generate_image(
                     patched_model, current_seed, conf["steps"], conf["cfg"],
                     conf["sampler"], conf["scheduler"], final_positive, final_negative,
-                    latent_in, conf["denoise"], attention_mode=attention_mode
+                    latent_in, conf["denoise"], attention_mode=attention_mode,
+                    model_sampling_override=conf.get("model_sampling_override", "none"),
+                    model_sampling_shift=conf.get("model_sampling_shift", 1.73),
+                    model_sampling_flux_max_shift=conf.get("model_sampling_flux_max_shift", 1.15),
+                    model_sampling_flux_base_shift=conf.get("model_sampling_flux_base_shift", 0.5),
+                    use_advanced_sampling=conf.get("use_advanced_sampling", False),
+                    advanced_guider=conf.get("advanced_guider", "cfg_guider"),
+                    advanced_scheduler=conf.get("advanced_scheduler", "basic"),
+                    flux_guidance_value=conf.get("flux_guidance_value", 0.0),
+                    width=w,
+                    height=h
                 )
 
                 job_durations.append(duration)
