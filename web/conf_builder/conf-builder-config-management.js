@@ -1929,6 +1929,349 @@ export function renderVAEsSection(node, div, configArray, arrayIdx, modelLists) 
     div.appendChild(vaeGrid);
 }
 
+// --- EXTRA MODEL & SAMPLING OPTIONS SECTION ---
+
+export function renderExtraModelSamplingSection(node, div, configArray, arrayIdx) {
+    // Default collapsed per design
+    const isSectionCollapsed = node.uiState.extraOptionsSectionCollapsed?.[arrayIdx] !== false;
+
+    const sectionGrid = document.createElement("div");
+    sectionGrid.className = "cb-list-grid";
+
+    const sectionHeader = document.createElement("div");
+    sectionHeader.className = "cb-section-toggle";
+    sectionHeader.style.cssText = "padding: 8px; background: #3a3a3a; border-radius: 4px; margin-bottom: 8px; font-weight: bold; color: #ffaa00;";
+
+    const titleSpan = document.createElement("span");
+    titleSpan.textContent = "Extra Model & Sampling Options";
+    sectionHeader.appendChild(titleSpan);
+
+    const arrowSpan = document.createElement("span");
+    arrowSpan.textContent = isSectionCollapsed ? "▶" : "▼";
+    sectionHeader.appendChild(arrowSpan);
+
+    sectionGrid.appendChild(sectionHeader);
+
+    const contentContainer = document.createElement("div");
+    contentContainer.style.display = isSectionCollapsed ? "none" : "contents";
+
+    sectionHeader.onclick = () => {
+        const isNowCollapsed = contentContainer.style.display === "none";
+        if (isNowCollapsed) {
+            contentContainer.style.display = "contents";
+            arrowSpan.textContent = "▼";
+            if (!node.uiState.extraOptionsSectionCollapsed) node.uiState.extraOptionsSectionCollapsed = {};
+            node.uiState.extraOptionsSectionCollapsed[arrayIdx] = true;
+        } else {
+            contentContainer.style.display = "none";
+            arrowSpan.textContent = "▶";
+            if (!node.uiState.extraOptionsSectionCollapsed) node.uiState.extraOptionsSectionCollapsed = {};
+            node.uiState.extraOptionsSectionCollapsed[arrayIdx] = false;
+        }
+    };
+
+    const innerWrapper = document.createElement("div");
+    innerWrapper.style.cssText = "padding: 4px 8px; display: flex; flex-direction: column; gap: 12px;";
+
+    // ========== SUB-GROUP 1: Model Sampling Override ==========
+    const group1 = document.createElement("div");
+    group1.style.cssText = "border-left: 3px solid #ffaa00; padding-left: 8px;";
+
+    const group1Header = document.createElement("div");
+    group1Header.style.cssText = "font-size: 11px; font-weight: bold; margin-bottom: 4px; color: #ffaa00;";
+    group1Header.textContent = "MODEL SAMPLING OVERRIDE";
+    group1.appendChild(group1Header);
+
+    const group1Info = document.createElement("div");
+    group1Info.style.cssText = "font-size: 10px; color: #888; font-style: italic; margin-bottom: 6px;";
+    group1Info.textContent = "Patches the model's internal noise schedule for specific model families";
+    group1.appendChild(group1Info);
+
+    // Dropdown: None / AuraFlow / Flux / SD3
+    const overrideRow = document.createElement("div");
+    overrideRow.style.cssText = "display: flex; gap: 6px; align-items: center; margin-bottom: 6px;";
+    const overrideLabel = document.createElement("label");
+    overrideLabel.textContent = "Override:";
+    overrideLabel.style.cssText = "color: #aaa; font-size: 11px; white-space: nowrap; min-width: 55px;";
+    overrideRow.appendChild(overrideLabel);
+
+    const overrideSelect = document.createElement("select");
+    overrideSelect.className = "cb-select";
+    overrideSelect.style.cssText = "flex: 1; max-width: 200px;";
+    [["none", "None"], ["aura_flow", "AuraFlow (Qwen Image)"], ["flux", "Flux"], ["sd3", "SD3"]].forEach(([val, label]) => {
+        const opt = document.createElement("option");
+        opt.value = val;
+        opt.textContent = label;
+        if (configArray.model_sampling_override === val) opt.selected = true;
+        overrideSelect.appendChild(opt);
+    });
+    overrideRow.appendChild(overrideSelect);
+    group1.appendChild(overrideRow);
+
+    // Conditional params container
+    const paramsContainer = document.createElement("div");
+    paramsContainer.style.cssText = "margin-top: 4px;";
+
+    function updateParamsVisibility() {
+        paramsContainer.innerHTML = "";
+        const override = configArray.model_sampling_override;
+
+        if (override === "aura_flow" || override === "sd3") {
+            // Single shift param
+            const row = document.createElement("div");
+            row.style.cssText = "display: flex; gap: 6px; align-items: center; margin-bottom: 4px;";
+            const lbl = document.createElement("label");
+            lbl.textContent = "Shift:";
+            lbl.style.cssText = "color: #aaa; font-size: 11px; white-space: nowrap; min-width: 55px;";
+            row.appendChild(lbl);
+            const inp = document.createElement("input");
+            inp.type = "text";
+            inp.className = "cb-input";
+            inp.style.cssText = "width: 120px;";
+            inp.value = configArray.model_sampling_shift || (override === "sd3" ? "3.0" : "1.73");
+            inp.placeholder = override === "sd3" ? "3.0" : "1.73";
+            inp.title = "Comma-separated values for grid testing";
+            inp.onchange = () => {
+                configArray.model_sampling_shift = inp.value;
+                node.saveState();
+            };
+            row.appendChild(inp);
+            const hint = document.createElement("span");
+            hint.style.cssText = "font-size: 10px; color: #666;";
+            hint.textContent = override === "sd3" ? "(default: 3.0, multiplier: 1000)" : "(default: 1.73, multiplier: 1.0)";
+            row.appendChild(hint);
+            paramsContainer.appendChild(row);
+        } else if (override === "flux") {
+            // Max shift
+            const row1 = document.createElement("div");
+            row1.style.cssText = "display: flex; gap: 6px; align-items: center; margin-bottom: 4px;";
+            const lbl1 = document.createElement("label");
+            lbl1.textContent = "Max Shift:";
+            lbl1.style.cssText = "color: #aaa; font-size: 11px; white-space: nowrap; min-width: 55px;";
+            row1.appendChild(lbl1);
+            const inp1 = document.createElement("input");
+            inp1.type = "text";
+            inp1.className = "cb-input";
+            inp1.style.cssText = "width: 120px;";
+            inp1.value = configArray.model_sampling_flux_max_shift || "1.15";
+            inp1.placeholder = "1.15";
+            inp1.title = "Comma-separated values for grid testing";
+            inp1.onchange = () => {
+                configArray.model_sampling_flux_max_shift = inp1.value;
+                node.saveState();
+            };
+            row1.appendChild(inp1);
+            paramsContainer.appendChild(row1);
+
+            // Base shift
+            const row2 = document.createElement("div");
+            row2.style.cssText = "display: flex; gap: 6px; align-items: center; margin-bottom: 4px;";
+            const lbl2 = document.createElement("label");
+            lbl2.textContent = "Base Shift:";
+            lbl2.style.cssText = "color: #aaa; font-size: 11px; white-space: nowrap; min-width: 55px;";
+            row2.appendChild(lbl2);
+            const inp2 = document.createElement("input");
+            inp2.type = "text";
+            inp2.className = "cb-input";
+            inp2.style.cssText = "width: 120px;";
+            inp2.value = configArray.model_sampling_flux_base_shift || "0.5";
+            inp2.placeholder = "0.5";
+            inp2.title = "Comma-separated values for grid testing";
+            inp2.onchange = () => {
+                configArray.model_sampling_flux_base_shift = inp2.value;
+                node.saveState();
+            };
+            row2.appendChild(inp2);
+            paramsContainer.appendChild(row2);
+
+            const hint = document.createElement("div");
+            hint.style.cssText = "font-size: 10px; color: #666;";
+            hint.textContent = "Dynamic shift computed from image dimensions";
+            paramsContainer.appendChild(hint);
+        }
+    }
+
+    overrideSelect.onchange = () => {
+        configArray.model_sampling_override = overrideSelect.value;
+        updateParamsVisibility();
+        node.saveState();
+    };
+    updateParamsVisibility();
+    group1.appendChild(paramsContainer);
+    innerWrapper.appendChild(group1);
+
+    // ========== SUB-GROUP 2: Advanced Sampling Pipeline ==========
+    const group2 = document.createElement("div");
+    group2.style.cssText = "border-left: 3px solid #ffaa00; padding-left: 8px;";
+
+    const group2Header = document.createElement("div");
+    group2Header.style.cssText = "font-size: 11px; font-weight: bold; margin-bottom: 4px; color: #ffaa00;";
+    group2Header.textContent = "ADVANCED SAMPLING PIPELINE";
+    group2.appendChild(group2Header);
+
+    const group2Info = document.createElement("div");
+    group2Info.style.cssText = "font-size: 10px; color: #888; font-style: italic; margin-bottom: 6px;";
+    group2Info.textContent = "Replaces KSampler with explicit SamplerCustomAdvanced flow (Noise + Guider + Sampler + Sigmas)";
+    group2.appendChild(group2Info);
+
+    // Toggle checkbox
+    const toggleRow = document.createElement("div");
+    toggleRow.style.cssText = "display: flex; gap: 6px; align-items: center; margin-bottom: 6px;";
+    const toggleLabel = document.createElement("label");
+    toggleLabel.style.cssText = "display: flex; align-items: center; gap: 6px; cursor: pointer;";
+    const toggleCheck = document.createElement("input");
+    toggleCheck.type = "checkbox";
+    toggleCheck.checked = configArray.use_advanced_sampling || false;
+    toggleCheck.style.cssText = "cursor: pointer;";
+    toggleLabel.appendChild(toggleCheck);
+    const toggleText = document.createElement("span");
+    toggleText.textContent = "Enable Advanced Sampling";
+    toggleText.style.cssText = "color: #ccc; font-size: 11px;";
+    toggleLabel.appendChild(toggleText);
+    toggleRow.appendChild(toggleLabel);
+    group2.appendChild(toggleRow);
+
+    // Sub-options container (shown when enabled)
+    const advancedOpts = document.createElement("div");
+    advancedOpts.style.cssText = "margin-left: 12px;";
+    advancedOpts.style.display = configArray.use_advanced_sampling ? "block" : "none";
+
+    // Guider dropdown
+    const guiderRow = document.createElement("div");
+    guiderRow.style.cssText = "display: flex; gap: 6px; align-items: center; margin-bottom: 4px;";
+    const guiderLabel = document.createElement("label");
+    guiderLabel.textContent = "Guider:";
+    guiderLabel.style.cssText = "color: #aaa; font-size: 11px; white-space: nowrap; min-width: 55px;";
+    guiderRow.appendChild(guiderLabel);
+    const guiderSelect = document.createElement("select");
+    guiderSelect.className = "cb-select";
+    guiderSelect.style.cssText = "flex: 1; max-width: 200px;";
+    [["cfg_guider", "CFG Guider"], ["basic_guider", "Basic Guider (no CFG)"]].forEach(([val, label]) => {
+        const opt = document.createElement("option");
+        opt.value = val;
+        opt.textContent = label;
+        if (configArray.advanced_guider === val) opt.selected = true;
+        guiderSelect.appendChild(opt);
+    });
+    guiderSelect.onchange = () => {
+        configArray.advanced_guider = guiderSelect.value;
+        node.saveState();
+    };
+    guiderRow.appendChild(guiderSelect);
+    advancedOpts.appendChild(guiderRow);
+
+    // Scheduler dropdown
+    const schedulerRow = document.createElement("div");
+    schedulerRow.style.cssText = "display: flex; gap: 6px; align-items: center; margin-bottom: 4px;";
+    const schedulerLabel = document.createElement("label");
+    schedulerLabel.textContent = "Scheduler:";
+    schedulerLabel.style.cssText = "color: #aaa; font-size: 11px; white-space: nowrap; min-width: 55px;";
+    schedulerRow.appendChild(schedulerLabel);
+    const schedulerSelect = document.createElement("select");
+    schedulerSelect.className = "cb-select";
+    schedulerSelect.style.cssText = "flex: 1; max-width: 200px;";
+    [["basic", "Basic Scheduler"], ["flux2", "Flux2 Scheduler"]].forEach(([val, label]) => {
+        const opt = document.createElement("option");
+        opt.value = val;
+        opt.textContent = label;
+        if (configArray.advanced_scheduler === val) opt.selected = true;
+        schedulerSelect.appendChild(opt);
+    });
+    schedulerSelect.onchange = () => {
+        configArray.advanced_scheduler = schedulerSelect.value;
+        node.saveState();
+    };
+    schedulerRow.appendChild(schedulerSelect);
+    advancedOpts.appendChild(schedulerRow);
+
+    const advancedHint = document.createElement("div");
+    advancedHint.style.cssText = "font-size: 10px; color: #666;";
+    advancedHint.textContent = "When ON, creates ON/OFF grid variants. Uses existing seed, sampler, cfg, and steps from config.";
+    advancedOpts.appendChild(advancedHint);
+
+    toggleCheck.onchange = () => {
+        configArray.use_advanced_sampling = toggleCheck.checked;
+        advancedOpts.style.display = toggleCheck.checked ? "block" : "none";
+        node.saveState();
+    };
+
+    group2.appendChild(advancedOpts);
+    innerWrapper.appendChild(group2);
+
+    // ========== SUB-GROUP 3: Flux Guidance ==========
+    const group3 = document.createElement("div");
+    group3.style.cssText = "border-left: 3px solid #ffaa00; padding-left: 8px;";
+
+    const group3Header = document.createElement("div");
+    group3Header.style.cssText = "font-size: 11px; font-weight: bold; margin-bottom: 4px; color: #ffaa00;";
+    group3Header.textContent = "FLUX GUIDANCE";
+    group3.appendChild(group3Header);
+
+    const group3Info = document.createElement("div");
+    group3Info.style.cssText = "font-size: 10px; color: #888; font-style: italic; margin-bottom: 6px;";
+    group3Info.textContent = "Modifies positive conditioning with a guidance value (used by Flux models)";
+    group3.appendChild(group3Info);
+
+    // Toggle checkbox
+    const fluxToggleRow = document.createElement("div");
+    fluxToggleRow.style.cssText = "display: flex; gap: 6px; align-items: center; margin-bottom: 6px;";
+    const fluxToggleLabel = document.createElement("label");
+    fluxToggleLabel.style.cssText = "display: flex; align-items: center; gap: 6px; cursor: pointer;";
+    const fluxToggleCheck = document.createElement("input");
+    fluxToggleCheck.type = "checkbox";
+    fluxToggleCheck.checked = configArray.use_flux_guidance || false;
+    fluxToggleCheck.style.cssText = "cursor: pointer;";
+    fluxToggleLabel.appendChild(fluxToggleCheck);
+    const fluxToggleText = document.createElement("span");
+    fluxToggleText.textContent = "Enable Flux Guidance";
+    fluxToggleText.style.cssText = "color: #ccc; font-size: 11px;";
+    fluxToggleLabel.appendChild(fluxToggleText);
+    fluxToggleRow.appendChild(fluxToggleLabel);
+    group3.appendChild(fluxToggleRow);
+
+    // Guidance value input (shown when enabled)
+    const fluxOpts = document.createElement("div");
+    fluxOpts.style.cssText = "margin-left: 12px;";
+    fluxOpts.style.display = configArray.use_flux_guidance ? "block" : "none";
+
+    const guidanceRow = document.createElement("div");
+    guidanceRow.style.cssText = "display: flex; gap: 6px; align-items: center; margin-bottom: 4px;";
+    const guidanceLabel = document.createElement("label");
+    guidanceLabel.textContent = "Guidance:";
+    guidanceLabel.style.cssText = "color: #aaa; font-size: 11px; white-space: nowrap; min-width: 55px;";
+    guidanceRow.appendChild(guidanceLabel);
+    const guidanceInput = document.createElement("input");
+    guidanceInput.type = "text";
+    guidanceInput.className = "cb-input";
+    guidanceInput.style.cssText = "width: 120px;";
+    guidanceInput.value = configArray.flux_guidance_value || "3.5";
+    guidanceInput.placeholder = "3.5";
+    guidanceInput.title = "Comma-separated values for grid testing (range 0-100)";
+    guidanceInput.onchange = () => {
+        configArray.flux_guidance_value = guidanceInput.value;
+        node.saveState();
+    };
+    guidanceRow.appendChild(guidanceInput);
+    const guidanceHint = document.createElement("span");
+    guidanceHint.style.cssText = "font-size: 10px; color: #666;";
+    guidanceHint.textContent = "(default: 3.5, range: 0-100)";
+    guidanceRow.appendChild(guidanceHint);
+    fluxOpts.appendChild(guidanceRow);
+
+    fluxToggleCheck.onchange = () => {
+        configArray.use_flux_guidance = fluxToggleCheck.checked;
+        fluxOpts.style.display = fluxToggleCheck.checked ? "block" : "none";
+        node.saveState();
+    };
+
+    group3.appendChild(fluxOpts);
+    innerWrapper.appendChild(group3);
+
+    contentContainer.appendChild(innerWrapper);
+    sectionGrid.appendChild(contentContainer);
+    div.appendChild(sectionGrid);
+}
+
 // --- VAE ELEMENT CREATOR ---
 
 function createVAEElement(node, vaeName, arrayIdx, vaeIdx, vaeList, vFolders) {
@@ -3204,6 +3547,7 @@ export async function renderUI(node, availableLoras, modelLists, loraFolders, av
         const arrayElement = createConfigArrayElement(node, configArray, arrayIdx, modelLists);
         renderConfigPromptsSection(node, arrayElement, configArray, arrayIdx);
         renderModelsSection(node, arrayElement, configArray, arrayIdx, modelLists);
+        renderExtraModelSamplingSection(node, arrayElement, configArray, arrayIdx);
         renderVAEsSection(node, arrayElement, configArray, arrayIdx, modelLists);
         renderLorasSection(node, arrayElement, configArray, arrayIdx, availableLoras, loraFolders);
         arraysContainer.appendChild(arrayElement);
