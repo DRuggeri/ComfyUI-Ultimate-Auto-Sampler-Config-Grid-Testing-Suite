@@ -24,10 +24,20 @@ def generate_image(
     negative_conditioning,
     latent_input,
     denoise,
-    attention_mode="default"
+    attention_mode="default",
+    model_sampling_override="none",
+    model_sampling_shift=1.73,
+    model_sampling_flux_max_shift=1.15,
+    model_sampling_flux_base_shift=0.5,
+    use_advanced_sampling=False,
+    advanced_guider="cfg_guider",
+    advanced_scheduler="basic",
+    flux_guidance_value=0.0,
+    width=1024,
+    height=1024
 ):
     """
-    Generate a single image using ComfyUI's KSampler.
+    Generate a single image using ComfyUI's KSampler or SamplerCustomAdvanced pipeline.
 
     Args:
         patched_model: Model (potentially with LoRAs applied)
@@ -42,6 +52,16 @@ def generate_image(
         denoise: Denoise strength (0.0-1.0)
         attention_mode: Attention implementation to use ("default", "xformers", "pytorch",
                        "flash", "sage", "sage3", "sub_quad", "split")
+        model_sampling_override: Model sampling patch type ("none", "aura_flow", "flux", "sd3")
+        model_sampling_shift: Shift value for AuraFlow/SD3 model sampling
+        model_sampling_flux_max_shift: Max shift for Flux model sampling
+        model_sampling_flux_base_shift: Base shift for Flux model sampling
+        use_advanced_sampling: Whether to use SamplerCustomAdvanced pipeline
+        advanced_guider: Guider type ("cfg_guider", "basic_guider")
+        advanced_scheduler: Scheduler type for advanced sampling ("basic", "flux2")
+        flux_guidance_value: Flux guidance value (0.0 = disabled)
+        width: Image width (used by Flux model sampling and Flux2Scheduler)
+        height: Image height (used by Flux model sampling and Flux2Scheduler)
 
     Returns:
         tuple: (result_latent_dict, generation_duration_seconds)
@@ -63,21 +83,172 @@ def generate_image(
         except Exception as e:
             print(f"[GridTester] ⚠️ Could not set attention mode '{attention_mode}': {e}")
 
+    # === Model Sampling Override ===
+    # Clone model and patch model_sampling if an override is requested.
+    # This modifies the model's internal noise schedule for specific model families.
+    if model_sampling_override and model_sampling_override != "none":
+        import comfy.model_sampling
+        patched_model = patched_model.clone()
+
+        if model_sampling_override == "aura_flow":
+            # AuraFlow/Qwen Image: discrete flow with shift, multiplier=1.0
+            sampling_base = comfy.model_sampling.ModelSamplingDiscreteFlow
+            sampling_type = comfy.model_sampling.CONST
+            class ModelSamplingAdvanced(sampling_base, sampling_type):
+                pass
+            model_sampling = ModelSamplingAdvanced(patched_model.model.model_config)
+            model_sampling.set_parameters(shift=float(model_sampling_shift), multiplier=1.0)
+            patched_model.add_object_patch("model_sampling", model_sampling)
+            print(f"[GridTester] 🔧 Applied ModelSamplingAuraFlow (shift={model_sampling_shift})")
+
+        elif model_sampling_override == "sd3":
+            # SD3: discrete flow with shift, multiplier=1000
+            sampling_base = comfy.model_sampling.ModelSamplingDiscreteFlow
+            sampling_type = comfy.model_sampling.CONST
+            class ModelSamplingAdvanced(sampling_base, sampling_type):
+                pass
+            model_sampling = ModelSamplingAdvanced(patched_model.model.model_config)
+            model_sampling.set_parameters(shift=float(model_sampling_shift), multiplier=1000)
+            patched_model.add_object_patch("model_sampling", model_sampling)
+            print(f"[GridTester] 🔧 Applied ModelSamplingSD3 (shift={model_sampling_shift})")
+
+        elif model_sampling_override == "flux":
+            # Flux: dynamic shift computed from image dimensions
+            sampling_base = comfy.model_sampling.ModelSamplingFlux
+            sampling_type = comfy.model_sampling.CONST
+            class ModelSamplingAdvanced(sampling_base, sampling_type):
+                pass
+            max_s = float(model_sampling_flux_max_shift)
+            base_s = float(model_sampling_flux_base_shift)
+            x1, x2 = 256, 4096
+            mm = (max_s - base_s) / (x2 - x1)
+            b = base_s - mm * x1
+            shift = (width * height / (8 * 8 * 2 * 2)) * mm + b
+            model_sampling = ModelSamplingAdvanced(patched_model.model.model_config)
+            model_sampling.set_parameters(shift=shift)
+            patched_model.add_object_patch("model_sampling", model_sampling)
+            print(f"[GridTester] 🔧 Applied ModelSamplingFlux (max_shift={max_s}, base_shift={base_s}, computed_shift={shift:.4f})")
+
+    # === Flux Guidance ===
+    # Modify positive conditioning with guidance value (used by Flux 1 models)
+    if flux_guidance_value and float(flux_guidance_value) > 0:
+        import node_helpers
+        positive_conditioning = node_helpers.conditioning_set_values(
+            positive_conditioning, {"guidance": float(flux_guidance_value)}
+        )
+        print(f"[GridTester] 🔧 Applied FluxGuidance (guidance={flux_guidance_value})")
+
     t0 = time.time()
 
     try:
-        result = nodes.common_ksampler(
-            model=patched_model,
-            seed=seed,
-            steps=steps,
-            cfg=cfg,
-            sampler_name=sampler_name,
-            scheduler=scheduler,
-            positive=positive_conditioning,
-            negative=negative_conditioning,
-            latent=latent_input,
-            denoise=denoise
-        )
+        if use_advanced_sampling:
+            # === Advanced Sampling Pipeline (SamplerCustomAdvanced) ===
+            import comfy.samplers
+            import comfy.sample
+            import comfy.sampler_helpers
+            import comfy.model_management
+            import comfy.utils
+            import latent_preview
+
+            # Noise
+            class _Noise_RandomNoise:
+                def __init__(self, seed):
+                    self.seed = seed
+                def generate_noise(self, input_latent):
+                    latent_image = input_latent["samples"]
+                    batch_inds = input_latent.get("batch_index")
+                    return comfy.sample.prepare_noise(latent_image, self.seed, batch_inds)
+
+            noise = _Noise_RandomNoise(seed)
+
+            # Guider
+            if advanced_guider == "basic_guider":
+                guider = comfy.samplers.CFGGuider(patched_model)
+                guider.inner_set_conds({"positive": comfy.sampler_helpers.convert_cond(positive_conditioning)})
+                guider.set_cfg(1.0)
+                print(f"[GridTester] 🔧 Advanced sampling: BasicGuider (no CFG)")
+            else:
+                guider = comfy.samplers.CFGGuider(patched_model)
+                guider.set_conds(positive_conditioning, negative_conditioning)
+                guider.set_cfg(cfg)
+                print(f"[GridTester] 🔧 Advanced sampling: CFGGuider (cfg={cfg})")
+
+            # Sampler object
+            sampler_obj = comfy.samplers.sampler_object(sampler_name)
+
+            # Sigmas
+            if advanced_scheduler == "flux2":
+                import math
+
+                def _flux2_generalized_time_snr_shift(t, mu, sigma):
+                    return math.exp(mu) / (math.exp(mu) + (1 / t - 1) ** sigma)
+
+                def _flux2_compute_empirical_mu(image_seq_len, num_steps):
+                    a1, b1 = 8.73809524e-05, 1.89833333
+                    a2, b2 = 0.00016927, 0.45666666
+                    if image_seq_len > 4300:
+                        return float(a2 * image_seq_len + b2)
+                    m_200 = a2 * image_seq_len + b2
+                    m_10 = a1 * image_seq_len + b1
+                    a = (m_200 - m_10) / 190.0
+                    b_val = m_200 - 200.0 * a
+                    return float(a * num_steps + b_val)
+
+                seq_len = round(width * height / (16 * 16))
+                mu = _flux2_compute_empirical_mu(seq_len, steps)
+                timesteps = torch.linspace(1, 0, steps + 1)
+                sigmas = torch.FloatTensor([_flux2_generalized_time_snr_shift(t.item(), mu, 1.0) for t in timesteps])
+                print(f"[GridTester] 🔧 Advanced sampling: Flux2Scheduler (steps={steps}, {width}x{height}, mu={mu:.4f})")
+            else:
+                # BasicScheduler
+                total_steps = steps
+                if denoise < 1.0:
+                    if denoise <= 0.0:
+                        sigmas = torch.FloatTensor([])
+                    else:
+                        total_steps = int(steps / denoise)
+                model_sampling_obj = patched_model.get_model_object("model_sampling")
+                sigmas = comfy.samplers.calculate_sigmas(model_sampling_obj, scheduler, total_steps).cpu()
+                sigmas = sigmas[-(steps + 1):]
+                print(f"[GridTester] 🔧 Advanced sampling: BasicScheduler ({scheduler}, {steps} steps)")
+
+            # Execute SamplerCustomAdvanced
+            latent = latent_input.copy()
+            latent_image = latent["samples"]
+            latent_image = comfy.sample.fix_empty_latent_channels(guider.model_patcher, latent_image)
+            latent["samples"] = latent_image
+
+            noise_mask = latent.get("noise_mask")
+
+            x0_output = {}
+            callback = latent_preview.prepare_callback(guider.model_patcher, sigmas.shape[-1] - 1, x0_output)
+
+            disable_pbar = not comfy.utils.PROGRESS_BAR_ENABLED
+            samples = guider.sample(
+                noise.generate_noise(latent), latent_image, sampler_obj, sigmas,
+                denoise_mask=noise_mask, callback=callback, disable_pbar=disable_pbar,
+                seed=noise.seed
+            )
+            samples = samples.to(comfy.model_management.intermediate_device())
+
+            out = latent.copy()
+            out["samples"] = samples
+            result = ({"samples": out["samples"]},)
+
+        else:
+            # === Standard KSampler path ===
+            result = nodes.common_ksampler(
+                model=patched_model,
+                seed=seed,
+                steps=steps,
+                cfg=cfg,
+                sampler_name=sampler_name,
+                scheduler=scheduler,
+                positive=positive_conditioning,
+                negative=negative_conditioning,
+                latent=latent_input,
+                denoise=denoise
+            )
     finally:
         # Restore original attention override
         if attention_mode and attention_mode != "default":
