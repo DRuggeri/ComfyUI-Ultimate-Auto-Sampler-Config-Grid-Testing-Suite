@@ -531,6 +531,17 @@ class UltimateConfigBuilder:
             omit_triggers = config_array.get("lora_omit_triggers", [])
             lora_triggerwords_append_settings = config_array.get("lora_triggerwords_append_settings", {})
 
+            # Extra Model & Sampling Options
+            model_sampling_override = config_array.get("model_sampling_override", "none")
+            model_sampling_shift = config_array.get("model_sampling_shift", "1.73")
+            model_sampling_flux_max_shift = config_array.get("model_sampling_flux_max_shift", "1.15")
+            model_sampling_flux_base_shift = config_array.get("model_sampling_flux_base_shift", "0.5")
+            use_advanced_sampling = config_array.get("use_advanced_sampling", False)
+            advanced_guider = config_array.get("advanced_guider", "cfg_guider")
+            advanced_scheduler = config_array.get("advanced_scheduler", "basic")
+            use_flux_guidance = config_array.get("use_flux_guidance", False)
+            flux_guidance_value = config_array.get("flux_guidance_value", "3.5")
+
             # Process models - handle both object format {path, type} and legacy string format
             model_strings = []
             model_type = "checkpoint"  # default
@@ -590,6 +601,22 @@ class UltimateConfigBuilder:
             # Add trigger append settings if present
             if lora_triggerwords_append_settings and any(v != "none" for v in lora_triggerwords_append_settings.values()):
                 config["lora_triggerwords_append_settings"] = lora_triggerwords_append_settings
+
+            # Add extra model & sampling options if enabled
+            if model_sampling_override and model_sampling_override != "none":
+                config["model_sampling_override"] = model_sampling_override
+                if model_sampling_override == "flux":
+                    config["model_sampling_flux_max_shift"] = model_sampling_flux_max_shift
+                    config["model_sampling_flux_base_shift"] = model_sampling_flux_base_shift
+                else:
+                    config["model_sampling_shift"] = model_sampling_shift
+            if use_advanced_sampling:
+                config["use_advanced_sampling"] = True
+                config["advanced_guider"] = advanced_guider
+                config["advanced_scheduler"] = advanced_scheduler
+            if use_flux_guidance:
+                config["use_flux_guidance"] = True
+                config["flux_guidance_value"] = flux_guidance_value
 
             # ==== PROMPT HANDLING ====
             # Priority: per-config > global > node inputs (omitted = use node inputs)
