@@ -72,7 +72,8 @@ app.registerExtension({
                     lorasCollapsed: {},
                     vaesCollapsed: {},
                     promptsSectionCollapsed: {},
-                    globalPromptsSectionCollapsed: false
+                    globalPromptsSectionCollapsed: false,
+                    extraOptionsSectionCollapsed: {}
                 };
                 
                 // Initialize default state structure
@@ -113,7 +114,17 @@ app.registerExtension({
                         use_custom_prompts: false,
                         model_prompt_prefix: "",
                         model_prompt_suffix: "",
-                        attention_modes: ["default"]
+                        attention_modes: ["default"],
+                        // Extra Model & Sampling Options
+                        model_sampling_override: "none",
+                        model_sampling_shift: "1.73",
+                        model_sampling_flux_max_shift: "1.15",
+                        model_sampling_flux_base_shift: "0.5",
+                        use_advanced_sampling: false,
+                        advanced_guider: "cfg_guider",
+                        advanced_scheduler: "basic",
+                        use_flux_guidance: false,
+                        flux_guidance_value: "3.5"
                     }]
                 };
 
@@ -409,6 +420,17 @@ app.registerExtension({
 
                                 // Migration: ensure attention modes field exists
                                 if (!arr.attention_modes) arr.attention_modes = ["default"];
+
+                                // Migration: ensure extra model & sampling options exist
+                                if (arr.model_sampling_override === undefined) arr.model_sampling_override = "none";
+                                if (arr.model_sampling_shift === undefined) arr.model_sampling_shift = "1.73";
+                                if (arr.model_sampling_flux_max_shift === undefined) arr.model_sampling_flux_max_shift = "1.15";
+                                if (arr.model_sampling_flux_base_shift === undefined) arr.model_sampling_flux_base_shift = "0.5";
+                                if (arr.use_advanced_sampling === undefined) arr.use_advanced_sampling = false;
+                                if (arr.advanced_guider === undefined) arr.advanced_guider = "cfg_guider";
+                                if (arr.advanced_scheduler === undefined) arr.advanced_scheduler = "basic";
+                                if (arr.use_flux_guidance === undefined) arr.use_flux_guidance = false;
+                                if (arr.flux_guidance_value === undefined) arr.flux_guidance_value = "3.5";
                             });
                         } else if (existing.lora_config) {
                             this.state = this.migrateOldFormat(existing);
