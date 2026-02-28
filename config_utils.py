@@ -495,11 +495,82 @@ def expand_configs(raw_configs, pos_prompts, neg_prompts, denoise_values, seed, 
         else:
             attention_modes = [a for a in raw_attention if a in VALID_ATTENTION_MODES] or ["default"]
 
+        # Extra Model & Sampling Options
+        # Model sampling override: can be "none" or a specific type
+        raw_model_sampling = entry.get("model_sampling_override", "none")
+        if isinstance(raw_model_sampling, list):
+            model_sampling_overrides = raw_model_sampling
+        else:
+            model_sampling_overrides = [raw_model_sampling]
+
+        # Model sampling shift values (comma-separated string -> list of floats)
+        raw_shift = entry.get("model_sampling_shift", "1.73")
+        model_sampling_shifts = [float(s.strip()) for s in str(raw_shift).split(",") if s.strip()]
+        if not model_sampling_shifts:
+            model_sampling_shifts = [1.73]
+
+        # Flux-specific shift values
+        raw_flux_max = entry.get("model_sampling_flux_max_shift", "1.15")
+        flux_max_shifts = [float(s.strip()) for s in str(raw_flux_max).split(",") if s.strip()]
+        if not flux_max_shifts:
+            flux_max_shifts = [1.15]
+
+        raw_flux_base = entry.get("model_sampling_flux_base_shift", "0.5")
+        flux_base_shifts = [float(s.strip()) for s in str(raw_flux_base).split(",") if s.strip()]
+        if not flux_base_shifts:
+            flux_base_shifts = [0.5]
+
+        # Advanced sampling pipeline
+        use_advanced = entry.get("use_advanced_sampling", False)
+        if use_advanced:
+            advanced_sampling_values = [True, False]  # Grid: test with and without
+        else:
+            advanced_sampling_values = [False]
+
+        raw_guider = entry.get("advanced_guider", "cfg_guider")
+        advanced_guiders = to_list(raw_guider) if use_advanced else ["cfg_guider"]
+
+        raw_scheduler_adv = entry.get("advanced_scheduler", "basic")
+        advanced_schedulers = to_list(raw_scheduler_adv) if use_advanced else ["basic"]
+
+        # Flux guidance
+        use_flux_guid = entry.get("use_flux_guidance", False)
+        if use_flux_guid:
+            raw_guid_val = entry.get("flux_guidance_value", "3.5")
+            flux_guidance_values = [float(v.strip()) for v in str(raw_guid_val).split(",") if v.strip()]
+            if not flux_guidance_values:
+                flux_guidance_values = [3.5]
+        else:
+            flux_guidance_values = [0.0]  # 0.0 = disabled sentinel
+
         # Build all combinations
         base_combos = []
         for combo in itertools.product(samplers, schedulers, steps_l, cfgs, clip_skips, expanded_loras,
                                       denoise_values, entry_prompt_pairs, expanded_models, raw_vaes,
-                                      attention_modes):
+                                      attention_modes, model_sampling_overrides, model_sampling_shifts,
+                                      flux_max_shifts, flux_base_shifts,
+                                      advanced_sampling_values, advanced_guiders, advanced_schedulers,
+                                      flux_guidance_values):
+            # Skip redundant model sampling parameter combinations
+            override = combo[11]
+            if override == "none":
+                # Skip all but first shift values when override is disabled
+                if combo[12] != model_sampling_shifts[0] or combo[13] != flux_max_shifts[0] or combo[14] != flux_base_shifts[0]:
+                    continue
+            elif override == "flux":
+                # Skip non-flux shift values
+                if combo[12] != model_sampling_shifts[0]:
+                    continue
+            else:  # aura_flow or sd3
+                # Skip flux shift values
+                if combo[13] != flux_max_shifts[0] or combo[14] != flux_base_shifts[0]:
+                    continue
+
+            # Skip advanced sampling sub-options when advanced sampling is off
+            if not combo[15]:  # use_advanced_sampling == False
+                if combo[16] != advanced_guiders[0] or combo[17] != advanced_schedulers[0]:
+                    continue
+
             base_combos.append({
                 "sampler": combo[0],
                 "scheduler": combo[1],
@@ -513,6 +584,14 @@ def expand_configs(raw_configs, pos_prompts, neg_prompts, denoise_values, seed, 
                 "model": combo[8],
                 "vae": combo[9],
                 "attention_mode": combo[10],
+                "model_sampling_override": combo[11],
+                "model_sampling_shift": combo[12],
+                "model_sampling_flux_max_shift": combo[13],
+                "model_sampling_flux_base_shift": combo[14],
+                "use_advanced_sampling": combo[15],
+                "advanced_guider": combo[16],
+                "advanced_scheduler": combo[17],
+                "flux_guidance_value": combo[18],
                 "seed": seed,
                 "seed_behavior": entry.get("seed_behavior", "fixed"),
                 "model_type": model_type,
