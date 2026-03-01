@@ -1961,12 +1961,12 @@ export function renderExtraModelSamplingSection(node, div, configArray, arrayIdx
             contentContainer.style.display = "contents";
             arrowSpan.textContent = "▼";
             if (!node.uiState.extraOptionsSectionCollapsed) node.uiState.extraOptionsSectionCollapsed = {};
-            node.uiState.extraOptionsSectionCollapsed[arrayIdx] = true;
+            node.uiState.extraOptionsSectionCollapsed[arrayIdx] = false;
         } else {
             contentContainer.style.display = "none";
             arrowSpan.textContent = "▶";
             if (!node.uiState.extraOptionsSectionCollapsed) node.uiState.extraOptionsSectionCollapsed = {};
-            node.uiState.extraOptionsSectionCollapsed[arrayIdx] = false;
+            node.uiState.extraOptionsSectionCollapsed[arrayIdx] = true;
         }
     };
 

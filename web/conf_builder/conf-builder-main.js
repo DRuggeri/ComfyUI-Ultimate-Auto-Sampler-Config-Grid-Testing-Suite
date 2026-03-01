@@ -186,6 +186,22 @@ app.registerExtension({
                             if (!this.state.config_name) this.state.config_name = filename.replace(".json", "");
                             if (this.state.auto_save === undefined) this.state.auto_save = false;
 
+                            // Migration: ensure config_arrays have all required fields
+                            if (this.state.config_arrays) {
+                                this.state.config_arrays.forEach(arr => {
+                                    if (!arr.attention_modes) arr.attention_modes = ["default"];
+                                    if (arr.model_sampling_override === undefined) arr.model_sampling_override = "none";
+                                    if (arr.model_sampling_shift === undefined) arr.model_sampling_shift = "1.73";
+                                    if (arr.model_sampling_flux_max_shift === undefined) arr.model_sampling_flux_max_shift = "1.15";
+                                    if (arr.model_sampling_flux_base_shift === undefined) arr.model_sampling_flux_base_shift = "0.5";
+                                    if (arr.use_advanced_sampling === undefined) arr.use_advanced_sampling = false;
+                                    if (arr.advanced_guider === undefined) arr.advanced_guider = "cfg_guider";
+                                    if (arr.advanced_scheduler === undefined) arr.advanced_scheduler = "basic";
+                                    if (arr.use_flux_guidance === undefined) arr.use_flux_guidance = false;
+                                    if (arr.flux_guidance_value === undefined) arr.flux_guidance_value = "3.5";
+                                });
+                            }
+
                             this.saveState();
                             this.renderUI();
                         }
@@ -293,6 +309,17 @@ app.registerExtension({
                                     if (!arr.clip_type) arr.clip_type = "stable_diffusion";
                                     if (!arr.gguf_options) arr.gguf_options = {};
                                     if (!arr.vaes) arr.vaes = ["None"];
+
+                                    // Ensure extra model & sampling options exist
+                                    if (arr.model_sampling_override === undefined) arr.model_sampling_override = "none";
+                                    if (arr.model_sampling_shift === undefined) arr.model_sampling_shift = "1.73";
+                                    if (arr.model_sampling_flux_max_shift === undefined) arr.model_sampling_flux_max_shift = "1.15";
+                                    if (arr.model_sampling_flux_base_shift === undefined) arr.model_sampling_flux_base_shift = "0.5";
+                                    if (arr.use_advanced_sampling === undefined) arr.use_advanced_sampling = false;
+                                    if (arr.advanced_guider === undefined) arr.advanced_guider = "cfg_guider";
+                                    if (arr.advanced_scheduler === undefined) arr.advanced_scheduler = "basic";
+                                    if (arr.use_flux_guidance === undefined) arr.use_flux_guidance = false;
+                                    if (arr.flux_guidance_value === undefined) arr.flux_guidance_value = "3.5";
                                 });
 
                                 this.state.config_arrays = loadedArrays;
