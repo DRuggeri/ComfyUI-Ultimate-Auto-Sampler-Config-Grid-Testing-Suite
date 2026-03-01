@@ -366,7 +366,7 @@ def batch_encode_prompts(patched_clip, unique_positives, unique_negatives, cond_
     # Save and print cache stats (only saves if disk cache is enabled)
     if cond_cache is not None:
         cond_cache.save()
-        cond_cache.print_stats()
+        # cond_cache.print_stats() # for debugging
     
     # Final cleanup after all encoding is complete
     gc.collect()

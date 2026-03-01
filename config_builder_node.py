@@ -1014,7 +1014,7 @@ async def refresh_models_endpoint(request):
         print(f"[ConfigBuilder] ❌ Error in refresh_models endpoint: {e}")
         import traceback
         traceback.print_exc()
-        return web.json_response({
+        return web.json_response({ 
             "error": str(e)
         }, status=500)
 

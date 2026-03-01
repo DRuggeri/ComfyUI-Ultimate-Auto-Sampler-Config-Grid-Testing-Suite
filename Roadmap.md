@@ -43,14 +43,37 @@ ProjectStructure.md has notes to assist AI in developing this project
 
 ### **ComfyUI Ultimate Sampler Grid – Development Roadmap**
 
+## Batch Encoding 
 
-## Add on off switches in builder ui to text encoder selection and vae selection
+## Add HF-RemoteVae list to BuilderUI Remote Vae (when Remote URL is selected, add a Presets: selection to choose which one from the list)
 
+
+## bug fix, the Builder UI is very slow to update when first starting, adding models, adding loras, a few other things, we need to check it and optimize it to load and respond faster.
+
+
+## Add on off switches in builder ui to text encoder selection and vae selection (nearly complete but vae on off switches don't work, also I'd prefer for simple omition from node output confg_json instead of adding uncessary on-off switches to the output)
+
+## In the Dashboard UI, I'd love to see a toggle option for view prompts without lora trigger-words. Currently it shows them all with them added and it causes a bit of a duplicate issue if we're just trying to see which prompts work best on variety of various loras. 
+
+
+## Models from UI aren't getting hashed properly for some reason, maybe diffusion models, maybe builder UI path / \ normalization? console logs:  Using fallback hash for model: 559ad07aae
+
+## Add on off switches in builder ui to text encoder selection and vae selection that works exactly the same as the model on off switches
 
 ## Add more info to the lora and model civitai lookups in the builderUI, option to show full API response, show full JSON response, save full JSON resposne, if lookup data is cached, show a big warning on the very top that says READ FROM DISK CACHE, LAST LOOKED UP ON {lookup date}
 
-
 ## When you click a sampler or scheduler in the dropdown it should add it to the list right away.
+
+## In the builder ui civit-ai lookup modal, when it alerts the user the data is cached and read from disk there needs to be a button for re-check/lookup now so they can get updated data when they want.
+
+## Feature: Adding permanent/saving/editing custom lora trigger words to a lora, read from and edit the lora_triggers.json file, with nice ui to make it easy and convenient to edit, remove and add triggerwords.
+
+
+
+#### **12. Arrays in LoRA Weights** Integrated but needs adding to the Builder UI
+
+Builder UI could have a + button right next to model strength text input (on its right side) to make it easy to add a compare different lora strengths. If activated it should add an additonal slider, or two sliders if 🔒 Lock Model & CLIP Strength Together is deactivated, for each time they click +. If a lora has a multiple strength array, the preview json and py node json_output should duplicate the full config for that run for each entry with the only difference being each lora strength. If multiple loras have multiple arrays it needs to output a cartesian of an each for each of all lora strenth combos. 
+
 
 
 
@@ -104,12 +127,6 @@ A button in the builder UI to pack short sha256 into config with an explanation 
 * **Problem:** Different models need different trigger words (e.g., "score_9, score_8" for Pony vs "masterpiece" for SD1.5).
 * **Status:** Implemented as per-config `model_prompt_prefix` and `model_prompt_suffix` fields. These quality tags are prepended/appended to ALL prompts for a given config, wrapping around the entire prompt+triggers assembly. Added `_apply_model_prompt_affixes()` helper in `trigger_words.py`, integrated into both `build_prompt_with_triggers()` and `collect_unique_prompts_with_triggers()` for correct pre-encoding. Config Builder UI shows prefix/suffix text inputs in the Prompts section of each config. Fields persist through save/load and are passed through `expand_configs()` in `config_utils.py`.
 * **Target Files:** `trigger_words.py`, `config_utils.py`, `conf-builder-config-management.js`, `conf-builder-utilities.js`, `conf-builder-main.js`
-
-#### **12. Arrays in LoRA Weights** COMPLETED
-
-* **Problem:** Cannot grid search LoRA weights like `lora.safetensors:[0.5, 0.8]:1.0`.
-* **Status:** Implemented `_expand_lora_weight_arrays()` in `config_utils.py`. Supports `[0.5, 0.8]` syntax in both model_strength and clip_strength positions, with Cartesian product for multiple arrays.
-* **Target Files:** `config_utils.py`
 
 #### **13. Real-Time ETA** COMPLETED
 

@@ -308,9 +308,15 @@ class WorkerThread(threading.Thread):
             print(f"[Worker {self.worker_id}] 📦 Loaded model: {config['model']}")
 
         # --- Per-config VAE loading ---
+        # Workers only support local VAE — remote VAE endpoints (remote:https://...)
+        # are handled by the master's RemoteVAEDecodeWorker, so fall back to
+        # the model's bundled VAE when a remote VAE is specified.
         config_vae = config.get("vae", "Default")
-        if config_vae != "Default":
+        if config_vae != "Default" and not config_vae.startswith("remote:"):
             vae = load_vae_by_name(config_vae)
+        elif config_vae.startswith("remote:"):
+            print(f"[Worker {self.worker_id}] ⚠️ Skipping remote VAE '{config_vae}' — using model's bundled VAE")
+            vae = self._loaded_vae
         else:
             vae = self._loaded_vae
 
