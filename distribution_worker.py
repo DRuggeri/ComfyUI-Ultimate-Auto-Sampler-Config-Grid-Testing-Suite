@@ -308,20 +308,25 @@ class WorkerThread(threading.Thread):
             print(f"[Worker {self.worker_id}] 📦 Loaded model: {config['model']}")
 
         # --- Per-config VAE loading ---
-        # Workers only support local VAE — remote VAE endpoints (remote:https://...)
-        # are handled by the master's RemoteVAEDecodeWorker, so fall back to
-        # the model's bundled VAE when a remote VAE is specified.
+        # Supports three modes:
+        #   1. "Default" → use model's bundled VAE
+        #   2. "remote:https://..." → remote HuggingFace VAE endpoint (decoded at decode step)
+        #   3. "ae.safetensors" → load local VAE file
         config_vae = config.get("vae", "Default")
-        if config_vae != "Default" and not config_vae.startswith("remote:"):
-            vae = load_vae_by_name(config_vae)
-        elif config_vae.startswith("remote:"):
-            print(f"[Worker {self.worker_id}] ⚠️ Skipping remote VAE '{config_vae}' — using model's bundled VAE")
-            vae = self._loaded_vae
+        _remote_vae_url = None
+        if config_vae != "Default":
+            if config_vae.startswith("remote:"):
+                _remote_vae_url = config_vae[len("remote:"):]
+                vae = None  # No local VAE needed — will use remote endpoint
+                print(f"[Worker {self.worker_id}] 🌐 Using remote VAE: {_remote_vae_url}")
+            else:
+                vae = load_vae_by_name(config_vae)
         else:
             vae = self._loaded_vae
 
         # Validate VAE is available (non-checkpoint models like GGUF may not bundle a VAE)
-        if vae is None:
+        # Skip this check when using remote VAE — no local VAE object needed.
+        if vae is None and _remote_vae_url is None:
             raise RuntimeError(
                 f"No VAE available for model '{config.get('model', 'unknown')}'. "
                 f"Non-checkpoint models (GGUF/diffusion) require a VAE to be specified "
@@ -387,7 +392,21 @@ class WorkerThread(threading.Thread):
         )
 
         # --- VAE Decode ---
-        image = decode_latent_with_vae(vae, result_latent["samples"])
+        if _remote_vae_url:
+            # Remote VAE: send latents to HuggingFace endpoint for decoding
+            from .remote_vae import remote_decode_hf
+            from PIL import Image as PILImage
+            import numpy as np
+            latent_samples = result_latent["samples"]
+            if latent_samples.ndim == 3:
+                latent_samples = latent_samples.unsqueeze(0)
+            decoded = remote_decode_hf(_remote_vae_url, latent_samples, h, w)
+            # Denormalize from [-1, 1] → [0, 1] (same as VaeImageProcessor.postprocess)
+            decoded = (decoded / 2 + 0.5).clamp(0, 1)
+            img_data = decoded[0].permute(1, 2, 0).cpu().numpy()
+            image = PILImage.fromarray((img_data * 255).round().astype(np.uint8))
+        else:
+            image = decode_latent_with_vae(vae, result_latent["samples"])
 
         # Free latent tensors ASAP (before image conversion, which is CPU-only)
         del result_latent, latent_in, pos_cond, neg_cond
