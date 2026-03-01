@@ -23,6 +23,12 @@ let availableSchedulers = [];
 let availableSessions = ["None"];
 let availableConfigs = ["None"];
 
+// Cache-loaded flags for fetchers that can't use null-check
+// (their initial values are already non-null arrays)
+let _modelListsLoaded = false;
+let _sessionsLoaded = false;
+let _configsLoaded = false;
+
 // Track all active ConfigBuilder nodes for refresh
 let activeConfigBuilderNodes = new Set();
 
@@ -46,7 +52,14 @@ export function clearAllCaches() {
     dualClipTypes = [];
     availableSamplers = [];
     availableSchedulers = [];
+    _modelListsLoaded = false;
+    _sessionsLoaded = false;
+    _configsLoaded = false;
 }
+
+// Targeted cache invalidation for when specific data changes
+export function clearConfigsCache() { _configsLoaded = false; }
+export function clearSessionsCache() { _sessionsLoaded = false; }
 
 export async function refreshAllConfigBuilders() {
     console.log("[ConfigBuilder] 🔄 Refreshing all Config Builder nodes...");
@@ -156,6 +169,8 @@ export async function getModelFolders() {
 // --- UNIFIED MODEL LISTS (for GGUF, Diffusion Models, Text Encoders) ---
 
 export async function getModelLists() {
+    // Return cached data if already loaded (cleared by clearAllCaches on explicit refresh)
+    if (_modelListsLoaded) return;
     // Fetch all model lists from the unified endpoint
     try {
         const resp = await fetch("/configbuilder/model_lists", {
@@ -201,6 +216,7 @@ export async function getModelLists() {
         if (availableGGUFModels.length === 0) {
             console.log(`[ConfigBuilder] ℹ️ No GGUF models found. Install ComfyUI-GGUF and place .gguf files in the unet_gguf folder.`);
         }
+        _modelListsLoaded = true;
         return data;
     } catch (e) {
         console.error("[ConfigBuilder] Error fetching model lists:", e);
@@ -222,6 +238,8 @@ export function getAvailableSamplers() { return availableSamplers || []; }
 export function getAvailableSchedulers() { return availableSchedulers || []; }
 
 export async function getAvailableSessions() {
+    // Return cached sessions if already loaded (cleared by clearAllCaches on explicit refresh)
+    if (_sessionsLoaded) return availableSessions;
     try {
         const resp = await fetch("/object_info", { headers: { "X-Config-Builder-Internal": "true" } });
         const objectInfo = await resp.json();
@@ -229,14 +247,18 @@ export async function getAvailableSessions() {
             const nodeDef = objectInfo[nodeType];
             if (nodeType === "UltimateConfigBuilder" && nodeDef.input?.required?.load_session) {
                 availableSessions = nodeDef.input.required.load_session[0];
+                _sessionsLoaded = true;
                 return availableSessions;
             }
         }
     } catch (e) { console.error("[ConfigBuilder] Error fetching sessions:", e); }
+    _sessionsLoaded = true;
     return availableSessions;
 }
 
 export async function getAvailableConfigs() {
+    // Return cached configs if already loaded (use clearConfigsCache() to force refresh)
+    if (_configsLoaded) return availableConfigs;
     try {
         const resp = await fetch("/configbuilder/list_configs");
         if (resp.ok) {
@@ -244,6 +266,7 @@ export async function getAvailableConfigs() {
             availableConfigs = files.length > 0 ? files : ["None"];
         }
     } catch (e) { console.error("[ConfigBuilder] Error fetching configs:", e); }
+    _configsLoaded = true;
     return availableConfigs;
 }
 

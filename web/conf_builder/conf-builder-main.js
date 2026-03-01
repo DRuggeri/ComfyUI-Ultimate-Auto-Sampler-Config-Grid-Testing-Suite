@@ -167,7 +167,7 @@ app.registerExtension({
                             headers: { "Content-Type": "application/json" },
                             body: JSON.stringify({ name: name, data: this.state })
                         });
-                        if (utilities) await utilities.getAvailableConfigs();
+                        if (utilities) { utilities.clearConfigsCache(); await utilities.getAvailableConfigs(); }
                     } catch (e) {
                         console.error("Save Failed", e);
                     }

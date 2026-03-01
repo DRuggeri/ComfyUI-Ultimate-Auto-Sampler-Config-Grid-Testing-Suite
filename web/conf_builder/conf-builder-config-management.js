@@ -122,7 +122,8 @@ export function renderConfigSection(node, container, availableConfigs) {
     saveBtn.style.width = "100%";
     saveBtn.onclick = async () => {
         await node.saveConfigToBackend();
-        const { getAvailableConfigs } = await import('./conf-builder-utilities.js');
+        const { getAvailableConfigs, clearConfigsCache } = await import('./conf-builder-utilities.js');
+        clearConfigsCache();  // Invalidate so getAvailableConfigs fetches fresh list
         await getAvailableConfigs();
         node.renderUI();
     };

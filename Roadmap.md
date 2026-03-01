@@ -43,7 +43,11 @@ ProjectStructure.md has notes to assist AI in developing this project
 
 ### **ComfyUI Ultimate Sampler Grid – Development Roadmap**
 
-## Batch Encoding 
+## Jobs don't generate prompts in the order they're written in the array, it's mildly inconvenient. Lets fix that and make it run in order from top to bottom of the array.
+
+## Custom Job Resume / Skipping - Start At Job # Option
+
+## Batch Encoding could use with implementing the smart, look ahead, caching system we built for lora swapping. 
 
 ## Add HF-RemoteVae list to BuilderUI Remote Vae (when Remote URL is selected, add a Presets: selection to choose which one from the list)
 
