@@ -799,11 +799,32 @@ async def lookup_lora_metadata_endpoint(request):
         
         print(f"[ConfigBuilder] ✅ Metadata saved to: {metadata_file}")
         
+        # Compare fresh tags with stored loras_tags.json (only on force_refresh)
+        tags_changed = False
+        old_tags = []
+        new_tags = metadata.get("trained_words", [])
+        if force_refresh and new_tags:
+            json_tags_path = os.path.join(output_dir, "benchmarks/loras_tags.json")
+            if os.path.exists(json_tags_path):
+                lora_tags = load_json_from_file(json_tags_path) or {}
+                normalized = lora_name.replace("\\", "/")
+                backslash = lora_name.replace("/", "\\")
+                old_tags = lora_tags.get(lora_name, lora_tags.get(normalized, lora_tags.get(backslash, [])))
+                if old_tags is None:
+                    old_tags = []
+                # Compare sorted lists to detect any difference
+                if sorted(old_tags) != sorted(new_tags):
+                    tags_changed = True
+                    print(f"[ConfigBuilder] ⚠️ Tags changed for {lora_name}: {old_tags} -> {new_tags}")
+
         return web.json_response({
             "metadata": metadata,
-            "saved_to": metadata_file
+            "saved_to": metadata_file,
+            "tags_changed": tags_changed,
+            "old_tags": old_tags,
+            "new_tags": new_tags
         })
-        
+
     except Exception as e:
         print(f"[ConfigBuilder] ❌ Error in lookup_lora_metadata endpoint: {e}")
         import traceback

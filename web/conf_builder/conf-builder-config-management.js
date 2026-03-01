@@ -1401,6 +1401,64 @@ async function showLoraMetadataModal(node, arrayIdx, loraName, forceRefresh = fa
         // Display metadata
         content.innerHTML = "";
 
+        // Tag diff banner (shown when force_refresh detects different tags)
+        if (data.tags_changed) {
+            const tagDiffBanner = document.createElement("div");
+            tagDiffBanner.style.cssText = "background: #1a3300; border: 2px solid #44cc00; border-radius: 6px; padding: 10px 14px; margin-bottom: 15px;";
+
+            const tagDiffTitle = document.createElement("div");
+            tagDiffTitle.style.cssText = "font-size: 14px; font-weight: bold; color: #44cc00; margin-bottom: 8px;";
+            tagDiffTitle.textContent = "🔄 Trigger Words Changed";
+            tagDiffBanner.appendChild(tagDiffTitle);
+
+            const oldTagsDiv = document.createElement("div");
+            oldTagsDiv.style.cssText = "font-size: 11px; color: #cc6666; margin-bottom: 4px;";
+            oldTagsDiv.textContent = "Old: " + (data.old_tags.length > 0 ? data.old_tags.join(", ") : "(none)");
+            tagDiffBanner.appendChild(oldTagsDiv);
+
+            const newTagsDiv = document.createElement("div");
+            newTagsDiv.style.cssText = "font-size: 11px; color: #66cc66; margin-bottom: 8px;";
+            newTagsDiv.textContent = "New: " + data.new_tags.join(", ");
+            tagDiffBanner.appendChild(newTagsDiv);
+
+            const tagBtnRow = document.createElement("div");
+            tagBtnRow.style.cssText = "display: flex; gap: 8px;";
+
+            const updateTagsBtn = document.createElement("button");
+            updateTagsBtn.className = "cb-button primary";
+            updateTagsBtn.style.cssText = "flex: 1; background: #336600; border: 1px solid #44cc00; color: #88ff44;";
+            updateTagsBtn.textContent = "✅ Update Tags";
+            updateTagsBtn.onclick = async () => {
+                try {
+                    const saveResp = await fetch("/configbuilder/save_lora_triggers", {
+                        method: "POST",
+                        headers: { "Content-Type": "application/json" },
+                        body: JSON.stringify({ lora_name: loraName, triggers: data.new_tags })
+                    });
+                    if (saveResp.ok) {
+                        updateTagsBtn.textContent = "✅ Updated!";
+                        updateTagsBtn.disabled = true;
+                        keepTagsBtn.disabled = true;
+                    }
+                } catch (e) {
+                    updateTagsBtn.textContent = "❌ Error";
+                }
+            };
+
+            const keepTagsBtn = document.createElement("button");
+            keepTagsBtn.className = "cb-button";
+            keepTagsBtn.style.cssText = "flex: 1;";
+            keepTagsBtn.textContent = "Keep Current";
+            keepTagsBtn.onclick = () => {
+                tagDiffBanner.style.display = "none";
+            };
+
+            tagBtnRow.appendChild(updateTagsBtn);
+            tagBtnRow.appendChild(keepTagsBtn);
+            tagDiffBanner.appendChild(tagBtnRow);
+            content.appendChild(tagDiffBanner);
+        }
+
         // Cache warning banner (shown prominently when data is from disk cache)
         if (data.cached) {
             const cacheBanner = document.createElement("div");
@@ -1979,6 +2037,7 @@ export function renderModelsSection(node, div, configArray, arrayIdx, modelLists
 
     const modelGrid = document.createElement("div");
     modelGrid.className = "cb-list-grid";
+    modelGrid.id = `cb-config-${arrayIdx}-models`;
 
     const modelHeader = document.createElement("div");
     modelHeader.className = "cb-section-toggle";
@@ -2069,16 +2128,21 @@ export function renderModelsSection(node, div, configArray, arrayIdx, modelLists
 
     modelGrid.appendChild(contentContainer);
     div.appendChild(modelGrid);
+
+    // Extra Model & Sampling Options (sub-section of Models)
+    renderExtraModelSamplingSection(node, div, configArray, arrayIdx);
 }
 
 // --- TEXT ENCODERS SECTION ---
 function renderTextEncodersSection(node, container, configArray, arrayIdx, modelLists) {
     const section = document.createElement("div");
+    section.id = `cb-config-${arrayIdx}-te`;
     section.style.cssText = "width: 100%; border-top: 1px solid #444; margin-top: 8px; padding-top: 8px;";
 
     const header = document.createElement("div");
-    header.style.cssText = "font-size: 11px; font-weight: bold; color: #44aaff; margin-bottom: 6px;";
-    header.textContent = "TEXT ENCODERS (CLIP)";
+    header.className = "cb-section-toggle";
+    header.style.cssText = "padding: 8px; background: #3a3a3a; border-radius: 4px; margin-bottom: 8px; font-weight: bold; color: #66bbff;";
+    header.textContent = "Text Encoders (CLIP)";
     section.appendChild(header);
 
     // Clip Type selector
@@ -2282,10 +2346,11 @@ export function renderVAEsSection(node, div, configArray, arrayIdx, modelLists) 
 
     const vaeGrid = document.createElement("div");
     vaeGrid.className = "cb-list-grid";
+    vaeGrid.id = `cb-config-${arrayIdx}-vae`;
 
     const vaeHeader = document.createElement("div");
     vaeHeader.className = "cb-section-toggle";
-    vaeHeader.style.cssText = "padding: 8px; background: #3a3a3a; border-radius: 4px; margin-bottom: 8px; font-weight: bold; color: #9900cc;";
+    vaeHeader.style.cssText = "padding: 8px; background: #444; border-radius: 4px; margin-bottom: 8px; font-weight: bold; color: #cc66ff;";
 
     const activeVaes = configArray.vaes.filter(v => v && v !== "None").length;
     const titleSpan = document.createElement("span");
@@ -2938,12 +3003,13 @@ export function renderLorasSection(node, div, configArray, arrayIdx, availableLo
 
     const loraGrid = document.createElement("div");
     loraGrid.className = "cb-list-grid";
+    loraGrid.id = `cb-config-${arrayIdx}-loras`;
     // FIX: Removed flexDirection column. Let Grid/Flex handle it.
     loraGrid.style.width = "100%";
 
     const loraHeader = document.createElement("div");
     loraHeader.className = "cb-section-toggle";
-    loraHeader.style.cssText = "padding: 8px; background: #3a3a3a; border-radius: 4px; margin-bottom: 8px; font-weight: bold; color: #0066cc;";
+    loraHeader.style.cssText = "padding: 8px; background: #3a3a3a; border-radius: 4px; margin-bottom: 8px; font-weight: bold; color: #4499ff;";
 
     const totalEntries = configArray.loras.length;
     let totalLoras = 0;
@@ -3927,6 +3993,11 @@ export async function renderUI(node, availableLoras, modelLists, loraFolders, av
 
     // === MAIN CONTENT SECTIONS ===
 
+    // Distribution Settings Section (when enabled, appears first)
+    if (node.state.distribution_enabled) {
+        renderDistributionSettingsSection(node, mainContent);
+    }
+
     // Global Prompts Section
     renderGlobalPromptsSection(node, mainContent);
 
@@ -4022,7 +4093,6 @@ export async function renderUI(node, availableLoras, modelLists, loraFolders, av
         const arrayElement = createConfigArrayElement(node, configArray, arrayIdx, modelLists);
         renderConfigPromptsSection(node, arrayElement, configArray, arrayIdx);
         renderModelsSection(node, arrayElement, configArray, arrayIdx, modelLists);
-        renderExtraModelSamplingSection(node, arrayElement, configArray, arrayIdx);
         renderVAEsSection(node, arrayElement, configArray, arrayIdx, modelLists);
         renderLorasSection(node, arrayElement, configArray, arrayIdx, availableLoras, loraFolders);
         arraysContainer.appendChild(arrayElement);
@@ -4030,11 +4100,6 @@ export async function renderUI(node, availableLoras, modelLists, loraFolders, av
 
     configSection.appendChild(arraysContainer);
     mainContent.appendChild(configSection);
-
-    // Distribution Settings Section (only when enabled)
-    if (node.state.distribution_enabled) {
-        renderDistributionSettingsSection(node, mainContent);
-    }
 
     // JSON Preview Section
     renderPreviewSection(mainContent);

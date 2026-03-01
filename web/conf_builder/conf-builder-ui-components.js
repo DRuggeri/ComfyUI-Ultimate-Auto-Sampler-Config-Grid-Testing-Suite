@@ -420,6 +420,64 @@ export function getStyles() {
                 border-color: #666;
             }
 
+            /* Per-config sidebar navigation */
+            .cb-sidebar-config-group {
+                position: relative;
+                display: flex;
+                flex-direction: column;
+                align-items: center;
+            }
+            .cb-sidebar-config-icon {
+                width: 28px;
+                height: 28px;
+                border: none;
+                border-radius: 4px;
+                cursor: pointer;
+                font-size: 11px;
+                font-weight: bold;
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                background: transparent;
+                color: #999;
+                transition: background 0.15s;
+            }
+            .cb-sidebar-config-icon:hover {
+                background: #333;
+            }
+            .cb-sidebar-config-icon.active {
+                background: #333;
+                color: #fff;
+            }
+            .cb-sidebar-sub-icons {
+                display: none;
+                flex-direction: column;
+                align-items: center;
+                gap: 2px;
+                padding: 2px 0;
+            }
+            .cb-sidebar-config-group:hover .cb-sidebar-sub-icons {
+                display: flex;
+            }
+            .cb-sidebar-sub-icon {
+                width: 28px;
+                height: 22px;
+                border: none;
+                border-radius: 3px;
+                cursor: pointer;
+                font-size: 9px;
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                background: transparent;
+                color: #888;
+                transition: background 0.15s;
+            }
+            .cb-sidebar-sub-icon:hover {
+                background: #444;
+                color: #fff;
+            }
+
             </style>
     `;
 }
@@ -720,12 +778,62 @@ export function createSidebar(node, mainContent, refreshAllConfigBuilders) {
         return btn;
     }
 
+    // Distribution icon (only when enabled, appears first)
+    if (node.state.distribution_enabled) {
+        addNavIcon("🌐", "Distribution", "cb-sec-distribution");
+    }
+
     addNavIcon("📝", "Global Prompts", "cb-sec-prompts");
     addNavIcon("⚙️", "Config Arrays", "cb-sec-configs");
 
-    // Distribution icon (only when enabled)
-    if (node.state.distribution_enabled) {
-        addNavIcon("🌐", "Distribution", "cb-sec-distribution");
+    // Per-config array navigation icons
+    const configColors = ["#0088ff", "#ff6600", "#00cc66", "#cc44cc", "#ffaa00", "#44cccc", "#ff4466", "#88aa00"];
+    if (node.state.config_arrays && node.state.config_arrays.length > 0) {
+        node.state.config_arrays.forEach((ca, idx) => {
+            const color = configColors[idx % configColors.length];
+            const group = document.createElement("div");
+            group.className = "cb-sidebar-config-group";
+
+            const cogBtn = document.createElement("button");
+            cogBtn.className = "cb-sidebar-config-icon";
+            cogBtn.style.color = color;
+            cogBtn.style.borderLeft = `2px solid ${color}`;
+            cogBtn.textContent = `${idx + 1}`;
+            cogBtn.title = ca.name || `Config ${idx + 1}`;
+            cogBtn.dataset.targetId = `cb-config-${idx}`;
+            cogBtn.onclick = () => {
+                const target = mainContent.querySelector(`#cb-config-${idx}`);
+                if (target) target.scrollIntoView({ behavior: "smooth", block: "start" });
+            };
+            icons.push(cogBtn);
+            group.appendChild(cogBtn);
+
+            // Sub-icons container (shown on hover)
+            const subIcons = document.createElement("div");
+            subIcons.className = "cb-sidebar-sub-icons";
+
+            const subSections = [
+                { emoji: "🧊", label: "Models", id: `cb-config-${idx}-models` },
+                { emoji: "📎", label: "Text Enc", id: `cb-config-${idx}-te` },
+                { emoji: "🎨", label: "VAE", id: `cb-config-${idx}-vae` },
+                { emoji: "🔗", label: "LoRAs", id: `cb-config-${idx}-loras` }
+            ];
+
+            subSections.forEach(sub => {
+                const subBtn = document.createElement("button");
+                subBtn.className = "cb-sidebar-sub-icon";
+                subBtn.textContent = sub.emoji;
+                subBtn.title = sub.label;
+                subBtn.onclick = () => {
+                    const target = mainContent.querySelector(`#${sub.id}`);
+                    if (target) target.scrollIntoView({ behavior: "smooth", block: "start" });
+                };
+                subIcons.appendChild(subBtn);
+            });
+
+            group.appendChild(subIcons);
+            sidebar.appendChild(group);
+        });
     }
 
     addNavIcon("📄", "JSON Preview", "cb-sec-preview");
@@ -798,7 +906,14 @@ export function createSidebar(node, mainContent, refreshAllConfigBuilders) {
     sidebar.appendChild(refreshBtn);
 
     // Scroll spy: highlight active section
-    const sectionIds = ["cb-sec-prompts", "cb-sec-configs", "cb-sec-distribution", "cb-sec-preview"];
+    const sectionIds = ["cb-sec-prompts", "cb-sec-configs"];
+    // Add per-config section IDs for scroll spy
+    if (node.state.config_arrays) {
+        node.state.config_arrays.forEach((_, idx) => {
+            sectionIds.push(`cb-config-${idx}`);
+        });
+    }
+    sectionIds.push("cb-sec-distribution", "cb-sec-preview");
     const updateActiveIcon = () => {
         const scrollTop = mainContent.scrollTop;
         let activeId = sectionIds[0];
