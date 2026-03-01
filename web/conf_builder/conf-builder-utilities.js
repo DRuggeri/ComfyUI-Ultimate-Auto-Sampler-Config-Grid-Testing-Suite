@@ -583,15 +583,15 @@ export function convertStateToConfigs(state) {
             config.lora_strength_lock = configArray.lora_strength_lock;
         }
 
-        // Add vae_bypass_states if any are set
-        if (configArray.vae_bypass_states && Object.keys(configArray.vae_bypass_states).length > 0) {
-            config.vae_bypass_states = configArray.vae_bypass_states;
-        }
-
-        // Add te_bypass_states if any are set
-        if (configArray.te_bypass_states && Object.keys(configArray.te_bypass_states).length > 0) {
-            config.te_bypass_states = configArray.te_bypass_states;
-        }
+        // vae_bypass_states and te_bypass_states are internal UI state only.
+        // They control filtering (lines 500, 545) but should NOT be in config output.
+        // Bypass state persistence is handled by node.saveState() separately.
+        // if (configArray.vae_bypass_states && Object.keys(configArray.vae_bypass_states).length > 0) {
+        //     config.vae_bypass_states = configArray.vae_bypass_states;
+        // }
+        // if (configArray.te_bypass_states && Object.keys(configArray.te_bypass_states).length > 0) {
+        //     config.te_bypass_states = configArray.te_bypass_states;
+        // }
 
         // Add seed_behavior if set to randomize
         if (configArray.seed_behavior === "randomize") {
