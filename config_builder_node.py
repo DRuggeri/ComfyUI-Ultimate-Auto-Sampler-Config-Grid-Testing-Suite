@@ -706,7 +706,8 @@ async def lookup_lora_metadata_endpoint(request):
     try:
         data = await request.json()
         lora_name = data.get("lora_name", "")
-        
+        force_refresh = data.get("force_refresh", False)
+
         if not lora_name:
             return web.json_response({
                 "error": "No LoRA name provided"
@@ -719,7 +720,7 @@ async def lookup_lora_metadata_endpoint(request):
         model_data_dir = os.path.join(output_dir, "benchmarks", "model-data", lora_name.replace("/", "_").replace("\\", "_").replace(".safetensors", ""))
         metadata_file = os.path.join(model_data_dir, "metadata.json")
 
-        if os.path.exists(metadata_file):
+        if os.path.exists(metadata_file) and not force_refresh:
             try:
                 cached = load_json_from_file(metadata_file)
                 if cached and cached.get("name"):
@@ -820,6 +821,7 @@ async def lookup_model_metadata_endpoint(request):
         data = await request.json()
         model_name = data.get("model_name", "")
         model_type = data.get("model_type", "checkpoint")
+        force_refresh = data.get("force_refresh", False)
 
         if not model_name:
             return web.json_response({
@@ -833,7 +835,7 @@ async def lookup_model_metadata_endpoint(request):
         model_data_dir = os.path.join(output_dir, "benchmarks", "model-data", model_name.replace("/", "_").replace("\\", "_").replace(".safetensors", "").replace(".ckpt", "").replace(".gguf", ""))
         metadata_file = os.path.join(model_data_dir, "metadata.json")
 
-        if os.path.exists(metadata_file):
+        if os.path.exists(metadata_file) and not force_refresh:
             try:
                 cached = load_json_from_file(metadata_file)
                 if cached and cached.get("name"):

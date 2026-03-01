@@ -1119,7 +1119,7 @@ async function fetchLoraTriggersForOmit(node, arrayIdx, loraName) {
 }
 
 // New modal for LoRA metadata lookup
-async function showLoraMetadataModal(node, arrayIdx, loraName) {
+async function showLoraMetadataModal(node, arrayIdx, loraName, forceRefresh = false) {
     const overlay = document.createElement("div");
     overlay.style.cssText = `position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0, 0, 0, 0.85); display: flex; align-items: center; justify-content: center; z-index: 10000;`;
 
@@ -1173,7 +1173,7 @@ async function showLoraMetadataModal(node, arrayIdx, loraName) {
         const resp = await fetch("/configbuilder/lookup_lora_metadata", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ lora_name: loraName })
+            body: JSON.stringify({ lora_name: loraName, force_refresh: forceRefresh })
         });
 
         if (!resp.ok) {
@@ -1198,9 +1198,20 @@ async function showLoraMetadataModal(node, arrayIdx, loraName) {
             const cacheBanner = document.createElement("div");
             cacheBanner.style.cssText = "background: #553300; border: 2px solid #ffaa00; border-radius: 6px; padding: 10px 14px; margin-bottom: 15px; text-align: center;";
             cacheBanner.innerHTML = `
-                <div style="font-size: 14px; font-weight: bold; color: #ffaa00;">⚠️ READ FROM DISK CACHE</div>
+                <div style="font-size: 16px; font-weight: bold; color: #ffaa00;">⚠️ READ FROM DISK CACHE</div>
                 <div style="font-size: 12px; color: #ccaa66; margin-top: 4px;">Last looked up on: <strong>${data.cache_date || 'Unknown'}</strong></div>
             `;
+            const refetchBtn = document.createElement("button");
+            refetchBtn.className = "cb-button";
+            refetchBtn.style.cssText = "margin-top: 8px; background: #664400; border: 1px solid #ffaa00; color: #ffcc44; font-size: 12px; padding: 6px 16px;";
+            refetchBtn.textContent = "🔄 Re-fetch from CivitAI Now";
+            refetchBtn.onclick = async () => {
+                refetchBtn.disabled = true;
+                refetchBtn.textContent = "🔄 Fetching...";
+                closeModal();
+                await showLoraMetadataModal(node, arrayIdx, loraName, true);
+            };
+            cacheBanner.appendChild(refetchBtn);
             content.appendChild(cacheBanner);
         }
 
@@ -1339,7 +1350,7 @@ async function showLoraMetadataModal(node, arrayIdx, loraName) {
 }
 
 // Modal for Model/Checkpoint metadata lookup from CivitAI
-async function showModelMetadataModal(node, arrayIdx, modelName, modelType) {
+async function showModelMetadataModal(node, arrayIdx, modelName, modelType, forceRefresh = false) {
     const overlay = document.createElement("div");
     overlay.style.cssText = `position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0, 0, 0, 0.85); display: flex; align-items: center; justify-content: center; z-index: 10000;`;
 
@@ -1394,7 +1405,7 @@ async function showModelMetadataModal(node, arrayIdx, modelName, modelType) {
         const resp = await fetch("/configbuilder/lookup_model_metadata", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ model_name: modelName, model_type: modelType })
+            body: JSON.stringify({ model_name: modelName, model_type: modelType, force_refresh: forceRefresh })
         });
 
         if (!resp.ok) {
@@ -1428,9 +1439,20 @@ async function showModelMetadataModal(node, arrayIdx, modelName, modelType) {
             const cacheBanner = document.createElement("div");
             cacheBanner.style.cssText = "background: #553300; border: 2px solid #ffaa00; border-radius: 6px; padding: 10px 14px; margin-bottom: 15px; text-align: center;";
             cacheBanner.innerHTML = `
-                <div style="font-size: 14px; font-weight: bold; color: #ffaa00;">⚠️ READ FROM DISK CACHE</div>
+                <div style="font-size: 16px; font-weight: bold; color: #ffaa00;">⚠️ READ FROM DISK CACHE</div>
                 <div style="font-size: 12px; color: #ccaa66; margin-top: 4px;">Last looked up on: <strong>${data.cache_date || 'Unknown'}</strong></div>
             `;
+            const refetchBtn = document.createElement("button");
+            refetchBtn.className = "cb-button";
+            refetchBtn.style.cssText = "margin-top: 8px; background: #664400; border: 1px solid #ffaa00; color: #ffcc44; font-size: 12px; padding: 6px 16px;";
+            refetchBtn.textContent = "🔄 Re-fetch from CivitAI Now";
+            refetchBtn.onclick = async () => {
+                refetchBtn.disabled = true;
+                refetchBtn.textContent = "🔄 Fetching...";
+                closeModal();
+                await showModelMetadataModal(node, arrayIdx, modelName, modelType, true);
+            };
+            cacheBanner.appendChild(refetchBtn);
             content.appendChild(cacheBanner);
         }
 
