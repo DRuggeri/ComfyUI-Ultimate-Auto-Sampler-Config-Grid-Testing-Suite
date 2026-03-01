@@ -1065,6 +1065,14 @@ export function createLoraElement(node, loraStr, arrayIdx, loraIdx, availableLor
         metadataBtn.onclick = async () => await showLoraMetadataModal(node, arrayIdx, parsed.name);
         moreOptionsContent.appendChild(metadataBtn);
 
+        // 4. Edit Trigger Words Button
+        const editTriggersBtn = document.createElement("button");
+        editTriggersBtn.className = "cb-button";
+        editTriggersBtn.style.cssText = `width: 100%; background: linear-gradient(135deg, #336633, #446644); border-left: 4px solid #66cc66; margin-top: 4px;`;
+        editTriggersBtn.textContent = "✏️ Edit Trigger Words";
+        editTriggersBtn.onclick = async () => await showEditTriggersModal(node, arrayIdx, parsed.name);
+        moreOptionsContent.appendChild(editTriggersBtn);
+
         moreOptionsSection.appendChild(moreOptionsContent);
         contentDiv.appendChild(moreOptionsSection);
     }
@@ -1588,6 +1596,177 @@ async function showModelMetadataModal(node, arrayIdx, modelName, modelType, forc
     }
 
     modal.appendChild(closeBtn);
+}
+
+// ============================================================
+// Trigger Word Editor Modal
+// ============================================================
+async function showEditTriggersModal(node, arrayIdx, loraName) {
+    // Build modal overlay (same pattern as metadata modals)
+    const overlay = document.createElement("div");
+    overlay.style.cssText = "position: fixed; top: 0; left: 0; width: 100vw; height: 100vh; background: rgba(0,0,0,0.85); z-index: 10000; display: flex; align-items: center; justify-content: center;";
+
+    const modal = document.createElement("div");
+    modal.style.cssText = "background: #1a1a1a; border: 2px solid #66cc66; border-radius: 12px; padding: 25px; max-width: 600px; width: 90%; max-height: 80vh; overflow-y: auto; position: relative;";
+
+    const closeModal = () => { if (document.body.contains(overlay)) document.body.removeChild(overlay); };
+    overlay.onclick = (e) => { if (e.target === overlay) closeModal(); };
+    document.addEventListener("keydown", function escHandler(e) {
+        if (e.key === "Escape") { closeModal(); document.removeEventListener("keydown", escHandler); }
+    });
+
+    // Close X button
+    const closeX = document.createElement("button");
+    closeX.textContent = "✕";
+    closeX.style.cssText = "position: absolute; top: 10px; right: 15px; background: none; border: none; color: #ff4444; font-size: 20px; cursor: pointer;";
+    closeX.onclick = closeModal;
+    modal.appendChild(closeX);
+
+    // Title
+    const title = document.createElement("h3");
+    title.textContent = "✏️ Edit Trigger Words";
+    title.style.cssText = "margin: 0 0 5px 0; color: #66cc66;";
+    modal.appendChild(title);
+
+    const subtitle = document.createElement("div");
+    subtitle.style.cssText = "font-size: 12px; color: #888; margin-bottom: 15px;";
+    subtitle.textContent = loraName.split('/').pop();
+    modal.appendChild(subtitle);
+
+    const status = document.createElement("div");
+    status.textContent = "🔄 Loading trigger words...";
+    status.style.cssText = "margin-bottom: 15px; color: #aaa; font-size: 12px;";
+    modal.appendChild(status);
+
+    const chipsContainer = document.createElement("div");
+    chipsContainer.style.cssText = "display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 15px; min-height: 30px; padding: 8px; background: #111; border: 1px solid #333; border-radius: 6px;";
+    modal.appendChild(chipsContainer);
+
+    // Input row
+    const inputRow = document.createElement("div");
+    inputRow.style.cssText = "display: flex; gap: 6px; margin-bottom: 15px;";
+    const input = document.createElement("input");
+    input.className = "cb-input";
+    input.type = "text";
+    input.placeholder = "Add new trigger word...";
+    input.style.cssText = "flex: 1; padding: 6px 10px; font-size: 12px;";
+    const addWordBtn = document.createElement("button");
+    addWordBtn.className = "cb-button primary";
+    addWordBtn.textContent = "+ Add";
+    addWordBtn.style.cssText = "padding: 6px 12px; font-size: 12px;";
+    inputRow.appendChild(input);
+    inputRow.appendChild(addWordBtn);
+    modal.appendChild(inputRow);
+
+    // Button row
+    const btnRow = document.createElement("div");
+    btnRow.style.cssText = "display: flex; gap: 8px; justify-content: flex-end; margin-top: 10px;";
+
+    const saveBtn = document.createElement("button");
+    saveBtn.className = "cb-button";
+    saveBtn.style.cssText = "background: #336633; border: 1px solid #66cc66; color: #88ff88; padding: 8px 20px;";
+    saveBtn.textContent = "💾 Save";
+
+    const cancelBtn = document.createElement("button");
+    cancelBtn.className = "cb-button";
+    cancelBtn.style.cssText = "background: #333; color: #aaa; padding: 8px 20px;";
+    cancelBtn.textContent = "Cancel";
+    cancelBtn.onclick = closeModal;
+
+    btnRow.appendChild(cancelBtn);
+    btnRow.appendChild(saveBtn);
+    modal.appendChild(btnRow);
+
+    overlay.appendChild(modal);
+    document.body.appendChild(overlay);
+
+    // State
+    let currentTriggers = [];
+
+    function renderTriggerChips() {
+        chipsContainer.innerHTML = "";
+        if (currentTriggers.length === 0) {
+            const empty = document.createElement("span");
+            empty.style.cssText = "color: #666; font-size: 11px; font-style: italic;";
+            empty.textContent = "No trigger words";
+            chipsContainer.appendChild(empty);
+            return;
+        }
+        currentTriggers.forEach((trigger, idx) => {
+            const chip = document.createElement("span");
+            chip.style.cssText = "background: #224422; border: 1px solid #448844; color: #aaffaa; padding: 3px 8px; border-radius: 12px; font-size: 11px; display: flex; align-items: center; gap: 4px;";
+            chip.textContent = trigger;
+            const removeBtn = document.createElement("span");
+            removeBtn.textContent = "×";
+            removeBtn.style.cssText = "cursor: pointer; color: #ff6666; font-weight: bold; margin-left: 2px;";
+            removeBtn.onclick = () => {
+                currentTriggers.splice(idx, 1);
+                renderTriggerChips();
+            };
+            chip.appendChild(removeBtn);
+            chipsContainer.appendChild(chip);
+        });
+    }
+
+    function addTriggerWord() {
+        const word = input.value.trim();
+        if (word && !currentTriggers.includes(word)) {
+            currentTriggers.push(word);
+            renderTriggerChips();
+            input.value = "";
+        }
+        input.focus();
+    }
+
+    addWordBtn.onclick = addTriggerWord;
+    input.onkeydown = (e) => { if (e.key === "Enter") { e.preventDefault(); addTriggerWord(); } };
+
+    saveBtn.onclick = async () => {
+        saveBtn.disabled = true;
+        saveBtn.textContent = "💾 Saving...";
+        try {
+            const resp = await fetch("/configbuilder/save_lora_triggers", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ lora_name: loraName, triggers: currentTriggers })
+            });
+            if (resp.ok) {
+                status.textContent = "✅ Trigger words saved!";
+                status.style.color = "#66ff66";
+                setTimeout(closeModal, 800);
+            } else {
+                const err = await resp.json();
+                status.textContent = "❌ Error: " + (err.error || "Save failed");
+                status.style.color = "#ff6666";
+                saveBtn.disabled = false;
+                saveBtn.textContent = "💾 Save";
+            }
+        } catch (e) {
+            status.textContent = "❌ Error: " + e.message;
+            status.style.color = "#ff6666";
+            saveBtn.disabled = false;
+            saveBtn.textContent = "💾 Save";
+        }
+    };
+
+    // Fetch current triggers
+    try {
+        const resp = await fetch(`/configbuilder/get_lora_triggers?lora_name=${encodeURIComponent(loraName)}`);
+        if (resp.ok) {
+            const data = await resp.json();
+            currentTriggers = data.triggers || [];
+            status.textContent = `Loaded ${currentTriggers.length} trigger word(s)`;
+            status.style.color = "#88ff88";
+        } else {
+            status.textContent = "⚠️ No triggers found (you can add new ones)";
+            status.style.color = "#ffaa00";
+        }
+    } catch (e) {
+        status.textContent = "⚠️ Could not load triggers: " + e.message;
+        status.style.color = "#ffaa00";
+    }
+    renderTriggerChips();
+    input.focus();
 }
 
 

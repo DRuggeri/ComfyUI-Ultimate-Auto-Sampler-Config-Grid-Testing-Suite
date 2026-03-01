@@ -1017,3 +1017,59 @@ async def refresh_models_endpoint(request):
         return web.json_response({
             "error": str(e)
         }, status=500)
+
+
+@server.PromptServer.instance.routes.get("/configbuilder/get_lora_triggers")
+async def get_lora_triggers_endpoint(request):
+    """Get trigger words for a specific LoRA from loras_tags.json"""
+    try:
+        lora_name = request.query.get("lora_name", "")
+        if not lora_name:
+            return web.json_response({"error": "Missing lora_name"}, status=400)
+
+        json_tags_path = os.path.join(folder_paths.get_output_directory(), "benchmarks/loras_tags.json")
+        triggers = []
+        if os.path.exists(json_tags_path):
+            from .lora_utils import load_json_from_file
+            lora_tags = load_json_from_file(json_tags_path) or {}
+            # Try exact match, normalized, and backslash variants
+            normalized = lora_name.replace("\\", "/")
+            backslash = lora_name.replace("/", "\\")
+            triggers = lora_tags.get(lora_name, lora_tags.get(normalized, lora_tags.get(backslash, [])))
+
+        return web.json_response({"lora_name": lora_name, "triggers": triggers})
+    except Exception as e:
+        return web.json_response({"error": str(e)}, status=500)
+
+
+@server.PromptServer.instance.routes.post("/configbuilder/save_lora_triggers")
+async def save_lora_triggers_endpoint(request):
+    """Save edited trigger words for a LoRA to loras_tags.json"""
+    try:
+        data = await request.json()
+        lora_name = data.get("lora_name", "")
+        triggers = data.get("triggers", [])
+
+        if not lora_name:
+            return web.json_response({"error": "Missing lora_name"}, status=400)
+
+        json_tags_path = os.path.join(folder_paths.get_output_directory(), "benchmarks/loras_tags.json")
+        from .lora_utils import load_json_from_file, save_dict_to_json
+        lora_tags = {}
+        if os.path.exists(json_tags_path):
+            lora_tags = load_json_from_file(json_tags_path) or {}
+
+        # Normalize the name for consistent storage
+        normalized = lora_name.replace("\\", "/")
+        lora_tags[normalized] = triggers
+
+        save_dict_to_json(lora_tags, json_tags_path)
+
+        # Clear the trigger word LRU cache so changes take effect immediately
+        from .trigger_words import clear_trigger_caches
+        clear_trigger_caches()
+
+        print(f"[ConfigBuilder] ✏️ Saved {len(triggers)} trigger words for: {normalized}")
+        return web.json_response({"status": "saved", "lora_name": normalized, "triggers": triggers})
+    except Exception as e:
+        return web.json_response({"error": str(e)}, status=500)
