@@ -20,10 +20,13 @@ import {
     createSearchableSelect,
     createSlider,
     createInputGroup,
-    getStyles
+    getStyles,
+    createTopBar,
+    createSidebar,
+    createSectionHeader
 } from './conf-builder-ui-components.js';
 
-import { renderDistributionSection } from './conf-builder-distribution.js';
+import { renderDistributionSection, renderDistributionSettingsSection } from './conf-builder-distribution.js';
 
 const RESOLUTION_PRESETS = [
     { group: "SD 1.5 — Square",    items: ["512x512"] },
@@ -3573,22 +3576,21 @@ export function renderGlobalPromptsSection(node, container) {
 
     const section = document.createElement("div");
     section.className = "cb-section full-width";
+    section.id = "cb-sec-prompts";
 
-    // Header (collapsible)
-    const header = document.createElement("div");
-    header.className = "cb-section-toggle";
-    header.style.cssText = "display: flex; justify-content: space-between; align-items: center; cursor: pointer; user-select: none; margin-bottom: 10px;";
-
-    const titleSpan = document.createElement("div");
-    titleSpan.className = "cb-section-title";
-    titleSpan.style.cssText = "margin-bottom: 0; border-bottom: none; padding-bottom: 0; color: #00aa44;";
-    titleSpan.textContent = "📝 Global Prompts (Override Node Inputs)";
-    header.appendChild(titleSpan);
-
-    const arrowSpan = document.createElement("span");
-    arrowSpan.textContent = isCollapsed ? "▶" : "▼";
-    arrowSpan.style.cssText = "color: #00aa44; font-size: 12px;";
-    header.appendChild(arrowSpan);
+    // Header (collapsible) — uniform section header
+    const header = createSectionHeader("📝", "Global Prompts (Override Node Inputs)", "prompts", {
+        collapsible: true,
+        collapsed: isCollapsed,
+        onToggle: () => {
+            const isNowCollapsed = contentDiv.style.display !== "none";
+            contentDiv.style.display = isNowCollapsed ? "none" : "flex";
+            // Update arrow in header
+            const arrow = header.querySelector("span:last-child");
+            if (arrow) arrow.textContent = isNowCollapsed ? "▶" : "▼";
+            node.uiState.globalPromptsSectionCollapsed = isNowCollapsed;
+        }
+    });
 
     section.appendChild(header);
 
@@ -3598,16 +3600,9 @@ export function renderGlobalPromptsSection(node, container) {
     contentDiv.style.flexDirection = "column";
     contentDiv.style.gap = "12px";
 
-    header.onclick = () => {
-        const isNowCollapsed = contentDiv.style.display !== "none";
-        contentDiv.style.display = isNowCollapsed ? "none" : "flex";
-        arrowSpan.textContent = isNowCollapsed ? "▶" : "▼";
-        node.uiState.globalPromptsSectionCollapsed = isNowCollapsed;
-    };
-
     // Info text
     const info = document.createElement("div");
-    info.style.cssText = "font-size: 11px; color: #888; font-style: italic;";
+    info.style.cssText = "font-size: 11px; color: #999; font-style: italic;";
     info.textContent = "These prompts override the sampler node's positive/negative text inputs for ALL config arrays. Per-config prompts (below) can further override these.";
     contentDiv.appendChild(info);
 
@@ -3819,7 +3814,12 @@ export function renderConfigPromptsSection(node, div, configArray, arrayIdx) {
 export function renderPreviewSection(container) {
     const section = document.createElement("div");
     section.className = "cb-section full-width";
-    section.innerHTML = '<div class="cb-section-title">📄 JSON Preview</div>';
+    section.id = "cb-sec-preview";
+
+    // Uniform section header
+    const header = createSectionHeader("📄", "JSON Preview", "preview");
+    section.appendChild(header);
+
     const preview = document.createElement("pre");
     preview.className = "cb-preview";
     preview.id = "json-preview";
@@ -3835,26 +3835,63 @@ export function updatePreview(node) {
 }
 
 export async function renderUI(node, availableLoras, modelLists, loraFolders, availableSessions, availableConfigs, refreshAllConfigBuilders) {
-    const scrollContainer = node.htmlContainer.querySelector(".cb-container");
+    // Save scroll from the main content area
+    const scrollContainer = node.htmlContainer.querySelector(".cb-main-content");
     const savedScrollTop = scrollContainer ? scrollContainer.scrollTop : 0;
 
     node.htmlContainer.innerHTML = getStyles() + '<div class="cb-container" id="cb-root"></div>';
 
     const root = node.htmlContainer.querySelector("#cb-root");
 
-    const topRow = document.createElement("div");
-    topRow.className = "cb-sections-row";
-    renderSessionSection(node, topRow, availableSessions, refreshAllConfigBuilders);
-    renderConfigSection(node, topRow, availableConfigs);
-    renderDistributionSection(node, topRow);
-    root.appendChild(topRow);
+    // === TOP BAR (sticky) ===
+    const topBar = createTopBar(node, {
+        availableSessions,
+        availableConfigs,
+        refreshAllConfigBuilders,
+        onLoadSession: async (value) => {
+            node.state.auto_save = false;
+            await node.loadSession(value);
+        },
+        onLoadConfig: async (value) => {
+            await node.loadConfigFromBackend(value);
+        },
+        onSaveConfig: async () => {
+            await node.saveConfigToBackend();
+            const { getAvailableConfigs, clearConfigsCache } = await import('./conf-builder-utilities.js');
+            clearConfigsCache();
+            await getAvailableConfigs();
+            node.renderUI();
+        }
+    });
+    root.appendChild(topBar);
 
-    // Global Prompts Section (between session/config management and config arrays)
-    renderGlobalPromptsSection(node, root);
+    // === LAYOUT WRAPPER (sidebar + main content) ===
+    const layoutWrapper = document.createElement("div");
+    layoutWrapper.className = "cb-layout-wrapper";
 
+    // Create main content area first (sidebar needs reference for scroll spy)
+    const mainContent = document.createElement("div");
+    mainContent.className = "cb-main-content";
+
+    // Create sidebar
+    const sidebar = createSidebar(node, mainContent, refreshAllConfigBuilders);
+    layoutWrapper.appendChild(sidebar);
+    layoutWrapper.appendChild(mainContent);
+    root.appendChild(layoutWrapper);
+
+    // === MAIN CONTENT SECTIONS ===
+
+    // Global Prompts Section
+    renderGlobalPromptsSection(node, mainContent);
+
+    // Config Arrays Section
     const configSection = document.createElement("div");
     configSection.className = "cb-section full-width";
-    configSection.innerHTML = '<div class="cb-section-title">⚙️ Config Arrays</div>';
+    configSection.id = "cb-sec-configs";
+
+    // Uniform section header for Config Arrays
+    const configHeader = createSectionHeader("⚙️", "Config Arrays", "configs");
+    configSection.appendChild(configHeader);
 
     const headerBar = document.createElement("div");
     headerBar.style.cssText = "margin-bottom: 10px; display: flex; align-items: center; gap: 12px;";
@@ -3888,37 +3925,32 @@ export async function renderUI(node, availableLoras, modelLists, loraFolders, av
             use_custom_prompts: false,
             model_prompt_prefix: "",
             model_prompt_suffix: "",
-            attention_modes: ["default"]
+            attention_modes: ["default"],
+            resolutions: [],
+            model_sampling_override: "none",
+            model_sampling_shift: "1.73",
+            model_sampling_flux_max_shift: "1.15",
+            model_sampling_flux_base_shift: "0.5",
+            use_advanced_sampling: false,
+            advanced_guider: "cfg_guider",
+            advanced_scheduler: "basic",
+            use_flux_guidance: false,
+            flux_guidance_value: "3.5"
         });
         node.saveState();
         node.renderUI();
     };
     headerBar.appendChild(addConfigBtn);
 
-    const labelModeLabel = document.createElement("label");
-    labelModeLabel.className = "cb-toggle";
-    labelModeLabel.style.fontSize = "12px";
-    const labelModeCheckbox = document.createElement("input");
-    labelModeCheckbox.type = "checkbox";
-    labelModeCheckbox.checked = node.state.label_mode || false;
-    labelModeCheckbox.onchange = () => {
-        node.state.label_mode = labelModeCheckbox.checked;
-        node.saveState();
-        debouncedRenderUI(node);
-    };
-    labelModeLabel.appendChild(labelModeCheckbox);
-    labelModeLabel.appendChild(document.createTextNode(" \u{1F3F7}\uFE0F Label Mode"));
-    headerBar.appendChild(labelModeLabel);
-
     configSection.appendChild(headerBar);
 
     // Quick-jump navigation bar (only show when there are 2+ configs)
     if (node.state.config_arrays.length > 1) {
         const navBar = document.createElement("div");
-        navBar.style.cssText = "display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 12px; padding: 8px; background: #252525; border-radius: 4px; position: sticky; top: 0; z-index: 50;";
+        navBar.style.cssText = "display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 12px; padding: 8px; background: #2a2a2a; border-radius: 4px; position: sticky; top: 0; z-index: 50;";
 
         const navLabel = document.createElement("span");
-        navLabel.style.cssText = "color: #888; font-size: 11px; font-weight: bold; display: flex; align-items: center; margin-right: 4px;";
+        navLabel.style.cssText = "color: #999; font-size: 11px; font-weight: bold; display: flex; align-items: center; margin-right: 4px;";
         navLabel.textContent = "JUMP TO:";
         navBar.appendChild(navLabel);
 
@@ -3951,12 +3983,19 @@ export async function renderUI(node, availableLoras, modelLists, loraFolders, av
     });
 
     configSection.appendChild(arraysContainer);
-    root.appendChild(configSection);
+    mainContent.appendChild(configSection);
 
-    renderPreviewSection(root);
+    // Distribution Settings Section (only when enabled)
+    if (node.state.distribution_enabled) {
+        renderDistributionSettingsSection(node, mainContent);
+    }
+
+    // JSON Preview Section
+    renderPreviewSection(mainContent);
     updatePreview(node);
 
-    const newScrollContainer = node.htmlContainer.querySelector(".cb-container");
+    // Restore scroll position on main content
+    const newScrollContainer = node.htmlContainer.querySelector(".cb-main-content");
     if (newScrollContainer) {
         newScrollContainer.scrollTop = savedScrollTop;
     }
