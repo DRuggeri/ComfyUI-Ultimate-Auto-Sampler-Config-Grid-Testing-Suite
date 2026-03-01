@@ -698,6 +698,7 @@ export function createModelElement(node, modelEntry, arrayIdx, modelIdx, modelLi
             const newBypassState = !bypassCheck.checked;
             node.state.config_arrays[arrayIdx].model_bypass_states[modelPath] = newBypassState;
             node.saveState();
+            updatePreview(node);
             // Visual feedback
             div.style.opacity = newBypassState ? "0.5" : "1.0";
             div.style.filter = newBypassState ? "grayscale(0.7)" : "none";
@@ -977,6 +978,7 @@ export function createLoraElement(node, loraStr, arrayIdx, loraIdx, availableLor
         const newBypassState = !bypassCheck.checked;
         node.state.config_arrays[arrayIdx].lora_bypass_states[parsed.name] = newBypassState;
         node.saveState();
+        updatePreview(node);
         // Visual feedback
         div.style.opacity = newBypassState ? "0.5" : "1.0";
         div.style.filter = newBypassState ? "grayscale(0.7)" : "none";
@@ -2133,6 +2135,7 @@ function renderTextEncodersSection(node, container, configArray, arrayIdx, model
                 const newBypassState = !teBypassCheck.checked;
                 node.state.config_arrays[arrayIdx].te_bypass_states[tePath] = newBypassState;
                 node.saveState();
+                updatePreview(node);
                 // Visual feedback
                 teRow.style.opacity = newBypassState ? "0.5" : "1.0";
                 teRow.style.filter = newBypassState ? "grayscale(0.7)" : "none";
@@ -2715,6 +2718,7 @@ function createVAEElement(node, vaeName, arrayIdx, vaeIdx, vaeList, vFolders) {
             const newBypassState = !bypassCheck.checked;
             node.state.config_arrays[arrayIdx].vae_bypass_states[vaeName] = newBypassState;
             node.saveState();
+            updatePreview(node);
             // Visual feedback
             div.style.opacity = newBypassState ? "0.5" : "1.0";
             div.style.filter = newBypassState ? "grayscale(0.7)" : "none";
