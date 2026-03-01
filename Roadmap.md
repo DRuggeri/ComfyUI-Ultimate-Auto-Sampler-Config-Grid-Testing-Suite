@@ -43,6 +43,18 @@ ProjectStructure.md has notes to assist AI in developing this project
 
 ### **ComfyUI Ultimate Sampler Grid – Development Roadmap**
 
+## Builder UI Improve Navigation, Layout & Styles - Always on top, sticky, Top Bar & Sidebar:
+
+Top bar should have Session Name as a text input first, far left. Then let's add a Settings button with a dropdown with Load Session, Load Config, Save Config, Enable Distributed Processing
+
+Side Bar, Icons For Each Major Section, click to scroll to it.
+
+Layout & Styles fix: Many section headers are too small to find and read easily, and some are different sizes, lets make them uniform.
+
+Color issues, comfyui is dark mode, many buttons and headers and texts are too dark or darkly colored to be viewed easily for everyone, lets fix that.
+
+
+
 ## Jobs don't generate prompts in the order they're written in the array, it's mildly inconvenient. Lets fix that and make it run in order from top to bottom of the array.
 
 ## Custom Job Resume / Skipping - Start At Job # Option
