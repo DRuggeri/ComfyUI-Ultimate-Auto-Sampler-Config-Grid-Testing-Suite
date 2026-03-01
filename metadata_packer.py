@@ -156,11 +156,14 @@ def find_model_file(model_path, search_paths=None):
     if search_paths is None:
         # Try common ComfyUI model directories
         import folder_paths
-        search_paths = [
-            folder_paths.get_folder_paths("checkpoints")[0] if folder_paths.get_folder_paths("checkpoints") else None,
-            folder_paths.get_folder_paths("loras")[0] if folder_paths.get_folder_paths("loras") else None,
-        ]
-        search_paths = [p for p in search_paths if p]
+        search_paths = []
+        for folder_type in ["checkpoints", "loras", "diffusion_models", "unet"]:
+            try:
+                paths = folder_paths.get_folder_paths(folder_type)
+                if paths:
+                    search_paths.extend(paths)
+            except Exception:
+                pass
     
     # Normalize path separators
     model_path_normalized = model_path.replace("\\", os.sep).replace("/", os.sep)
@@ -261,10 +264,21 @@ def pack_metadata_into_image(source_path, dest_path, item_data, meta_data, workf
         model_hash = ""
         if model:
             model_file = find_model_file(model, checkpoint_paths)
+            if not model_file:
+                # Try folder_paths.get_full_path for various model types
+                import folder_paths as fp
+                for model_type in ["checkpoints", "diffusion_models", "unet"]:
+                    try:
+                        resolved = fp.get_full_path(model_type, model)
+                        if resolved and os.path.isfile(resolved):
+                            model_file = resolved
+                            break
+                    except Exception:
+                        pass
             if model_file:
                 print(f"[MetadataPacker] Found model file: {model_file}")
                 model_hash = calculate_file_hash(model_file, defer_save=True)
-            
+
             # Fallback: use filename-based hash if file not found
             if not model_hash:
                 model_filename = model.replace("\\", "/").split("/")[-1].replace(".safetensors", "")
