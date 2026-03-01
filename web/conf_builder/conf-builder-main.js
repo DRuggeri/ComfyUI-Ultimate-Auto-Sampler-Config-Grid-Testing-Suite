@@ -214,13 +214,13 @@ app.registerExtension({
                     // Guard against running before modules are ready
                     if (!utilities || !configManagement) return;
 
-                    const availableLoras = await utilities.getAvailableLoras();
-                    const loraFolders = await utilities.getLoraFolders();
-                    const availableSessions = await utilities.getAvailableSessions();
-                    const availableConfigs = await utilities.getAvailableConfigs();
-
-                    // Fetch all model type lists via unified endpoint
-                    await utilities.getModelLists();
+                    const [availableLoras, loraFolders, availableSessions, availableConfigs] = await Promise.all([
+                        utilities.getAvailableLoras(),
+                        utilities.getLoraFolders(),
+                        utilities.getAvailableSessions(),
+                        utilities.getAvailableConfigs(),
+                        utilities.getModelLists()
+                    ]);
 
                     // Build modelLists object for config management
                     const modelLists = {

@@ -25,6 +25,16 @@ import {
 
 import { renderDistributionSection } from './conf-builder-distribution.js';
 
+// Debounced renderUI to batch rapid state changes and avoid redundant full rebuilds
+let _renderUITimer = null;
+function debouncedRenderUI(node) {
+    if (_renderUITimer) clearTimeout(_renderUITimer);
+    _renderUITimer = setTimeout(() => {
+        _renderUITimer = null;
+        node.renderUI();
+    }, 150);
+}
+
 // --- SESSION SECTION RENDERER ---
 
 export function renderSessionSection(node, container, availableSessions, refreshAllConfigBuilders) {
@@ -389,7 +399,7 @@ export function createConfigArrayElement(node, configArray, arrayIdx, modelLists
         if (!node.state.config_arrays[arrayIdx].models) node.state.config_arrays[arrayIdx].models = [];
         node.state.config_arrays[arrayIdx].models.push("None");
         node.saveState();
-        node.renderUI();
+        debouncedRenderUI(node);
     };
     controlsBar.appendChild(addModelBtn);
 
@@ -401,7 +411,7 @@ export function createConfigArrayElement(node, configArray, arrayIdx, modelLists
         if (!node.state.config_arrays[arrayIdx].vaes) node.state.config_arrays[arrayIdx].vaes = [];
         node.state.config_arrays[arrayIdx].vaes.push("None");
         node.saveState();
-        node.renderUI();
+        debouncedRenderUI(node);
     };
     controlsBar.appendChild(addVaeBtn);
 
@@ -413,7 +423,7 @@ export function createConfigArrayElement(node, configArray, arrayIdx, modelLists
         if (!node.state.config_arrays[arrayIdx].loras) node.state.config_arrays[arrayIdx].loras = [];
         node.state.config_arrays[arrayIdx].loras.push("None");
         node.saveState();
-        node.renderUI();
+        debouncedRenderUI(node);
     };
     controlsBar.appendChild(addLoraBtn);
 
@@ -548,7 +558,7 @@ export function createModelElement(node, modelEntry, arrayIdx, modelIdx, modelLi
     deleteBtn.onclick = () => {
         node.state.config_arrays[arrayIdx].models.splice(modelIdx, 1);
         node.saveState();
-        node.renderUI();
+        debouncedRenderUI(node);
     };
     header.appendChild(deleteBtn);
     div.appendChild(header);
@@ -588,7 +598,7 @@ export function createModelElement(node, modelEntry, arrayIdx, modelIdx, modelLi
             ? "None"
             : { path: "None", type: newType };
         node.saveState();
-        node.renderUI();
+        debouncedRenderUI(node);
     };
     contentDiv.appendChild(modelTypeSelect);
 
@@ -608,7 +618,7 @@ export function createModelElement(node, modelEntry, arrayIdx, modelIdx, modelLi
             node.state.config_arrays[arrayIdx].models[modelIdx] = { path: newVal, type: modelType };
         }
         node.saveState();
-        node.renderUI();
+        debouncedRenderUI(node);
     };
     contentDiv.appendChild(typeSelect);
 
@@ -643,7 +653,7 @@ export function createModelElement(node, modelEntry, arrayIdx, modelIdx, modelLi
                 node.state.config_arrays[arrayIdx].models[modelIdx] = { path: normalized, type: modelType };
             }
             node.saveState();
-            node.renderUI();
+            debouncedRenderUI(node);
         },
         isFolder ? "Search folders..." : "Search models..."
     );
@@ -666,7 +676,7 @@ export function createModelElement(node, modelEntry, arrayIdx, modelIdx, modelLi
                 const expanded = matchingModels.map(m => modelType === "checkpoint" ? m : { path: m, type: modelType });
                 node.state.config_arrays[arrayIdx].models.splice(modelIdx, 1, ...expanded);
                 node.saveState();
-                node.renderUI();
+                debouncedRenderUI(node);
             } else {
                 alert(`No models found in folder: ${folderPrefix}`);
             }
@@ -817,7 +827,7 @@ export function createLoraElement(node, loraStr, arrayIdx, loraIdx, availableLor
     deleteBtn.onclick = () => {
         node.state.config_arrays[arrayIdx].loras.splice(loraIdx, 1);
         node.saveState();
-        node.renderUI();
+        debouncedRenderUI(node);
     };
     header.appendChild(deleteBtn);
     div.appendChild(header);
@@ -858,7 +868,7 @@ export function createLoraElement(node, loraStr, arrayIdx, loraIdx, availableLor
         else if (typeSelect.value === "combined") node.state.config_arrays[arrayIdx].loras[loraIdx] = buildLoraString("/*", currentModelStr, currentClipStr);
         else node.state.config_arrays[arrayIdx].loras[loraIdx] = buildLoraString("None", currentModelStr, currentClipStr);
         node.saveState();
-        node.renderUI();
+        debouncedRenderUI(node);
     };
     contentDiv.appendChild(typeSelect);
 
@@ -877,7 +887,7 @@ export function createLoraElement(node, loraStr, arrayIdx, loraIdx, availableLor
                 : normalizePath(selectedName);
             node.state.config_arrays[arrayIdx].loras[loraIdx] = buildLoraString(finalName, currentModelStr, currentClipStr);
             node.saveState();
-            node.renderUI();
+            debouncedRenderUI(node);
         },
         isFolder ? "Search folders..." : "Search LoRAs..."
     );
@@ -972,7 +982,7 @@ export function createLoraElement(node, loraStr, arrayIdx, loraIdx, availableLor
             }
 
             node.saveState();
-            node.renderUI(); // Re-render to show/hide CLIP slider
+            debouncedRenderUI(node); // Re-render to show/hide CLIP slider
         };
 
         strengthLockLabel.appendChild(strengthLockCheck);
@@ -1077,7 +1087,7 @@ export function createLoraElement(node, loraStr, arrayIdx, loraIdx, availableLor
                 const withStrengths = matchingLoras.map(l => buildLoraString(l, parsed.model_str, parsed.clip_str));
                 node.state.config_arrays[arrayIdx].loras.splice(loraIdx, 1, ...withStrengths);
                 node.saveState();
-                node.renderUI();
+                debouncedRenderUI(node);
             } else {
                 alert(`No LoRAs found in folder: ${cleanName}`);
             }
@@ -1633,7 +1643,7 @@ export function renderModelsSection(node, div, configArray, arrayIdx, modelLists
     addBtn.onclick = () => {
         node.state.config_arrays[arrayIdx].models.push("None");
         node.saveState();
-        node.renderUI();
+        debouncedRenderUI(node);
     };
     addRow.appendChild(addBtn);
     contentContainer.appendChild(addRow);
@@ -1766,7 +1776,7 @@ function renderTextEncodersSection(node, container, configArray, arrayIdx, model
         delBtn.onclick = () => {
             node.state.config_arrays[arrayIdx].text_encoders.splice(teIdx, 1);
             node.saveState();
-            node.renderUI();
+            debouncedRenderUI(node);
         };
         teRow.appendChild(delBtn);
         section.appendChild(teRow);
@@ -1783,7 +1793,7 @@ function renderTextEncodersSection(node, container, configArray, arrayIdx, model
         }
         node.state.config_arrays[arrayIdx].text_encoders.push("None");
         node.saveState();
-        node.renderUI();
+        debouncedRenderUI(node);
     };
     section.appendChild(addTeBtn);
 
@@ -1920,7 +1930,7 @@ export function renderVAEsSection(node, div, configArray, arrayIdx, modelLists) 
     addBtn.onclick = () => {
         node.state.config_arrays[arrayIdx].vaes.push("None");
         node.saveState();
-        node.renderUI();
+        debouncedRenderUI(node);
     };
     addRow.appendChild(addBtn);
     contentContainer.appendChild(addRow);
@@ -2367,7 +2377,7 @@ function createVAEElement(node, vaeName, arrayIdx, vaeIdx, vaeList, vFolders) {
             node.state.config_arrays[arrayIdx].vaes = ["None"];
         }
         node.saveState();
-        node.renderUI();
+        debouncedRenderUI(node);
     };
     header.appendChild(deleteBtn);
     div.appendChild(header);
@@ -2413,7 +2423,7 @@ function createVAEElement(node, vaeName, arrayIdx, vaeIdx, vaeList, vFolders) {
         }
         node.state.config_arrays[arrayIdx].vaes[vaeIdx] = newVal;
         node.saveState();
-        node.renderUI();
+        debouncedRenderUI(node);
     };
     contentDiv.appendChild(typeSelect);
 
@@ -2453,7 +2463,7 @@ function createVAEElement(node, vaeName, arrayIdx, vaeIdx, vaeList, vFolders) {
             (value) => {
                 node.state.config_arrays[arrayIdx].vaes[vaeIdx] = normalizePath(value);
                 node.saveState();
-                node.renderUI();
+                debouncedRenderUI(node);
             },
             isFolder ? "Search folders..." : "Search VAEs..."
         );
@@ -2472,7 +2482,7 @@ function createVAEElement(node, vaeName, arrayIdx, vaeIdx, vaeList, vFolders) {
                 if (matchingVAEs.length > 0) {
                     node.state.config_arrays[arrayIdx].vaes.splice(vaeIdx, 1, ...matchingVAEs);
                     node.saveState();
-                    node.renderUI();
+                    debouncedRenderUI(node);
                 } else {
                     alert(`No VAEs found in folder: ${folderPrefix}`);
                 }
@@ -2558,7 +2568,7 @@ export function renderLorasSection(node, div, configArray, arrayIdx, availableLo
     addBtn.onclick = () => {
         node.state.config_arrays[arrayIdx].loras.push("None");
         node.saveState();
-        node.renderUI();
+        debouncedRenderUI(node);
     };
     addRow.appendChild(addBtn);
     contentContainer.appendChild(addRow);
@@ -2818,7 +2828,7 @@ export async function showTriggerLookupModal(node, arrayIdx) {
             selectedTriggers.forEach(t => existing.add(t));
             node.state.config_arrays[arrayIdx].lora_omit_triggers = Array.from(existing);
             node.saveState();
-            node.renderUI();
+            debouncedRenderUI(node);
             document.body.removeChild(overlay);
         };
     } catch (error) {
@@ -3304,7 +3314,7 @@ export function renderConfigPromptsSection(node, div, configArray, arrayIdx) {
     toggleCheck.onchange = () => {
         node.state.config_arrays[arrayIdx].use_custom_prompts = toggleCheck.checked;
         node.saveState();
-        node.renderUI();
+        debouncedRenderUI(node);
     };
     toggleLabel.appendChild(toggleCheck);
     toggleLabel.appendChild(document.createTextNode("Use Custom Prompts (Override Global/Node)"));
@@ -3507,7 +3517,7 @@ export async function renderUI(node, availableLoras, modelLists, loraFolders, av
     labelModeCheckbox.onchange = () => {
         node.state.label_mode = labelModeCheckbox.checked;
         node.saveState();
-        node.renderUI();
+        debouncedRenderUI(node);
     };
     labelModeLabel.appendChild(labelModeCheckbox);
     labelModeLabel.appendChild(document.createTextNode(" \u{1F3F7}\uFE0F Label Mode"));
