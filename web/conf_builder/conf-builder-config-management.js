@@ -40,6 +40,15 @@ const RESOLUTION_PRESETS = [
     { group: "Flux — Landscape",   items: ["1344x768", "1216x832"] },
 ];
 
+// HF Remote VAE endpoint presets (mirrors remote_vae.py HF_ENDPOINTS)
+const REMOTE_VAE_PRESETS = {
+    "Custom": "",
+    "HF-SD": "https://q1bj3bpq6kzilnsu.us-east-1.aws.endpoints.huggingface.cloud/",
+    "HF-SDXL": "https://x2dmsqunjd6k9prw.us-east-1.aws.endpoints.huggingface.cloud/",
+    "HF-Flux": "https://whhx50ex1aryqvw6.us-east-1.aws.endpoints.huggingface.cloud/",
+    "HF-HunyuanVideo": "https://o7ywnmrahorts457.us-east-1.aws.endpoints.huggingface.cloud/"
+};
+
 // Debounced renderUI to batch rapid state changes and avoid redundant full rebuilds
 let _renderUITimer = null;
 function debouncedRenderUI(node) {
@@ -2822,26 +2831,59 @@ function createVAEElement(node, vaeName, arrayIdx, vaeIdx, vaeList, vFolders) {
     contentDiv.appendChild(typeSelect);
 
     if (isRemote) {
+        // Presets dropdown for known HF Remote VAE endpoints
+        const presetSelect = document.createElement("select");
+        presetSelect.className = "cb-select";
+        presetSelect.style.marginBottom = "4px";
+        const currentUrl = vaeName.replace(/^remote:/, "");
+        Object.entries(REMOTE_VAE_PRESETS).forEach(([label, url]) => {
+            const opt = document.createElement("option");
+            opt.value = url;
+            opt.textContent = label;
+            // Select matching preset, or "Custom" if URL doesn't match any preset
+            if (url && currentUrl === url) opt.selected = true;
+            else if (!url && !Object.values(REMOTE_VAE_PRESETS).includes(currentUrl)) opt.selected = true;
+            presetSelect.appendChild(opt);
+        });
+
         // Text input for remote VAE endpoint URL
         const urlInput = document.createElement("input");
         urlInput.className = "cb-input";
         urlInput.type = "text";
         urlInput.placeholder = "http://192.168.1.100:8080/decode";
-        urlInput.value = vaeName.replace(/^remote:/, "");
+        urlInput.value = currentUrl;
         urlInput.style.fontFamily = "monospace";
         urlInput.style.fontSize = "12px";
         urlInput.onchange = () => {
             const url = urlInput.value.trim();
             node.state.config_arrays[arrayIdx].vaes[vaeIdx] = url ? `remote:${url}` : "remote:";
             node.saveState();
+            // Update preset dropdown to match
+            const matchingPreset = Object.entries(REMOTE_VAE_PRESETS).find(([, u]) => u && u === url);
+            presetSelect.value = matchingPreset ? matchingPreset[1] : "";
         };
         urlInput.onblur = urlInput.onchange;
+
+        presetSelect.onchange = () => {
+            const selectedUrl = presetSelect.value;
+            if (selectedUrl) {
+                urlInput.value = selectedUrl;
+                node.state.config_arrays[arrayIdx].vaes[vaeIdx] = `remote:${selectedUrl}`;
+                node.saveState();
+            } else {
+                // "Custom" selected - clear URL for manual entry
+                urlInput.value = "";
+                urlInput.focus();
+            }
+        };
+
+        contentDiv.appendChild(presetSelect);
         contentDiv.appendChild(urlInput);
 
         // Helper text
         const helperText = document.createElement("div");
         helperText.style.cssText = "font-size: 9px; color: #666; padding: 2px 4px;";
-        helperText.textContent = "Enter the endpoint URL for your remote VAE decode server";
+        helperText.textContent = "Select a preset or enter a custom endpoint URL for your remote VAE decode server";
         contentDiv.appendChild(helperText);
     } else {
         // Searchable Select for VAE file or folder
