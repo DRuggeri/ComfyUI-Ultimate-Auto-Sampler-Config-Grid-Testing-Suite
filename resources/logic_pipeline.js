@@ -233,8 +233,16 @@ function incrementalFilter(newItems) {
             if (filters.denoise.size > 0 && !filters.denoise.has(d.denoise)) return false;
             if (filters.lora.size > 0 && !filters.lora.has(d.lora)) return false;
             if (filters.model.size > 0 && !filters.model.has(d.model || meta.model || "Default")) return false;
-            if (filters.positive.size > 0 && !filters.positive.has(d.positive || meta.positive || "")) return false;
-            if (filters.negative.size > 0 && !filters.negative.has(d.negative || meta.negative || "")) return false;
+            if (filters.positive.size > 0) {
+                const st = document.getElementById('toggle-triggers')?.checked !== false;
+                const posValue = st ? (d.positive || meta.positive || "") : (d.config_positive || d.positive || meta.positive || "");
+                if (!filters.positive.has(posValue)) return false;
+            }
+            if (filters.negative.size > 0) {
+                const st = document.getElementById('toggle-triggers')?.checked !== false;
+                const negValue = st ? (d.negative || meta.negative || "") : (d.config_negative || d.negative || meta.negative || "");
+                if (!filters.negative.has(negValue)) return false;
+            }
             if (filters.size.size > 0) {
                 const sizeStr = `${d.width}x${d.height}`;
                 if (!filters.size.has(sizeStr)) return false;
@@ -301,8 +309,16 @@ function executePipeline() {
             if (filters.denoise.size > 0 && !filters.denoise.has(d.denoise)) return false;
             if (filters.lora.size > 0 && !filters.lora.has(d.lora)) return false;
             if (filters.model.size > 0 && !filters.model.has(d.model || meta.model || "Default")) return false;
-            if (filters.positive.size > 0 && !filters.positive.has(d.positive || meta.positive || "")) return false;
-            if (filters.negative.size > 0 && !filters.negative.has(d.negative || meta.negative || "")) return false;
+            if (filters.positive.size > 0) {
+                const st = document.getElementById('toggle-triggers')?.checked !== false;
+                const posValue = st ? (d.positive || meta.positive || "") : (d.config_positive || d.positive || meta.positive || "");
+                if (!filters.positive.has(posValue)) return false;
+            }
+            if (filters.negative.size > 0) {
+                const st = document.getElementById('toggle-triggers')?.checked !== false;
+                const negValue = st ? (d.negative || meta.negative || "") : (d.config_negative || d.negative || meta.negative || "");
+                if (!filters.negative.has(negValue)) return false;
+            }
             if (filters.size.size > 0 && !filters.size.has(`${d.width}x${d.height}`)) return false;
             if (filters.seed.size > 0 && !filters.seed.has(d.seed)) return false;
         }

@@ -364,6 +364,9 @@ def create_image_metadata(config, width, height, duration, seed, batch_idx, actu
     }
     if gen_index is not None:
         update_dict["gen_index"] = gen_index
+    # Preserve raw config prompts (without trigger words) for dashboard toggle
+    meta["config_positive"] = config.get("positive", "")
+    meta["config_negative"] = config.get("negative", "")
     meta.update(update_dict)
 
     return meta

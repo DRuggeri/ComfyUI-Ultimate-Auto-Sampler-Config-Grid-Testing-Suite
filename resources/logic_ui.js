@@ -145,8 +145,14 @@ function initFilters() {
     ['model', 'sampler', 'scheduler', 'denoise', 'lora', 'positive', 'negative', 'size', 'seed'].forEach(key => {
         const unique = [...new Set(activeData.map(d => {
             if (key === 'model') return d.model || meta.model || "Default";
-            if (key === 'positive') return d.positive || meta.positive || "";
-            if (key === 'negative') return d.negative || meta.negative || "";
+            if (key === 'positive') {
+                const st = document.getElementById('toggle-triggers')?.checked !== false;
+                return st ? (d.positive || meta.positive || "") : (d.config_positive || d.positive || meta.positive || "");
+            }
+            if (key === 'negative') {
+                const st = document.getElementById('toggle-triggers')?.checked !== false;
+                return st ? (d.negative || meta.negative || "") : (d.config_negative || d.negative || meta.negative || "");
+            }
             if (key === 'size') return `${d.width}x${d.height}`;
             return d[key];
         }))].sort();
@@ -253,6 +259,17 @@ function initFilters() {
             container.appendChild(b);
         });
     });
+}
+
+// Toggle trigger word visibility in prompts
+function toggleTriggerWords(showTriggers) {
+    // Rebuild filters with new prompt mode
+    initFilters();
+    updateDataPipeline();
+    // If modal is open, refresh prompt display
+    if (window.currentModalId) {
+        openM(window.currentModalId);
+    }
 }
 
 
@@ -833,8 +850,14 @@ function openM(id) {
 
     if (modelEl) modelEl.value = d.model || meta.model || "Default";
     if (seedEl) seedEl.value = d.seed || 0;
-    if (posEl) posEl.value = d.positive || meta.positive || "";
-    if (negEl) negEl.value = d.negative || meta.negative || "";
+    // Check trigger word toggle
+    const showTriggers = document.getElementById('toggle-triggers')?.checked !== false;
+    if (posEl) posEl.value = showTriggers
+        ? (d.positive || meta.positive || "")
+        : (d.config_positive || d.positive || meta.positive || "");
+    if (negEl) negEl.value = showTriggers
+        ? (d.negative || meta.negative || "")
+        : (d.config_negative || d.negative || meta.negative || "");
 
     // Populate editable parameter fields
     const map = {

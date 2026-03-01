@@ -277,6 +277,14 @@
             <div class="popup-section">
                 <div class="popup-section-title">FILTERS <span
                         style="font-size: 9px; color: #555; font-weight: normal;">(Shift+Click to isolate)</span></div>
+                <div style="margin: 6px 0 2px 0; padding: 4px 0;">
+                    <label style="display: flex; align-items: center; gap: 6px; cursor: pointer; font-size: 11px; color: #aaa;">
+                        <input type="checkbox" id="toggle-triggers" checked
+                            style="cursor: pointer;"
+                            onchange="if(typeof toggleTriggerWords==='function') toggleTriggerWords(this.checked)">
+                        Show Lora Trigger Words in Prompts
+                    </label>
+                </div>
                 <br />
                 <div class="filter-row">
                     <span class="filter-label">Model</span>
