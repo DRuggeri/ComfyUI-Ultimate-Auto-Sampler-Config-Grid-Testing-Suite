@@ -432,7 +432,11 @@ class DistributionManager:
             if encoded_positive is not None and encoded_negative is not None:
                 return {
                     "encoded_positive": encoded_positive,
-                    "encoded_negative": encoded_negative
+                    "encoded_negative": encoded_negative,
+                    # Include final prompt text so workers can use it for metadata
+                    # without needing to re-run trigger word lookups
+                    "actual_positive_text": actual_positive,
+                    "actual_negative_text": actual_negative,
                 }
 
             return None
@@ -529,5 +533,9 @@ class DistributionManager:
         if encoded:
             result["encoded_positive"] = encoded["encoded_positive"]
             result["encoded_negative"] = encoded["encoded_negative"]
+            # Include final prompt text (with triggers applied) so workers can
+            # use it for metadata without re-running CivitAI trigger lookups
+            result["actual_positive_text"] = encoded.get("actual_positive_text")
+            result["actual_negative_text"] = encoded.get("actual_negative_text")
 
         return result
