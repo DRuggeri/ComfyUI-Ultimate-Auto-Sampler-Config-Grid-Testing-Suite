@@ -25,6 +25,18 @@ import {
 
 import { renderDistributionSection } from './conf-builder-distribution.js';
 
+const RESOLUTION_PRESETS = [
+    { group: "SD 1.5 — Square",    items: ["512x512"] },
+    { group: "SD 1.5 — Portrait",  items: ["512x896", "512x768"] },
+    { group: "SD 1.5 — Landscape", items: ["896x512", "768x512"] },
+    { group: "SDXL — Square",      items: ["1024x1024"] },
+    { group: "SDXL — Portrait",    items: ["768x1344", "832x1216", "896x1152"] },
+    { group: "SDXL — Landscape",   items: ["1344x768", "1216x832", "1152x896"] },
+    { group: "Flux — Square",      items: ["1024x1024"] },
+    { group: "Flux — Portrait",    items: ["768x1344", "832x1216"] },
+    { group: "Flux — Landscape",   items: ["1344x768", "1216x832"] },
+];
+
 // Debounced renderUI to batch rapid state changes and avoid redundant full rebuilds
 let _renderUITimer = null;
 function debouncedRenderUI(node) {
@@ -293,6 +305,175 @@ function createChipListBuilder({ label, stateKey, options, node, arrayIdx, confi
     return container;
 }
 
+function createResolutionBuilder({ node, arrayIdx, configArray }) {
+    const container = document.createElement("div");
+    container.style.cssText = "width: 100%; margin-bottom: 2px;";
+
+    // Ensure array exists
+    if (!Array.isArray(configArray.resolutions)) {
+        configArray.resolutions = [];
+        node.state.config_arrays[arrayIdx].resolutions = [];
+    }
+
+    // ===== CHIPS DISPLAY =====
+    const chipsContainer = document.createElement("div");
+    chipsContainer.style.cssText = "display: flex; flex-wrap: wrap; gap: 4px; margin-bottom: 6px; min-height: 24px;";
+
+    const renderChips = () => {
+        chipsContainer.innerHTML = "";
+        const items = configArray.resolutions;
+
+        if (!items || items.length === 0) {
+            const ph = document.createElement("div");
+            ph.textContent = "Using sampler node resolutions";
+            ph.style.cssText = "color: #666; font-style: italic; padding: 2px 4px; font-size: 11px;";
+            chipsContainer.appendChild(ph);
+            return;
+        }
+
+        items.forEach((item, idx) => {
+            const chip = document.createElement("div");
+            chip.style.cssText = "display: flex; align-items: center; background: #554400; color: #ffcc44; border-radius: 12px; padding: 2px 8px; font-size: 11px; border: 1px solid #886600;";
+
+            const text = document.createElement("span");
+            text.textContent = item;
+            chip.appendChild(text);
+
+            const closeBtn = document.createElement("span");
+            closeBtn.textContent = "×";
+            closeBtn.style.cssText = "margin-left: 6px; cursor: pointer; color: #ff8888; font-weight: bold;";
+            closeBtn.onclick = () => {
+                node.state.config_arrays[arrayIdx].resolutions.splice(idx, 1);
+                node.saveState();
+                renderChips();
+                populateSelect();
+            };
+            chip.appendChild(closeBtn);
+            chipsContainer.appendChild(chip);
+        });
+    };
+    renderChips();
+    container.appendChild(chipsContainer);
+
+    // ===== PRESET DROPDOWN =====
+    const inputRow = document.createElement("div");
+    inputRow.style.cssText = "display: flex; gap: 4px; align-items: center;";
+
+    const select = document.createElement("select");
+    select.className = "cb-select";
+    select.style.cssText = "flex: 1; font-size: 11px; padding: 3px 4px;";
+
+    const populateSelect = () => {
+        select.innerHTML = "";
+        const currentItems = configArray.resolutions || [];
+
+        // Placeholder option
+        const placeholder = document.createElement("option");
+        placeholder.value = "";
+        placeholder.textContent = "Add resolution...";
+        placeholder.disabled = true;
+        placeholder.selected = true;
+        select.appendChild(placeholder);
+
+        // Optgroups from presets
+        for (const preset of RESOLUTION_PRESETS) {
+            const available = preset.items.filter(r => !currentItems.includes(r));
+            if (available.length === 0) continue;
+
+            const optgroup = document.createElement("optgroup");
+            optgroup.label = preset.group;
+            for (const res of available) {
+                const opt = document.createElement("option");
+                opt.value = res;
+                opt.textContent = res.replace("x", " × ");
+                optgroup.appendChild(opt);
+            }
+            select.appendChild(optgroup);
+        }
+    };
+    populateSelect();
+
+    // Add on selection change (instant add)
+    select.onchange = () => {
+        const val = select.value;
+        if (val && !configArray.resolutions.includes(val)) {
+            node.state.config_arrays[arrayIdx].resolutions.push(val);
+            node.saveState();
+            renderChips();
+            populateSelect();
+        }
+    };
+
+    inputRow.appendChild(select);
+
+    // ===== CUSTOM W x H INPUT =====
+    const customW = document.createElement("input");
+    customW.type = "number";
+    customW.className = "cb-input";
+    customW.placeholder = "W";
+    customW.style.cssText = "width: 55px; font-size: 11px; padding: 3px 4px;";
+    customW.min = 64;
+    customW.max = 8192;
+    customW.step = 8;
+
+    const xLabel = document.createElement("span");
+    xLabel.textContent = "×";
+    xLabel.style.cssText = "color: #888; font-size: 11px;";
+
+    const customH = document.createElement("input");
+    customH.type = "number";
+    customH.className = "cb-input";
+    customH.placeholder = "H";
+    customH.style.cssText = "width: 55px; font-size: 11px; padding: 3px 4px;";
+    customH.min = 64;
+    customH.max = 8192;
+    customH.step = 8;
+
+    const addCustomBtn = document.createElement("button");
+    addCustomBtn.className = "cb-button primary";
+    addCustomBtn.textContent = "+";
+    addCustomBtn.title = "Add custom resolution";
+    addCustomBtn.style.cssText = "padding: 3px 8px; font-size: 11px; min-width: 28px;";
+    addCustomBtn.onclick = () => {
+        const w = parseInt(customW.value);
+        const h = parseInt(customH.value);
+        if (w > 0 && h > 0) {
+            const res = `${w}x${h}`;
+            if (!configArray.resolutions.includes(res)) {
+                node.state.config_arrays[arrayIdx].resolutions.push(res);
+                node.saveState();
+                renderChips();
+                populateSelect();
+            }
+            customW.value = "";
+            customH.value = "";
+        }
+    };
+
+    // Clear all button
+    const clearBtn = document.createElement("button");
+    clearBtn.className = "cb-button";
+    clearBtn.textContent = "Clear";
+    clearBtn.title = "Remove all resolutions";
+    clearBtn.style.cssText = "padding: 3px 8px; font-size: 11px; min-width: 40px; color: #ff8888;";
+    clearBtn.onclick = () => {
+        node.state.config_arrays[arrayIdx].resolutions = [];
+        configArray.resolutions = [];
+        node.saveState();
+        renderChips();
+        populateSelect();
+    };
+
+    inputRow.appendChild(customW);
+    inputRow.appendChild(xLabel);
+    inputRow.appendChild(customH);
+    inputRow.appendChild(addCustomBtn);
+    inputRow.appendChild(clearBtn);
+    container.appendChild(inputRow);
+
+    return container;
+}
+
 
 // --- CONFIG ARRAY ELEMENT CREATOR ---
 
@@ -360,6 +541,10 @@ export function createConfigArrayElement(node, configArray, arrayIdx, modelLists
         node, arrayIdx, configArray, accentColor: "#cc44cc", placeholder: "default"
     });
     settingsGrid.appendChild(createInputGroup("Attention", attentionBuilder));
+
+    // Resolutions - categorized preset dropdown + custom input + chips
+    const resolutionBuilder = createResolutionBuilder({ node, arrayIdx, configArray });
+    settingsGrid.appendChild(createInputGroup("Resolutions", resolutionBuilder));
 
     addInput("Steps", "steps");
     addInput("CFG", "cfg");

@@ -374,11 +374,20 @@ def run_generation_loop(
         model_cache.register_schedule(expanded)
 
     input_jobs = prepare_input_jobs(optional_latent, resolutions)
-    total_jobs = len(expanded) * len(input_jobs)
-    
+
+    # Count total jobs: configs with per-config resolutions provide their own
+    # width/height and don't multiply with the global input_jobs.
+    configs_with_res = sum(1 for c in expanded if c.get("resolution") is not None)
+    configs_without_res = len(expanded) - configs_with_res
+    total_jobs = configs_with_res + (configs_without_res * len(input_jobs))
+
     print(f"{'='*80}")
     print(f"[GridTester] 🚀 GENERATION START")
-    print(f"[GridTester] 📋 {len(expanded)} configs × {len(input_jobs)} resolutions = {total_jobs} total jobs")
+    if configs_with_res > 0:
+        print(f"[GridTester] 📋 {configs_with_res} configs with per-config resolutions + "
+              f"{configs_without_res} configs × {len(input_jobs)} resolutions = {total_jobs} total jobs")
+    else:
+        print(f"[GridTester] 📋 {len(expanded)} configs × {len(input_jobs)} resolutions = {total_jobs} total jobs")
     print(f"{'='*80}")
     
     # ==== OPTIONAL INPUT DETECTION ====
@@ -619,6 +628,15 @@ def run_generation_loop(
         batch_idx = job["batch_idx"]
         
         for conf_idx, conf in enumerate(expanded):
+            # Per-config resolution override: if this config has its own resolution,
+            # use it instead of the global input_job's resolution. Only process once
+            # (at job_idx == 0) to avoid duplicating work across input_jobs.
+            if conf.get("resolution") is not None:
+                if job_idx > 0:
+                    continue  # Already processed at job_idx=0
+                w, h = conf["resolution"]
+                batch_idx = 0
+
             # ==== CHECK FOR INTERRUPT ====
             # ==== UPDATE CURRENT STEP ====
             if model_cache:

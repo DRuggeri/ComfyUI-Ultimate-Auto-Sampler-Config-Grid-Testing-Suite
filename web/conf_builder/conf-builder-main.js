@@ -190,6 +190,7 @@ app.registerExtension({
                             if (this.state.config_arrays) {
                                 this.state.config_arrays.forEach(arr => {
                                     if (!arr.attention_modes) arr.attention_modes = ["default"];
+                                    if (!arr.resolutions) arr.resolutions = [];
                                     if (arr.model_sampling_override === undefined) arr.model_sampling_override = "none";
                                     if (arr.model_sampling_shift === undefined) arr.model_sampling_shift = "1.73";
                                     if (arr.model_sampling_flux_max_shift === undefined) arr.model_sampling_flux_max_shift = "1.15";
@@ -447,6 +448,9 @@ app.registerExtension({
 
                                 // Migration: ensure attention modes field exists
                                 if (!arr.attention_modes) arr.attention_modes = ["default"];
+
+                                // Migration: ensure resolutions field exists
+                                if (!arr.resolutions) arr.resolutions = [];
 
                                 // Migration: ensure extra model & sampling options exist
                                 if (arr.model_sampling_override === undefined) arr.model_sampling_override = "none";

@@ -470,7 +470,10 @@ export function getIterationCount(configArray) {
     // 6. Attention modes
     const a_count = (configArray.attention_modes && configArray.attention_modes.length > 0) ? configArray.attention_modes.length : 1;
 
-    return m_count * l_count * v_count * s_count * sch_count * st_count * c_count * p_count * a_count;
+    // 7. Resolutions (per-config overrides)
+    const r_count = (configArray.resolutions && configArray.resolutions.length > 0) ? configArray.resolutions.length : 1;
+
+    return m_count * l_count * v_count * s_count * sch_count * st_count * c_count * p_count * a_count * r_count;
 }
 
 // --- CONFIG CONVERSION ---
@@ -535,6 +538,14 @@ export function convertStateToConfigs(state) {
         const attentionModes = (configArray.attention_modes || ["default"]).filter(a => a);
         if (attentionModes.length > 0 && !(attentionModes.length === 1 && attentionModes[0] === "default")) {
             config.attention_mode = attentionModes.length > 1 ? attentionModes : attentionModes[0];
+        }
+
+        // Per-config resolutions (override sampler's resolutions_json)
+        if (configArray.resolutions && configArray.resolutions.length > 0) {
+            config.resolutions = configArray.resolutions.map(r => {
+                const parts = r.split("x").map(Number);
+                return [parts[0], parts[1]];
+            });
         }
 
         // Add extra model & sampling options if enabled

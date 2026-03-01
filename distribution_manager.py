@@ -102,6 +102,14 @@ class DistributionManager:
                 for conf_idx, conf in enumerate(expanded_configs):
                     total += 1
 
+                    # Per-config resolution override
+                    if conf.get("resolution") is not None:
+                        if job_idx > 0:
+                            continue
+                        w = conf["resolution"][0]
+                        h = conf["resolution"][1]
+                        batch_idx = 0
+
                     # Compute actual prompts (with trigger words applied)
                     # build_prompt_with_triggers returns (final_positive, trigger_string)
                     try:

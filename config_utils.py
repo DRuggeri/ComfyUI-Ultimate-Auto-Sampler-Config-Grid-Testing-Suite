@@ -495,6 +495,13 @@ def expand_configs(raw_configs, pos_prompts, neg_prompts, denoise_values, seed, 
         else:
             attention_modes = [a for a in raw_attention if a in VALID_ATTENTION_MODES] or ["default"]
 
+        # Per-config resolutions (override sampler's resolutions_json when present)
+        raw_resolutions = entry.get("resolutions", None)
+        if raw_resolutions and isinstance(raw_resolutions, list) and len(raw_resolutions) > 0:
+            config_resolutions = [tuple(r) for r in raw_resolutions]  # [(w, h), ...]
+        else:
+            config_resolutions = [None]  # Single None = no override, use global resolutions
+
         # Extra Model & Sampling Options
         # Model sampling override: can be "none" or a specific type
         raw_model_sampling = entry.get("model_sampling_override", "none")
@@ -550,7 +557,7 @@ def expand_configs(raw_configs, pos_prompts, neg_prompts, denoise_values, seed, 
                                       attention_modes, model_sampling_overrides, model_sampling_shifts,
                                       flux_max_shifts, flux_base_shifts,
                                       advanced_sampling_values, advanced_guiders, advanced_schedulers,
-                                      flux_guidance_values):
+                                      flux_guidance_values, config_resolutions):
             # Skip redundant model sampling parameter combinations
             override = combo[11]
             if override == "none":
@@ -592,6 +599,7 @@ def expand_configs(raw_configs, pos_prompts, neg_prompts, denoise_values, seed, 
                 "advanced_guider": combo[16],
                 "advanced_scheduler": combo[17],
                 "flux_guidance_value": combo[18],
+                "resolution": combo[19],  # (w, h) tuple or None
                 "seed": seed,
                 "seed_behavior": entry.get("seed_behavior", "fixed"),
                 "model_type": model_type,
