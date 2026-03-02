@@ -415,5 +415,31 @@ export function renderDistributionSettingsSection(node, container) {
         + "Disabled when optional conditioning inputs are connected.";
     section.appendChild(encodingInfo);
 
+    // Sync Models to Workers toggle
+    const syncRow = document.createElement("div");
+    syncRow.style.cssText = "display: flex; align-items: flex-start; gap: 10px; margin-top: 10px;";
+
+    const syncLabel = document.createElement("label");
+    syncLabel.className = "cb-toggle";
+    syncLabel.style.fontSize = "12px";
+    const syncCheckbox = document.createElement("input");
+    syncCheckbox.type = "checkbox";
+    syncCheckbox.checked = node.state.sync_models_to_workers || false;
+    syncCheckbox.onchange = () => {
+        node.state.sync_models_to_workers = syncCheckbox.checked;
+        node.saveState();
+    };
+    syncLabel.appendChild(syncCheckbox);
+    syncLabel.appendChild(document.createTextNode(" ☁️ Sync Models to Workers"));
+    syncRow.appendChild(syncLabel);
+    section.appendChild(syncRow);
+
+    const syncInfo = document.createElement("div");
+    syncInfo.style.cssText = "font-size: 10px; color: #777; margin-top: 4px; line-height: 1.3; padding-left: 2px;";
+    syncInfo.textContent = "Automatically transfer required models, LoRAs, text encoders, "
+        + "and VAEs to workers via HTTP. Files are saved permanently to each worker's "
+        + "ComfyUI models folder, matching the master's directory structure.";
+    section.appendChild(syncInfo);
+
     container.appendChild(section);
 }
