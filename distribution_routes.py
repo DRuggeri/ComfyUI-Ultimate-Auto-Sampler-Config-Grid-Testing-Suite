@@ -426,6 +426,112 @@ async def test_worker_connection(request):
 
 
 # =============================================================================
+# MODEL SYNC ENDPOINTS
+# =============================================================================
+
+@server.PromptServer.instance.routes.post("/distribution/check_models")
+async def check_models(request):
+    """
+    Bulk check which model files exist on this instance.
+    Workers call this to find out what they need to download.
+
+    Request body:
+        worker_id: Registered worker ID
+        models: List of {category, filename} dicts
+
+    Returns:
+        available: List of {category, filename, size_bytes} for files that exist
+        total_size: Total bytes of all available files
+    """
+    try:
+        data = await request.json()
+        worker_id = data.get("worker_id", "")
+        models = data.get("models", [])
+
+        import folder_paths
+
+        available = []
+        total_size = 0
+        for m in models:
+            category = m.get("category", "")
+            filename = m.get("filename", "")
+            if not category or not filename:
+                continue
+
+            full_path = folder_paths.get_full_path(category, filename)
+            if full_path and os.path.exists(full_path):
+                size = os.path.getsize(full_path)
+                available.append({
+                    "category": category,
+                    "filename": filename,
+                    "size_bytes": size
+                })
+                total_size += size
+
+        print(f"[Distribution] 📋 Model check from worker {worker_id}: {len(models)} requested, {len(available)} available ({total_size / (1024**3):.2f} GB)")
+        return web.json_response({
+            "available": available,
+            "total_size": total_size
+        })
+    except Exception as e:
+        return web.json_response({"error": str(e)}, status=500)
+
+
+@server.PromptServer.instance.routes.post("/distribution/download_model")
+async def download_model(request):
+    """
+    Stream a model file to a worker.
+
+    Request body:
+        worker_id: Registered worker ID
+        category: Model category (checkpoints, loras, vae, etc.)
+        filename: Relative path including subdirectories
+
+    Returns:
+        Streaming file response with Content-Length header
+    """
+    try:
+        data = await request.json()
+        worker_id = data.get("worker_id", "")
+        category = data.get("category", "")
+        filename = data.get("filename", "")
+
+        if not category or not filename:
+            return web.Response(status=400, text="Missing category or filename")
+
+        import folder_paths
+        full_path = folder_paths.get_full_path(category, filename)
+
+        if not full_path or not os.path.exists(full_path):
+            return web.Response(status=404, text=f"File not found: {category}/{filename}")
+
+        file_size = os.path.getsize(full_path)
+        print(f"[Distribution] 📤 Serving {category}/{filename} ({file_size / (1024**3):.2f} GB) to worker {worker_id}")
+
+        response = web.StreamResponse()
+        response.content_type = "application/octet-stream"
+        response.content_length = file_size
+        response.headers["X-Filename"] = filename
+        response.headers["X-Category"] = category
+        await response.prepare(request)
+
+        chunk_size = 8 * 1024 * 1024  # 8 MB chunks
+        with open(full_path, "rb") as f:
+            while True:
+                chunk = f.read(chunk_size)
+                if not chunk:
+                    break
+                await response.write(chunk)
+
+        await response.write_eof()
+        print(f"[Distribution] ✅ Finished serving {category}/{filename} to worker {worker_id}")
+        return response
+    except Exception as e:
+        print(f"[Distribution] ❌ Error serving model: {e}")
+        return web.Response(status=500, text=str(e))
+
+
+# =============================================================================
 # HELPERS
 # =============================================================================
 
