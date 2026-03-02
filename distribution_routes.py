@@ -336,6 +336,8 @@ async def start_worker(request):
             return web.Response(status=400, text="Missing master_url")
 
         thread = WorkerThread(master_url)
+        # Pass sync models flag to worker
+        thread._sync_models = data.get("sync_models_to_workers", False)
         set_worker_thread(thread)
         thread.start()
 
@@ -549,7 +551,7 @@ def _send_distribution_status(manager):
         pass
 
 
-def notify_workers_to_start(worker_urls, master_url, session_name):
+def notify_workers_to_start(worker_urls, master_url, session_name, sync_models_to_workers=False):
     """
     Notify remote worker ComfyUI instances to start processing.
     Sends POST /distribution/start_worker to each worker URL.
@@ -560,6 +562,7 @@ def notify_workers_to_start(worker_urls, master_url, session_name):
         worker_urls: List of worker base URLs
         master_url: This master's base URL
         session_name: Current session name
+        sync_models_to_workers: Whether workers should download missing models from master
 
     Returns:
         List of (url, success, message) tuples
@@ -577,7 +580,8 @@ def notify_workers_to_start(worker_urls, master_url, session_name):
         try:
             data = json.dumps({
                 "master_url": master_url,
-                "session_name": session_name
+                "session_name": session_name,
+                "sync_models_to_workers": sync_models_to_workers
             }).encode("utf-8")
 
             req = urllib.request.Request(

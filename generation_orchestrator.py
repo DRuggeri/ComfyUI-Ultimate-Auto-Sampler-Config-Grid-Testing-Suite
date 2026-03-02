@@ -1570,7 +1570,12 @@ def _run_distributed_generation(
     print(f"[Distribution] 🌐 Master URL: {master_url}")
     print(f"[Distribution] 🌐 Notifying {len(worker_urls)} worker(s)...")
 
-    worker_results = notify_workers_to_start(worker_urls, master_url, session_name)
+    sync_models = distribution_config.get("sync_models_to_workers", False)
+    if sync_models:
+        manager.sync_models_to_workers = True
+        print(f"[Distribution] ☁️ Model sync enabled — workers will download missing models from master")
+
+    worker_results = notify_workers_to_start(worker_urls, master_url, session_name, sync_models_to_workers=sync_models)
     successful_workers = sum(1 for _, ok, _ in worker_results if ok)
     print(f"[Distribution] ✅ {successful_workers}/{len(worker_urls)} workers started")
 

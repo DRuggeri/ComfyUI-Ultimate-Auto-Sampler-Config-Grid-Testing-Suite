@@ -59,6 +59,192 @@ class WorkerThread(threading.Thread):
         self._cached_lora_key = None
         self._incompatible_loras = {}
 
+        # Model sync: download missing models from master before processing
+        self._sync_models = False  # Set by master when sync_models_to_workers enabled
+        self._prefetch_thread = None
+        self._prefetch_queue = []  # List of {category, filename} to pre-fetch
+        self._prefetch_lock = threading.Lock()
+
+    # =========================================================================
+    # MODEL SYNC HELPERS
+    # =========================================================================
+
+    def _download_model_from_master(self, category, filename):
+        """
+        Download a single model file from the master instance.
+        Preserves full subdirectory structure.
+
+        Args:
+            category: Model category (checkpoints, loras, vae, etc.)
+            filename: Relative path including subdirs (e.g. SDXL/Illustrious/model.safetensors)
+
+        Returns:
+            str: Local path where file was saved, or None on failure
+        """
+        import folder_paths
+
+        # Determine target directory
+        # folder_paths stores base directories per category
+        base_dirs = folder_paths.get_folder_paths(category)
+        if not base_dirs:
+            print(f"[Worker {self.worker_id}] ❌ Unknown model category: {category}")
+            return None
+        target_dir = base_dirs[0]  # Use first (primary) directory
+        target_path = os.path.join(target_dir, filename.replace("/", os.sep))
+
+        # Skip if already exists
+        if os.path.exists(target_path):
+            return target_path
+
+        # Create subdirectories
+        os.makedirs(os.path.dirname(target_path), exist_ok=True)
+
+        # Download from master
+        url = f"{self.master_url}/distribution/download_model"
+        payload = json.dumps({
+            "worker_id": self.worker_id,
+            "category": category,
+            "filename": filename
+        }).encode("utf-8")
+
+        req = urllib.request.Request(
+            url, data=payload,
+            headers={"Content-Type": "application/json"},
+            method="POST"
+        )
+
+        try:
+            print(f"[Worker {self.worker_id}] ⬇️ Downloading {category}/{filename}...")
+            with urllib.request.urlopen(req, timeout=3600) as resp:
+                file_size = int(resp.headers.get("Content-Length", 0))
+                if file_size > 0:
+                    size_str = f"{file_size / (1024**3):.2f} GB" if file_size > 1024**3 else f"{file_size / (1024**2):.0f} MB"
+                    print(f"[Worker {self.worker_id}] ⬇️ Size: {size_str}")
+
+                # Stream to temp file, then rename (atomic-ish)
+                temp_path = target_path + ".downloading"
+                downloaded = 0
+                last_progress = 0
+                with open(temp_path, "wb") as f:
+                    while True:
+                        chunk = resp.read(8 * 1024 * 1024)  # 8 MB chunks
+                        if not chunk:
+                            break
+                        f.write(chunk)
+                        downloaded += len(chunk)
+                        if file_size > 0:
+                            progress = int(downloaded / file_size * 100)
+                            if progress >= last_progress + 10:
+                                print(f"[Worker {self.worker_id}] ⬇️ {category}/{filename}: {progress}%")
+                                last_progress = progress
+
+                os.replace(temp_path, target_path)
+                print(f"[Worker {self.worker_id}] ✅ Downloaded {category}/{filename}")
+                return target_path
+
+        except Exception as e:
+            print(f"[Worker {self.worker_id}] ❌ Failed to download {category}/{filename}: {e}")
+            # Clean up partial download
+            temp_path = target_path + ".downloading"
+            if os.path.exists(temp_path):
+                os.remove(temp_path)
+            return None
+
+    def _extract_required_models(self, config):
+        """
+        Extract all model file references from a job config.
+
+        Returns:
+            List of {category, filename} dicts
+        """
+        models = []
+
+        # Main model/checkpoint
+        model_name = config.get("model", "None")
+        if model_name and model_name != "None":
+            model_type = config.get("model_type", "checkpoint")
+            if model_type == "checkpoint":
+                category = "checkpoints"
+            elif model_type == "gguf":
+                category = "unet_gguf"
+            elif model_type == "diffusion_model":
+                category = "diffusion_models"
+            else:
+                category = "checkpoints"
+            models.append({"category": category, "filename": model_name})
+
+        # LoRA
+        lora = config.get("lora_expanded", config.get("lora", "None"))
+        if lora and lora != "None":
+            models.append({"category": "loras", "filename": lora})
+
+        # VAE (skip remote URLs and "Default")
+        vae = config.get("vae", "Default")
+        if vae and vae != "Default" and not vae.startswith("remote:"):
+            models.append({"category": "vae", "filename": vae})
+
+        # Text encoders
+        text_encoders = config.get("text_encoders", [])
+        for te in text_encoders:
+            if te and te != "None":
+                models.append({"category": "text_encoders", "filename": te})
+
+        return models
+
+    def _ensure_models_available(self, config):
+        """
+        Check all required models exist locally, download missing ones from master.
+        Blocks until all models are available.
+        """
+        import folder_paths
+
+        required = self._extract_required_models(config)
+        if not required:
+            return
+
+        missing = []
+        for m in required:
+            path = folder_paths.get_full_path(m["category"], m["filename"])
+            if path is None:
+                missing.append(m)
+
+        if not missing:
+            return
+
+        print(f"[Worker {self.worker_id}] 📦 Missing {len(missing)} model(s), downloading from master...")
+        for m in missing:
+            result = self._download_model_from_master(m["category"], m["filename"])
+            if result is None:
+                raise RuntimeError(
+                    f"Failed to download required model: {m['category']}/{m['filename']}. "
+                    f"Check that the file exists on the master instance."
+                )
+
+    def _start_prefetch(self, upcoming_models):
+        """Start background thread to pre-fetch upcoming models."""
+        if not upcoming_models:
+            return
+
+        with self._prefetch_lock:
+            self._prefetch_queue = list(upcoming_models)
+
+        if self._prefetch_thread and self._prefetch_thread.is_alive():
+            return  # Already running
+
+        def _prefetch_worker():
+            while True:
+                with self._prefetch_lock:
+                    if not self._prefetch_queue:
+                        break
+                    model = self._prefetch_queue.pop(0)
+                try:
+                    self._download_model_from_master(model["category"], model["filename"])
+                except Exception as e:
+                    print(f"[Worker {self.worker_id}] ⚠️ Pre-fetch failed: {e}")
+
+        self._prefetch_thread = threading.Thread(target=_prefetch_worker, daemon=True)
+        self._prefetch_thread.start()
+
     def run(self):
         """Main worker loop."""
         print(f"[Worker {self.worker_id}] 🚀 Starting worker thread, master: {self.master_url}")
@@ -106,6 +292,19 @@ class WorkerThread(threading.Thread):
             # Validate job has required fields
             if not all(k in job for k in ("job_id", "config", "input_job")):
                 print(f"[Worker {self.worker_id}] ⚠️ Malformed job, skipping: {list(job.keys())}")
+                continue
+
+            # Sync missing models from master if enabled
+            try:
+                if self._sync_models:
+                    self._ensure_models_available(job["config"])
+
+                    # Start background pre-fetch for upcoming models
+                    if job.get("upcoming_models"):
+                        self._start_prefetch(job["upcoming_models"])
+            except Exception as e:
+                print(f"[Worker {self.worker_id}] ❌ Model sync failed for job {job['job_id']}: {e}")
+                self._report_failure(job["job_id"], f"Model sync failed: {e}")
                 continue
 
             # Process the job

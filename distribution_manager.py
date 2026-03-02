@@ -69,6 +69,8 @@ class DistributionManager:
         # Structure: {"model|lora": {"positive": {prompt: serialized}, "negative": {...}}}
         # Populated by master pre-encoding phase; attached to job claim responses
         self._encoded_conditionings = {}
+        # Model sync: when enabled, job claim responses include upcoming_models for pre-fetching
+        self.sync_models_to_workers = False
 
     def populate_jobs(self, expanded_configs, input_jobs, existing_data,
                       overwrite_existing, has_optional_inputs, lora_triggerwords_mode):
@@ -515,6 +517,77 @@ class DistributionManager:
         except Exception as e:
             print(f"[Distribution] ⚠️ Persist error: {e}")
 
+    def _get_upcoming_models(self, exclude_job_id=None, limit=10):
+        """
+        Scan pending jobs and collect unique model references for pre-fetching.
+        Must be called with lock held.
+
+        Args:
+            exclude_job_id: Job to skip (the current job being claimed)
+            limit: Maximum number of unique model references to return
+
+        Returns:
+            List of {category, filename} dicts
+        """
+        seen = set()
+        upcoming = []
+
+        for job_id in self._pending_queue:
+            if job_id == exclude_job_id:
+                continue
+            job = self._jobs.get(job_id)
+            if not job:
+                continue
+
+            config = job.config
+
+            # Main model/checkpoint
+            model_name = config.get("model", "None")
+            if model_name and model_name != "None":
+                model_type = config.get("model_type", "checkpoint")
+                if model_type == "checkpoint":
+                    cat = "checkpoints"
+                elif model_type == "gguf":
+                    cat = "unet_gguf"
+                elif model_type == "diffusion_model":
+                    cat = "diffusion_models"
+                else:
+                    cat = "checkpoints"
+                key = f"{cat}:{model_name}"
+                if key not in seen:
+                    seen.add(key)
+                    upcoming.append({"category": cat, "filename": model_name})
+
+            # LoRA
+            lora = config.get("lora_expanded", config.get("lora", "None"))
+            if lora and lora != "None":
+                key = f"loras:{lora}"
+                if key not in seen:
+                    seen.add(key)
+                    upcoming.append({"category": "loras", "filename": lora})
+
+            # VAE (skip remote URLs and "Default")
+            vae = config.get("vae", "Default")
+            if vae and vae != "Default" and not vae.startswith("remote:"):
+                key = f"vae:{vae}"
+                if key not in seen:
+                    seen.add(key)
+                    upcoming.append({"category": "vae", "filename": vae})
+
+            # Text encoders
+            text_encoders = config.get("text_encoders", [])
+            for te in text_encoders:
+                if te and te != "None":
+                    key = f"text_encoders:{te}"
+                    if key not in seen:
+                        seen.add(key)
+                        upcoming.append({"category": "text_encoders", "filename": te})
+
+            if len(upcoming) >= limit:
+                break
+
+        return upcoming
+
     def _job_to_dict(self, job):
         """
         Convert a DistributedJob to a serializable dict for API responses.
@@ -545,5 +618,11 @@ class DistributionManager:
             # use it for metadata without re-running CivitAI trigger lookups
             result["actual_positive_text"] = encoded.get("actual_positive_text")
             result["actual_negative_text"] = encoded.get("actual_negative_text")
+
+        # Attach upcoming models list if sync is enabled (for pre-fetching)
+        if self.sync_models_to_workers:
+            result["upcoming_models"] = self._get_upcoming_models(
+                exclude_job_id=job.job_id, limit=10
+            )
 
         return result
