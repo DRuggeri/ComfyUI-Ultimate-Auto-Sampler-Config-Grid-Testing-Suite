@@ -80,6 +80,13 @@ function init() {
             }, 100);
         }
 
+        // Show session landing page if no data loaded, populate session picker
+        if (typeof showSessionLandingIfEmpty === 'function') {
+            showSessionLandingIfEmpty();
+        } else if (typeof fetchAndShowSessions === 'function') {
+            fetchAndShowSessions();
+        }
+
     } catch (e) {
         console.error("Init Error", e);
     }

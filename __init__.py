@@ -142,6 +142,66 @@ async def delete_session(request):
         return web.Response(status=500, text=str(e))
 
 # =============================================================================
+# API: LIST SESSIONS
+# =============================================================================
+
+@server.PromptServer.instance.routes.get("/config_tester/list_sessions")
+async def list_sessions(request):
+    """
+    List all available sessions with metadata for the session picker.
+    Returns JSON array sorted by modification time (newest first).
+    Each entry: {name, item_count, first_image, mtime}
+    """
+    try:
+        benchmarks_dir = _get_benchmarks_base()
+        sessions = []
+
+        if os.path.exists(benchmarks_dir):
+            for item in os.listdir(benchmarks_dir):
+                item_path = os.path.join(benchmarks_dir, item)
+                manifest_path = os.path.join(item_path, "manifest.json")
+
+                if os.path.isdir(item_path) and os.path.exists(manifest_path):
+                    try:
+                        mtime = os.path.getmtime(item_path)
+                        # Read manifest for item count and first image
+                        with open(manifest_path, "r", encoding="utf-8") as f:
+                            manifest = json.load(f)
+                        items = manifest.get("items", [])
+                        item_count = len(items)
+
+                        # Find first image filename for thumbnail
+                        first_image = None
+                        if items:
+                            first_item = items[0]
+                            fname = first_item.get("filename")
+                            if fname:
+                                first_image = f"benchmarks/{item}/{fname}"
+
+                        sessions.append({
+                            "name": item,
+                            "item_count": item_count,
+                            "first_image": first_image,
+                            "mtime": mtime
+                        })
+                    except Exception:
+                        # Skip sessions with unreadable manifests
+                        sessions.append({
+                            "name": item,
+                            "item_count": 0,
+                            "first_image": None,
+                            "mtime": os.path.getmtime(item_path)
+                        })
+
+        # Sort by modification time, newest first
+        sessions.sort(key=lambda x: x["mtime"], reverse=True)
+        return web.json_response(sessions)
+
+    except Exception as e:
+        return web.json_response([], status=500)
+
+
+# =============================================================================
 # API: SAVE CHANGES (Optimized - Only Changed Items)
 # =============================================================================
 

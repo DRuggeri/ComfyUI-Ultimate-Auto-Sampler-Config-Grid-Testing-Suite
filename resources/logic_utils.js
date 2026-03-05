@@ -133,6 +133,12 @@ async function loadSession() {
         if (cogPanel) cogPanel.style.display = 'none';
         if (cogOverlay) cogOverlay.style.display = 'none';
         document.body.style.overflow = '';
+        // Hide landing page, show viewport
+        const landing = document.getElementById('session-landing');
+        const viewport = document.getElementById('viewport');
+        if (landing) landing.style.display = 'none';
+        if (viewport) viewport.style.display = 'block';
+
         console.log('[Load] ✅ Session loaded successfully');
 
 
@@ -140,6 +146,105 @@ async function loadSession() {
         console.error('[Load] ❌ Load failed:', e);
         if (grid) grid.style.opacity = '1';
         alert("Load Error: " + e.message);
+    }
+}
+
+// Load session from picker dropdown or session card
+function loadSessionFromPicker(sessionName) {
+    if (!sessionName) return;
+    const sessInput = document.getElementById('session-input');
+    if (sessInput) sessInput.value = sessionName;
+    loadSession();
+}
+
+// Fetch available sessions and populate picker dropdown + landing page
+async function fetchAndShowSessions() {
+    try {
+        const resp = await fetch('/config_tester/list_sessions');
+        if (!resp.ok) return;
+        const sessions = await resp.json();
+        if (!sessions || sessions.length === 0) return;
+
+        // Populate the session picker dropdown in cog menu
+        const picker = document.getElementById('session-picker');
+        if (picker) {
+            // Keep the default option
+            picker.innerHTML = '<option value="">-- Select a session --</option>';
+            sessions.forEach(s => {
+                const opt = document.createElement('option');
+                opt.value = s.name;
+                const date = new Date(s.mtime * 1000);
+                const dateStr = date.toLocaleDateString() + ' ' + date.toLocaleTimeString([], {hour: '2-digit', minute: '2-digit'});
+                opt.textContent = `${s.name} (${s.item_count} images, ${dateStr})`;
+                picker.appendChild(opt);
+            });
+        }
+
+        // Render session cards on the landing page
+        const cardsContainer = document.getElementById('session-cards');
+        const landingEl = document.getElementById('session-landing');
+        if (cardsContainer && landingEl) {
+            cardsContainer.innerHTML = '';
+            sessions.forEach(s => {
+                const card = document.createElement('div');
+                card.style.cssText = 'width: 180px; background: #2a2a2a; border: 1px solid #444; border-radius: 8px; overflow: hidden; cursor: pointer; transition: border-color 0.2s, transform 0.15s;';
+                card.onmouseenter = () => { card.style.borderColor = '#0af'; card.style.transform = 'translateY(-2px)'; };
+                card.onmouseleave = () => { card.style.borderColor = '#444'; card.style.transform = 'none'; };
+                card.onclick = () => loadSessionFromPicker(s.name);
+
+                // Thumbnail
+                const thumbDiv = document.createElement('div');
+                thumbDiv.style.cssText = 'width: 100%; height: 120px; background: #1a1a1a; display: flex; align-items: center; justify-content: center; overflow: hidden;';
+                if (s.first_image) {
+                    const img = document.createElement('img');
+                    img.src = `/view?filename=${encodeURIComponent(s.first_image.split('/').pop())}&type=output&subfolder=${encodeURIComponent(s.first_image.substring(0, s.first_image.lastIndexOf('/')))}&t=${Date.now()}`;
+                    img.style.cssText = 'width: 100%; height: 100%; object-fit: cover;';
+                    img.onerror = () => { img.style.display = 'none'; thumbDiv.textContent = '📷'; thumbDiv.style.fontSize = '24px'; thumbDiv.style.color = '#555'; };
+                    thumbDiv.appendChild(img);
+                } else {
+                    thumbDiv.textContent = '📷';
+                    thumbDiv.style.fontSize = '24px';
+                    thumbDiv.style.color = '#555';
+                }
+                card.appendChild(thumbDiv);
+
+                // Info
+                const info = document.createElement('div');
+                info.style.cssText = 'padding: 8px; font-size: 11px;';
+                const nameEl = document.createElement('div');
+                nameEl.style.cssText = 'font-weight: bold; color: #ddd; margin-bottom: 4px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;';
+                nameEl.textContent = s.name;
+                nameEl.title = s.name;
+                info.appendChild(nameEl);
+
+                const metaEl = document.createElement('div');
+                metaEl.style.cssText = 'color: #888; font-size: 10px;';
+                const date = new Date(s.mtime * 1000);
+                metaEl.textContent = `${s.item_count} images · ${date.toLocaleDateString()}`;
+                info.appendChild(metaEl);
+
+                card.appendChild(info);
+                cardsContainer.appendChild(card);
+            });
+        }
+    } catch (e) {
+        console.error('[Sessions] Failed to fetch sessions:', e);
+    }
+}
+
+// Show session landing page if no data is loaded
+function showSessionLandingIfEmpty() {
+    const hasData = fullManifest && fullManifest.items && fullManifest.items.length > 0;
+    const landing = document.getElementById('session-landing');
+    const viewport = document.getElementById('viewport');
+
+    if (!hasData && landing && viewport) {
+        landing.style.display = 'block';
+        viewport.style.display = 'none';
+        fetchAndShowSessions();
+    } else if (landing && viewport) {
+        landing.style.display = 'none';
+        viewport.style.display = 'block';
     }
 }
 

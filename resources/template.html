@@ -45,9 +45,10 @@
             </div>
         </div>
 
-        <button class="fs-btn" onclick="loadSession()" title="Load Session">
+        <button class="fs-btn" onclick="loadSession()" title="Reload Session (R)">
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
-                <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path>
+                <polyline points="23 4 23 10 17 10"></polyline>
+                <path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"></path>
             </svg>
         </button>
 
@@ -89,6 +90,12 @@
                     placeholder="Session name...">
                 <div class="session-actions" style="margin-top: 6px;">
                     <button class="session-action-btn save-btn" onclick="saveState()">SAVE</button>
+                </div>
+                <div style="margin-top: 8px;">
+                    <span class="meta-label" style="font-size: 10px;">Load Session:</span>
+                    <select id="session-picker" style="width: 100%; margin-top: 4px; background: #1a1a1a; color: #ccc; border: 1px solid #444; border-radius: 4px; padding: 4px 6px; font-size: 11px; cursor: pointer;" onchange="loadSessionFromPicker(this.value)">
+                        <option value="">-- Select a session --</option>
+                    </select>
                 </div>
             </div>
 
@@ -372,6 +379,13 @@
     <!-- Overlay for popup -->
     <div id="filters-overlay" class="filters-overlay" onclick="toggleFiltersPopup()" style="display: none;"></div>
 
+
+    <!-- Session landing page (shown when no session is loaded) -->
+    <div id="session-landing" style="display: none; padding: 40px 20px; text-align: center;">
+        <h2 style="color: #888; font-size: 18px; margin-bottom: 8px;">Ultimate Grid Dashboard</h2>
+        <p style="color: #555; font-size: 12px; margin-bottom: 24px;">Select a session to view</p>
+        <div id="session-cards" style="display: flex; flex-wrap: wrap; gap: 12px; justify-content: center; max-width: 900px; margin: 0 auto;"></div>
+    </div>
 
     <div id="viewport">
         <div id="canvas">
