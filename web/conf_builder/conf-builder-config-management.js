@@ -3943,7 +3943,20 @@ export function updatePreview(node) {
     const preview = node.htmlContainer.querySelector("#json-preview");
     if (!preview) return;
     const configs = convertStateToConfigs(node.state);
-    preview.textContent = JSON.stringify(configs, null, 2);
+
+    // Build the full output object matching what configs_json will contain
+    const output = { configs };
+    if (node.state.distribution_enabled) {
+        output._distribution = {
+            enabled: true,
+            worker_urls: (node.state.worker_urls || []).filter(u => u && u.trim()),
+            claim_timeout: node.state.claim_timeout || 600,
+            use_master_encoding: node.state.use_master_encoding || false,
+            sync_models_to_workers: node.state.sync_models_to_workers || false
+        };
+    }
+
+    preview.textContent = JSON.stringify(output, null, 2);
 }
 
 export async function renderUI(node, availableLoras, modelLists, loraFolders, availableSessions, availableConfigs, refreshAllConfigBuilders) {
@@ -3993,10 +4006,8 @@ export async function renderUI(node, availableLoras, modelLists, loraFolders, av
 
     // === MAIN CONTENT SECTIONS ===
 
-    // Distribution Settings Section (when enabled, appears first)
-    if (node.state.distribution_enabled) {
-        renderDistributionSettingsSection(node, mainContent);
-    }
+    // Distribution Settings Section (always shown with On/Off toggle)
+    renderDistributionSettingsSection(node, mainContent);
 
     // Global Prompts Section
     renderGlobalPromptsSection(node, mainContent);

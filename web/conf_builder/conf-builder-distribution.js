@@ -242,12 +242,40 @@ export function renderDistributionSettingsSection(node, container) {
     const header = createSectionHeader("🌐", "Distribution Settings", "distribution");
     section.appendChild(header);
 
+    // On/Off toggle row (always visible)
+    const toggleRow = document.createElement("div");
+    toggleRow.style.cssText = "display: flex; align-items: center; gap: 10px; margin-bottom: 8px;";
+    const toggleLabel = document.createElement("label");
+    toggleLabel.className = "cb-toggle";
+    toggleLabel.style.fontSize = "13px";
+    toggleLabel.style.fontWeight = "bold";
+    const toggleCheckbox = document.createElement("input");
+    toggleCheckbox.type = "checkbox";
+    toggleCheckbox.checked = node.state.distribution_enabled || false;
+    const toggleText = document.createTextNode(node.state.distribution_enabled ? " Distributed Processing: ON" : " Distributed Processing: OFF");
+    toggleLabel.appendChild(toggleCheckbox);
+    toggleLabel.appendChild(toggleText);
+    toggleRow.appendChild(toggleLabel);
+    section.appendChild(toggleRow);
+
+    // Collapsible details container (hidden when distribution is off)
+    const detailsContainer = document.createElement("div");
+    detailsContainer.id = "cb-distribution-details";
+    detailsContainer.style.display = node.state.distribution_enabled ? "block" : "none";
+
+    toggleCheckbox.onchange = () => {
+        node.state.distribution_enabled = toggleCheckbox.checked;
+        detailsContainer.style.display = toggleCheckbox.checked ? "block" : "none";
+        toggleText.textContent = toggleCheckbox.checked ? " Distributed Processing: ON" : " Distributed Processing: OFF";
+        node.saveState();
+    };
+
     // Info text
     const info = document.createElement("div");
     info.style.cssText = "font-size: 11px; color: #999; margin-bottom: 10px; line-height: 1.4;";
     info.textContent = "Add ComfyUI worker URLs below. Workers must have this node installed. "
         + "Jobs are pulled by workers (fast workers get more jobs).";
-    section.appendChild(info);
+    detailsContainer.appendChild(info);
 
     // Worker URL list
     const workerList = document.createElement("div");
@@ -301,7 +329,7 @@ export function renderDistributionSettingsSection(node, container) {
     };
 
     renderWorkerEntries();
-    section.appendChild(workerList);
+    detailsContainer.appendChild(workerList);
 
     // Button row: Add Worker + Test Connections
     const buttonRow = document.createElement("div");
@@ -375,7 +403,7 @@ export function renderDistributionSettingsSection(node, container) {
 
     buttonRow.appendChild(addBtn);
     buttonRow.appendChild(testBtn);
-    section.appendChild(buttonRow);
+    detailsContainer.appendChild(buttonRow);
 
     // Claim timeout slider
     const timeoutSlider = createSlider(
@@ -387,7 +415,7 @@ export function renderDistributionSettingsSection(node, container) {
             node.saveState();
         }
     );
-    section.appendChild(timeoutSlider);
+    detailsContainer.appendChild(timeoutSlider);
 
     // Use Master Text Encoding toggle
     const encodingRow = document.createElement("div");
@@ -406,14 +434,14 @@ export function renderDistributionSettingsSection(node, container) {
     encodingLabel.appendChild(encodingCheckbox);
     encodingLabel.appendChild(document.createTextNode(" Use Master Text Encoding"));
     encodingRow.appendChild(encodingLabel);
-    section.appendChild(encodingRow);
+    detailsContainer.appendChild(encodingRow);
 
     const encodingInfo = document.createElement("div");
     encodingInfo.style.cssText = "font-size: 10px; color: #777; margin-top: 4px; line-height: 1.3; padding-left: 2px;";
     encodingInfo.textContent = "Master pre-encodes all prompts and sends them to workers. "
         + "Workers skip CLIP loading and text encoding, saving significant time. "
         + "Disabled when optional conditioning inputs are connected.";
-    section.appendChild(encodingInfo);
+    detailsContainer.appendChild(encodingInfo);
 
     // Sync Models to Workers toggle
     const syncRow = document.createElement("div");
@@ -432,14 +460,15 @@ export function renderDistributionSettingsSection(node, container) {
     syncLabel.appendChild(syncCheckbox);
     syncLabel.appendChild(document.createTextNode(" ☁️ Sync Models to Workers"));
     syncRow.appendChild(syncLabel);
-    section.appendChild(syncRow);
+    detailsContainer.appendChild(syncRow);
 
     const syncInfo = document.createElement("div");
     syncInfo.style.cssText = "font-size: 10px; color: #777; margin-top: 4px; line-height: 1.3; padding-left: 2px;";
     syncInfo.textContent = "Automatically transfer required models, LoRAs, text encoders, "
         + "and VAEs to workers via HTTP. Files are saved permanently to each worker's "
         + "ComfyUI models folder, matching the master's directory structure.";
-    section.appendChild(syncInfo);
+    detailsContainer.appendChild(syncInfo);
 
+    section.appendChild(detailsContainer);
     container.appendChild(section);
 }

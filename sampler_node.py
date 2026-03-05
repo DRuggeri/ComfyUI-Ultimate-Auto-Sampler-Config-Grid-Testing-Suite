@@ -90,10 +90,6 @@ class SamplerGridTester:
                 "optional_positive": ("CONDITIONING",),
                 "optional_negative": ("CONDITIONING",),
                 "optional_latent": ("LATENT",),
-                "distribution_config": ("STRING", {
-                    "default": "",
-                    "tooltip": "JSON config for distributed processing. Connect from Config Builder's distribution_config output. Contains worker URLs and settings."
-                }),
             },
             "hidden": {"unique_id": "UNIQUE_ID"},
         }
@@ -258,8 +254,7 @@ class SamplerGridTester:
                 session_name, unique_id, add_random_seeds_to_gens, lora_triggerwords_mode,
                 remote_vae_endpoint, save_conditioning_cache_to_file, enable_model_cache,
                 optional_model=None, optional_clip=None, optional_vae=None,
-                optional_positive=None, optional_negative=None, optional_latent=None,
-                distribution_config=None):
+                optional_positive=None, optional_negative=None, optional_latent=None):
 
         # Import the generation logic from the separate module
         from .generation_orchestrator import run_generation_loop
@@ -271,17 +266,20 @@ class SamplerGridTester:
                 print("[GridTester] ⚠️ save_conditioning_cache_to_file disabled: optional inputs connected (changes cannot be reliably detected)")
             save_conditioning_cache_to_file = False
 
-        # Parse distribution config if provided
+        # Extract distribution config from configs_json (embedded as _distribution key)
         dist_config = None
-        if distribution_config and distribution_config.strip():
-            try:
-                import json
-                dist_config = json.loads(distribution_config)
-                print(f"[GridTester] 🌐 Distribution config received: {len(dist_config.get('worker_urls', []))} worker(s), enabled={dist_config.get('enabled')}")
-            except Exception as e:
-                print(f"[GridTester] ⚠️ Invalid distribution_config JSON: {e}")
-        else:
-            print(f"[GridTester] ℹ️ No distribution_config (wire not connected or distribution disabled)")
+        try:
+            import json
+            parsed = json.loads(configs_json)
+            if isinstance(parsed, dict) and "_distribution" in parsed:
+                dist_config = parsed["_distribution"]
+                # Replace configs_json with just the configs array for downstream
+                configs_json = json.dumps(parsed["configs"], indent=2, ensure_ascii=False)
+                print(f"[GridTester] 🌐 Distribution config extracted: {len(dist_config.get('worker_urls', []))} worker(s), enabled={dist_config.get('enabled')}")
+            else:
+                print(f"[GridTester] ℹ️ No distribution settings in configs_json")
+        except Exception as e:
+            print(f"[GridTester] ⚠️ Error parsing configs_json for distribution: {e}")
 
         return run_generation_loop(
             self,
@@ -291,7 +289,7 @@ class SamplerGridTester:
             remote_vae_endpoint, save_conditioning_cache_to_file, enable_model_cache,
             optional_model, optional_clip, optional_vae,
             optional_positive, optional_negative, optional_latent,
-            distribution_config=dist_config
+            distribution_config=dist_config  # Extracted from configs_json
         )
 
 

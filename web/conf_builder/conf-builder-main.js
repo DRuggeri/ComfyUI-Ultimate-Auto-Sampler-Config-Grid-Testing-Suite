@@ -268,7 +268,11 @@ app.registerExtension({
 
                         if (meta.configs_json) {
                             try {
-                                const configs = JSON.parse(meta.configs_json);
+                                let configs = JSON.parse(meta.configs_json);
+                                // Handle new format: {configs: [...], _distribution: {...}}
+                                if (configs && !Array.isArray(configs) && configs.configs) {
+                                    configs = configs.configs;
+                                }
                                 let loadedArrays = utilities.convertConfigsToConfigArrays(configs);
                                 const normalize = (str) => str.replace(/\\/g, "/");
 

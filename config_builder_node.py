@@ -217,8 +217,8 @@ class UltimateConfigBuilder:
             }
         }
     
-    RETURN_TYPES = ("STRING", "STRING", "STRING")
-    RETURN_NAMES = ("configs_json", "session_name", "distribution_config")
+    RETURN_TYPES = ("STRING", "STRING")
+    RETURN_NAMES = ("configs_json", "session_name")
     FUNCTION = "generate_config"
     CATEGORY = "sampling/testing"
     OUTPUT_NODE = True
@@ -639,8 +639,21 @@ class UltimateConfigBuilder:
 
             configs_output.append(config)
         
-        json_output = json.dumps(configs_output, indent=2, ensure_ascii=False)
-        
+        # Build the output object with configs and optional distribution settings
+        output_obj = {"configs": configs_output}
+
+        # Embed distribution config if enabled
+        if state.get("distribution_enabled") and state.get("worker_urls"):
+            output_obj["_distribution"] = {
+                "enabled": True,
+                "worker_urls": [u for u in state["worker_urls"] if u and u.strip()],
+                "claim_timeout": state.get("claim_timeout", 600),
+                "use_master_encoding": state.get("use_master_encoding", False),
+                "sync_models_to_workers": state.get("sync_models_to_workers", False)
+            }
+
+        json_output = json.dumps(output_obj, indent=2, ensure_ascii=False)
+
         # Calculate totals
         total_combinations = 0
         for config in configs_output:
@@ -659,19 +672,8 @@ class UltimateConfigBuilder:
         print(f"  Total Combinations: {total_combinations}")
         print(f"{'='*80}\n")
         
-        # Build distribution config from state if enabled
-        dist_config = ""
-        if state.get("distribution_enabled") and state.get("worker_urls"):
-            dist_config = json.dumps({
-                "enabled": True,
-                "worker_urls": [u for u in state["worker_urls"] if u and u.strip()],
-                "claim_timeout": state.get("claim_timeout", 600),
-                "use_master_encoding": state.get("use_master_encoding", False),
-                "sync_models_to_workers": state.get("sync_models_to_workers", False)
-            })
-
-        # Return configs, session name, and distribution config
-        return (json_output, actual_session_name, dist_config)
+        # Return configs (with embedded distribution settings) and session name
+        return (json_output, actual_session_name)
 
 
 # API endpoint for trigger word lookup
