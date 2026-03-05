@@ -685,6 +685,25 @@ function setupKeyboardShortcuts() {
                 updateVisibleItems();
                 break;
         }
+
+        // Shift+0-9: Quick column count change
+        if (e.shiftKey && e.key >= '0' && e.key <= '9') {
+            e.preventDefault();
+            const colInput = document.getElementById('col-count');
+            const num = parseInt(e.key);
+            if (num === 0) {
+                // Shift+0 = Auto columns
+                if (colInput) colInput.value = '';
+                localStorage.removeItem('ultimate_grid_cols');
+            } else {
+                // Shift+1-9 = Set exact column count
+                if (colInput) colInput.value = num;
+                localStorage.setItem('ultimate_grid_cols', num);
+            }
+            if (typeof recalcColumns === 'function') {
+                recalcColumns();
+            }
+        }
     });
 }
 

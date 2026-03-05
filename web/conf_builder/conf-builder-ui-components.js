@@ -357,7 +357,7 @@ export function getStyles() {
             }
             .cb-prompt-raw-editor {
                 width: 100%;
-                min-height: 80px;
+                min-height: 160px;
                 background: #0a0a0a;
                 border: 1px solid #3a3a3a;
                 color: #0cc;
@@ -450,14 +450,11 @@ export function getStyles() {
                 color: #fff;
             }
             .cb-sidebar-sub-icons {
-                display: none;
+                display: flex;
                 flex-direction: column;
                 align-items: center;
                 gap: 2px;
                 padding: 2px 0;
-            }
-            .cb-sidebar-config-group:hover .cb-sidebar-sub-icons {
-                display: flex;
             }
             .cb-sidebar-sub-icon {
                 width: 28px;
@@ -798,7 +795,7 @@ export function createSidebar(node, mainContent, refreshAllConfigBuilders) {
             cogBtn.className = "cb-sidebar-config-icon";
             cogBtn.style.color = color;
             cogBtn.style.borderLeft = `2px solid ${color}`;
-            cogBtn.textContent = `${idx + 1}`;
+            cogBtn.textContent = `⚙️${idx + 1}`;
             cogBtn.title = ca.name || `Config ${idx + 1}`;
             cogBtn.dataset.targetId = `cb-config-${idx}`;
             cogBtn.onclick = () => {
@@ -808,15 +805,15 @@ export function createSidebar(node, mainContent, refreshAllConfigBuilders) {
             icons.push(cogBtn);
             group.appendChild(cogBtn);
 
-            // Sub-icons container (shown on hover)
+            // Sub-icons container (always visible)
             const subIcons = document.createElement("div");
             subIcons.className = "cb-sidebar-sub-icons";
 
             const subSections = [
                 { emoji: "🧊", label: "Models", id: `cb-config-${idx}-models` },
-                { emoji: "📎", label: "Text Enc", id: `cb-config-${idx}-te` },
+                { emoji: "🔣", label: "Text Enc", id: `cb-config-${idx}-te` },
                 { emoji: "🎨", label: "VAE", id: `cb-config-${idx}-vae` },
-                { emoji: "🔗", label: "LoRAs", id: `cb-config-${idx}-loras` }
+                { emoji: "🔮", label: "LoRAs", id: `cb-config-${idx}-loras` }
             ];
 
             subSections.forEach(sub => {
