@@ -146,9 +146,17 @@ app.registerExtension({
             window.__ultimateGridDistributionStatusListenerInstalled = true;
         }
 
-        // 3. FULLSCREEN LISTENER (SINGLETON - only register once)
+        // 3. FULLSCREEN + CTRL+S LISTENER (SINGLETON - only register once)
         if (!window.__ultimateGridFullscreenListenerInstalled) {
             window.addEventListener("message", (event) => {
+                // Forward Ctrl+S from dashboard iframe to ComfyUI's save workflow
+                if (event.data?.type === 'forward_ctrl_s') {
+                    document.dispatchEvent(new KeyboardEvent('keydown', {
+                        key: 's', code: 'KeyS', ctrlKey: true, bubbles: true, cancelable: true
+                    }));
+                    return;
+                }
+
                 if (event.data?.type === 'toggle_fullscreen') {
                     const nodeId = parseInt(event.data.node_id);
                     const graphNode = app.graph.getNodeById(nodeId);

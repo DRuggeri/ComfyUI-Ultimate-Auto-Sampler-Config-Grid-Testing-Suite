@@ -301,7 +301,8 @@ function renderVisibleItems(forcePositionUpdate = false) {
         console.log(`[Grid] Added ${newCardsAdded} new cards, kept ${nodeMap.size - newCardsAdded} existing`);
     }
 
-    viewport.focus();
+    // Only set tabindex so keyboard shortcuts work when user clicks in
+    // Do NOT call viewport.focus() here — it steals focus from ComfyUI during live updates
     viewport.setAttribute('tabindex', '0');
 }
 
@@ -348,7 +349,8 @@ function renderDOM() {
     }
     renderVisibleItems();
 
-    viewport.focus();
+    // Only set tabindex so keyboard shortcuts work when user clicks in
+    // Do NOT call viewport.focus() here — it steals focus from ComfyUI during live updates
     viewport.setAttribute('tabindex', '0');
 
     isRendering = false;
@@ -687,10 +689,11 @@ function setupKeyboardShortcuts() {
         }
 
         // Shift+0-9: Quick column count change
-        if (e.shiftKey && e.key >= '0' && e.key <= '9') {
+        // Use e.code (Digit0-Digit9) because e.key returns shifted symbols (!@#$) when Shift is held
+        if (e.shiftKey && e.code >= 'Digit0' && e.code <= 'Digit9') {
             e.preventDefault();
             const colInput = document.getElementById('col-count');
-            const num = parseInt(e.key);
+            const num = parseInt(e.code.replace('Digit', ''));
             if (num === 0) {
                 // Shift+0 = Auto columns
                 if (colInput) colInput.value = '';

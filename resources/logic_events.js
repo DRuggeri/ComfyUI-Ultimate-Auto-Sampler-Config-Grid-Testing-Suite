@@ -3,6 +3,16 @@
  * Only processes NEW data, doesn't refilter everything
  */
 
+// Intercept Ctrl+S inside the dashboard iframe to prevent browser "Save As" dialog
+// and forward the save intent to ComfyUI's parent window
+document.addEventListener('keydown', (e) => {
+    if ((e.ctrlKey || e.metaKey) && e.key === 's') {
+        e.preventDefault();
+        e.stopPropagation();
+        window.parent.postMessage({ type: 'forward_ctrl_s' }, '*');
+    }
+});
+
 // Track last update to prevent duplicates
 let lastUpdateId = 0;
 

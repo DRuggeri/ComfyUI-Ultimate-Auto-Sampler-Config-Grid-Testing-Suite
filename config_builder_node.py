@@ -315,7 +315,8 @@ class UltimateConfigBuilder:
                     if normalized_file.startswith(folder_prefix):
                         expanded.append(lora_file)
                 
-                print(f"[ConfigBuilder] Expanded folder '{lora_name}' to {len([l for l in available_loras if l.replace('\\', '/').startswith(folder_prefix)])} LoRAs")
+                lora_count = len([l for l in available_loras if l.replace('\\', '/').startswith(folder_prefix)])
+                print(f"[ConfigBuilder] Expanded folder '{lora_name}' to {lora_count} LoRAs")
             else:
                 # Regular LoRA file
                 expanded.append(lora_str)

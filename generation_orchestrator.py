@@ -102,13 +102,18 @@ def extract_remote_vae_url(vae_string):
 
 def _flush_pending_batch(pending_batch, current_vae_is_remote, current_remote_vae_url,
                          per_config_remote_workers, use_remote_vae, remote_vae_worker,
-                         loaded_vae, paths, existing_data, session_name, manifest_path, unique_id):
+                         loaded_vae, paths, existing_data, session_name, manifest_path, unique_id,
+                         config_overrides_vae=False):
     """Flush pending batch using the appropriate VAE decode method.
 
     Handles three-way dispatch:
       1. Per-config remote VAE (current_vae_is_remote) — uses per-config worker
       2. Global remote VAE (use_remote_vae) — uses global remote_vae_worker
+         ONLY when config_overrides_vae is False (config VAE is "Default")
       3. Local VAE — uses loaded_vae for local decode
+
+    Config Builder VAE settings take priority over the sampler node's
+    remote_vae_endpoint when a config explicitly sets a non-Default VAE.
     """
     if not pending_batch:
         return
@@ -119,7 +124,7 @@ def _flush_pending_batch(pending_batch, current_vae_is_remote, current_remote_va
         else:
             print(f"[GridTester] ⚠️ No remote worker for {current_remote_vae_url}, falling back to local VAE")
             flush_batch_with_vae(pending_batch, loaded_vae, paths["images"], existing_data, session_name, manifest_path, unique_id)
-    elif use_remote_vae and remote_vae_worker:
+    elif not config_overrides_vae and use_remote_vae and remote_vae_worker:
         flush_batch_with_remote_vae(pending_batch, remote_vae_worker, existing_data, session_name)
     else:
         flush_batch_with_vae(pending_batch, loaded_vae, paths["images"], existing_data, session_name, manifest_path, unique_id)
@@ -490,6 +495,7 @@ def run_generation_loop(
     per_config_remote_workers = {}   # Keyed by URL, reused across configs
     current_vae_is_remote = False
     current_remote_vae_url = None
+    config_overrides_vae = False  # True when config explicitly sets a non-Default VAE (overrides sampler node's remote_vae_endpoint)
 
     # ==== PRE-ENCODING STAGE ====
     unique_model_keys = set(get_model_cache_key(conf) for conf in expanded)
@@ -513,8 +519,10 @@ def run_generation_loop(
         default_model_vae = loaded_vae
 
         # Per-config VAE: if first config specifies a VAE, load it
+        # Config Builder VAE settings take priority over sampler node's remote_vae_endpoint
         target_vae = first_conf.get("vae", "Default")
         if target_vae != "Default":
+            config_overrides_vae = True
             if is_remote_vae(target_vae):
                 url = extract_remote_vae_url(target_vae)
                 current_vae_is_remote = True
@@ -650,7 +658,8 @@ def run_generation_loop(
                     if pending_batch:
                         _flush_pending_batch(pending_batch, current_vae_is_remote, current_remote_vae_url,
                                              per_config_remote_workers, use_remote_vae, remote_vae_worker,
-                                             loaded_vae, paths, existing_data, session_name, paths["manifest"], unique_id)
+                                             loaded_vae, paths, existing_data, session_name, paths["manifest"], unique_id,
+                                             config_overrides_vae=config_overrides_vae)
                         pending_batch = []
 
                     _cleanup_per_config_remote_workers(per_config_remote_workers)
@@ -758,6 +767,7 @@ def run_generation_loop(
                 cached_vae_key = "Default"
                 current_vae_is_remote = False
                 current_remote_vae_url = None
+                config_overrides_vae = False
 
                 cached_model_key = target_model_key
                 cached_lora_key = None
@@ -768,13 +778,15 @@ def run_generation_loop(
                 model_switched = False
 
             # ==== PER-CONFIG VAE SWITCHING ====
+            # Config Builder VAE settings take priority over sampler node's remote_vae_endpoint
             target_vae = conf.get("vae", "Default")
             if target_vae != cached_vae_key:
                 # Flush pending batch before switching VAE (they need current VAE for decoding)
                 if pending_batch:
                     _flush_pending_batch(pending_batch, current_vae_is_remote, current_remote_vae_url,
                                          per_config_remote_workers, use_remote_vae, remote_vae_worker,
-                                         loaded_vae, paths, existing_data, session_name, paths["manifest"], unique_id)
+                                         loaded_vae, paths, existing_data, session_name, paths["manifest"], unique_id,
+                                         config_overrides_vae=config_overrides_vae)
                     pending_batch = []
 
                 if target_vae == "Default":
@@ -782,11 +794,13 @@ def run_generation_loop(
                     loaded_vae = default_model_vae
                     current_vae_is_remote = False
                     current_remote_vae_url = None
+                    config_overrides_vae = False
                     print(f"[GridTester] 🎨 Reverting to Default VAE")
                 elif is_remote_vae(target_vae):
                     url = extract_remote_vae_url(target_vae)
                     current_vae_is_remote = True
                     current_remote_vae_url = url
+                    config_overrides_vae = True
                     loaded_vae = None  # No local VAE needed
                     print(f"[GridTester] 🌐 Using per-config remote VAE: {url}")
                     if url not in per_config_remote_workers:
@@ -799,6 +813,7 @@ def run_generation_loop(
                 else:
                     current_vae_is_remote = False
                     current_remote_vae_url = None
+                    config_overrides_vae = True
                     print(f"[GridTester] 🎨 Loading per-config VAE: {target_vae}")
                     loaded_vae = load_vae_by_name(target_vae)
                 cached_vae_key = target_vae
@@ -890,7 +905,8 @@ def run_generation_loop(
                             if pending_batch:
                                 _flush_pending_batch(pending_batch, current_vae_is_remote, current_remote_vae_url,
                                                      per_config_remote_workers, use_remote_vae, remote_vae_worker,
-                                                     loaded_vae, paths, existing_data, session_name, paths["manifest"], unique_id)
+                                                     loaded_vae, paths, existing_data, session_name, paths["manifest"], unique_id,
+                                                     config_overrides_vae=config_overrides_vae)
                                 pending_batch = []
 
                             _cleanup_per_config_remote_workers(per_config_remote_workers)
@@ -1119,7 +1135,8 @@ def run_generation_loop(
                     if pending_batch:
                         _flush_pending_batch(pending_batch, current_vae_is_remote, current_remote_vae_url,
                                              per_config_remote_workers, use_remote_vae, remote_vae_worker,
-                                             loaded_vae, paths, existing_data, session_name, paths["manifest"], unique_id)
+                                             loaded_vae, paths, existing_data, session_name, paths["manifest"], unique_id,
+                                             config_overrides_vae=config_overrides_vae)
                         pending_batch = []
 
                     _cleanup_per_config_remote_workers(per_config_remote_workers)
@@ -1168,14 +1185,16 @@ def run_generation_loop(
             if len(pending_batch) >= threshold:
                 _flush_pending_batch(pending_batch, current_vae_is_remote, current_remote_vae_url,
                                      per_config_remote_workers, use_remote_vae, remote_vae_worker,
-                                     loaded_vae, paths, existing_data, session_name, paths["manifest"], unique_id)
+                                     loaded_vae, paths, existing_data, session_name, paths["manifest"], unique_id,
+                                     config_overrides_vae=config_overrides_vae)
                 pending_batch = []
-    
+
     # ==== FINALIZATION ====
     if pending_batch:
         _flush_pending_batch(pending_batch, current_vae_is_remote, current_remote_vae_url,
                              per_config_remote_workers, use_remote_vae, remote_vae_worker,
-                             loaded_vae, paths, existing_data, session_name, paths["manifest"], unique_id)
+                             loaded_vae, paths, existing_data, session_name, paths["manifest"], unique_id,
+                             config_overrides_vae=config_overrides_vae)
 
     # Shut down per-config remote VAE workers
     _cleanup_per_config_remote_workers(per_config_remote_workers)
@@ -1606,6 +1625,7 @@ def _run_distributed_generation(
     per_config_remote_workers = {}
     current_vae_is_remote = False
     current_remote_vae_url = None
+    config_overrides_vae = False  # True when config explicitly sets a non-Default VAE (overrides sampler node's remote_vae_endpoint)
 
     try:
         if PromptServer is not None:
@@ -1699,8 +1719,10 @@ def _run_distributed_generation(
                 cached_vae_key = "Default"
                 current_vae_is_remote = False
                 current_remote_vae_url = None
+                config_overrides_vae = False
 
             # --- VAE Switching ---
+            # Config Builder VAE settings take priority over sampler node's remote_vae_endpoint
             target_vae = conf.get("vae", "Default")
             if target_vae != cached_vae_key:
                 # Flush pending batch before switching VAE
@@ -1709,7 +1731,8 @@ def _run_distributed_generation(
                         pending_batch, current_vae_is_remote, current_remote_vae_url,
                         per_config_remote_workers, use_remote_vae, remote_vae_worker,
                         loaded_vae, paths, existing_data, session_name,
-                        paths["manifest"], unique_id
+                        paths["manifest"], unique_id,
+                        config_overrides_vae=config_overrides_vae
                     )
                     for jid in pending_job_ids:
                         manager.complete_job(jid)
@@ -1720,10 +1743,12 @@ def _run_distributed_generation(
                     loaded_vae = default_model_vae
                     current_vae_is_remote = False
                     current_remote_vae_url = None
+                    config_overrides_vae = False
                 elif is_remote_vae(target_vae):
                     url = extract_remote_vae_url(target_vae)
                     current_vae_is_remote = True
                     current_remote_vae_url = url
+                    config_overrides_vae = True
                     loaded_vae = None
                     if url not in per_config_remote_workers:
                         per_config_remote_workers[url] = RemoteVAEDecodeWorker(
@@ -1735,6 +1760,7 @@ def _run_distributed_generation(
                 else:
                     current_vae_is_remote = False
                     current_remote_vae_url = None
+                    config_overrides_vae = True
                     loaded_vae = load_vae_by_name(target_vae)
                 cached_vae_key = target_vae
 
@@ -1841,7 +1867,8 @@ def _run_distributed_generation(
                     pending_batch, current_vae_is_remote, current_remote_vae_url,
                     per_config_remote_workers, use_remote_vae, remote_vae_worker,
                     loaded_vae, paths, existing_data, session_name,
-                    paths["manifest"], unique_id
+                    paths["manifest"], unique_id,
+                    config_overrides_vae=config_overrides_vae
                 )
                 for jid in pending_job_ids:
                     manager.complete_job(jid)
@@ -1861,7 +1888,8 @@ def _run_distributed_generation(
                 pending_batch, current_vae_is_remote, current_remote_vae_url,
                 per_config_remote_workers, use_remote_vae, remote_vae_worker,
                 loaded_vae, paths, existing_data, session_name,
-                paths["manifest"], unique_id
+                paths["manifest"], unique_id,
+                config_overrides_vae=config_overrides_vae
             )
             for jid in pending_job_ids:
                 manager.complete_job(jid)
@@ -1876,7 +1904,8 @@ def _run_distributed_generation(
                 pending_batch, current_vae_is_remote, current_remote_vae_url,
                 per_config_remote_workers, use_remote_vae, remote_vae_worker,
                 loaded_vae, paths, existing_data, session_name,
-                paths["manifest"], unique_id
+                paths["manifest"], unique_id,
+                config_overrides_vae=config_overrides_vae
             )
             for jid in pending_job_ids:
                 manager.complete_job(jid)
