@@ -488,12 +488,19 @@ function updateFiltersForNewData(newItems) {
 
 // --- 5. INITIALIZATION ---
 // Ensure init fires after DOM is ready
+// Note: init() in logic_init.js handles the full initialization including
+// showSessionLandingIfEmpty() for sessions with no data. Only call loadSession()
+// here when we have embedded data to reload from disk.
 if (document.readyState === 'loading') {
     document.addEventListener('DOMContentLoaded', () => {
-        console.log('[Init] DOMContentLoaded - calling loadSession');
-        loadSession();
+        if (fullManifest && fullManifest.items && fullManifest.items.length > 0) {
+            console.log('[Init] DOMContentLoaded - calling loadSession');
+            loadSession();
+        }
     });
 } else {
-    console.log('[Init] DOM already loaded - calling loadSession');
-    loadSession();
+    if (fullManifest && fullManifest.items && fullManifest.items.length > 0) {
+        console.log('[Init] DOM already loaded - calling loadSession');
+        loadSession();
+    }
 }
