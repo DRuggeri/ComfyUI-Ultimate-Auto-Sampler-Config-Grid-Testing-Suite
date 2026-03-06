@@ -383,6 +383,17 @@ app.registerExtension({
                 // Set default size
                 this.setSize([900, 750]);
 
+                // Auto-load session on node creation so the dashboard
+                // shows content immediately (landing page or session grid)
+                // instead of a blank black box
+                const autoLoadSession = getSessionName();
+                if (autoLoadSession) {
+                    // Small delay to let ComfyUI finish initializing the node
+                    setTimeout(() => {
+                        this.forceLoadSession(autoLoadSession);
+                    }, 500);
+                }
+
                 // Cleanup on node removal
                 const originalOnRemoved = this.onRemoved;
                 this.onRemoved = function () {

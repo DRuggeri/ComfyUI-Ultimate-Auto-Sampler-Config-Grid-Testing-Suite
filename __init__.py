@@ -386,7 +386,11 @@ async def get_session_html(request):
         manifest_path = os.path.join(base_dir, "manifest.json")
 
         if not os.path.exists(manifest_path):
-            return web.Response(status=404, text=f"Session '{session_name}' not found")
+            # No session found — return full template with empty manifest
+            # so the landing page JS can show available sessions
+            empty_manifest = {"items": [], "meta": {"model": "", "positive": "", "negative": ""}, "session_name": session_name}
+            html = get_html_template(session_name, empty_manifest, node_id)
+            return web.Response(status=200, text=html)
 
         with open(manifest_path, "r") as f:
             manifest = json.load(f)
