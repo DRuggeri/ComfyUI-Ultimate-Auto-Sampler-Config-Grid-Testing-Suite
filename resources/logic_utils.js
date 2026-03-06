@@ -237,10 +237,12 @@ function showSessionLandingIfEmpty() {
     const landing = document.getElementById('session-landing');
     const viewport = document.getElementById('viewport');
 
+    // Always populate session picker dropdown and landing cards
+    fetchAndShowSessions();
+
     if (!hasData && landing && viewport) {
         landing.style.display = 'block';
         viewport.style.display = 'none';
-        fetchAndShowSessions();
     } else if (landing && viewport) {
         landing.style.display = 'none';
         viewport.style.display = 'block';

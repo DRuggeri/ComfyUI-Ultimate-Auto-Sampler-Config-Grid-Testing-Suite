@@ -63,4 +63,7 @@ class SamplerConfigDashboardViewer:
             except Exception as e:
                 return {"ui": {"html": [f"Error loading session: {e}"]}}
         
-        return {"ui": {"html": ["<h3>No session found.</h3>"]}}
+        # No session found — show full template with empty manifest so landing page can display
+        empty_manifest = {"items": [], "meta": {"model": "", "positive": "", "negative": ""}, "session_name": session_name}
+        html = get_html_template(session_name, empty_manifest, unique_id)
+        return {"ui": {"html": [html]}}
