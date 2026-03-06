@@ -87,6 +87,12 @@ Stop guessing which Sampler, Scheduler, Prompt, Denoise, Model, Lora or CFG valu
 - [API Integration (Config Builder)](#api-integration-config-builder)
 - [File Locations](#file-locations)
 - [Keyboard Shortcuts](#keyboard-shortcuts)
+- [Distributed Processing](#-distributed-processing)
+  - [Setting Up Distribution](#setting-up-distribution)
+  - [Master Text Encoding](#master-text-encoding)
+  - [Model Sync](#model-sync)
+  - [Distribution Troubleshooting](#distribution-troubleshooting)
+- [Notes for AI Development](#-notes-for-ai-development)
 - [Changelog](#-changelog)
 - [License](#-license)
 - [Credits](#-credits)
@@ -127,6 +133,17 @@ Stop guessing which Sampler, Scheduler, Prompt, Denoise, Model, Lora or CFG valu
 * **Model-Specific Prompts:** Per-config prompt prefix and suffix fields for model-appropriate quality tags (e.g., prepend `"masterpiece, best quality"` for anime models, append `"4k, photorealistic"` for realistic models).
 * **Recursive Cartesian Prompt Builder:** Visual chip-based prompt editor with `{option1|option2|option3}` syntax that expands into all combinations. Nest multiple groups for exponential prompt variation.
 * **Model & LoRA On/Off Switches:** Toggle individual models and LoRAs on/off without removing them from the config. Bypassed entries are omitted from both the preview JSON and the generated config output.
+
+### 🌐 Distributed Processing (Multi-Machine)
+* **Multi-Worker Distribution:** Split large grid runs across multiple ComfyUI instances. A master node coordinates job distribution while workers process images in parallel and upload results back.
+* **One-Click Setup:** Enable distribution in the Config Builder's Distribution Settings section. Add worker URLs (e.g., `http://192.168.1.100:8188`) and toggle "Enable Distribution."
+* **Worker Connection Testing:** Test connectivity to each worker with a single click — status dots show green (reachable), yellow (testing), or red (error).
+* **Master Text Encoding:** Optional "Use Master Text Encoding" toggle — the master pre-encodes ALL unique prompts (including LoRA-specific combinations) and sends the encoded conditionings to workers. Workers skip CLIP encoding entirely, saving significant time on prompt-heavy grids.
+* **Model Sync:** Optional "Sync Models to Workers" toggle — automatically transfers checkpoint and LoRA files from the master to workers that don't have them.
+* **Smart Job Queue:** Thread-safe job distribution with automatic re-queuing on worker timeout (configurable, default 600s) and max 3 retries before abandoning a job.
+* **Per-Worker Logging:** Final generation summary shows each worker's completed/failed job counts for full visibility into the distributed run.
+* **Live Distribution Status:** Dashboard receives real-time distribution status updates showing worker activity and progress.
+* **Backward Compatible:** Workers gracefully fall back to local CLIP encoding if master-encoded conditionings aren't available.
 
 ### 🎨 Interactive Dashboard (The "IDE")
 * **Infinite Canvas with Pan/Zoom:** Google Maps-style navigation with mouse drag, mousewheel zoom, and keyboard shortcuts.
@@ -184,18 +201,52 @@ The Config Builder node is included automatically — no separate installation i
 **File Structure:**
 ```
 ComfyUI/custom_nodes/ComfyUI-Ultimate-Auto-Sampler/
-├── config_builder_node.py           # Config Builder backend
-├── js/conf_builder/
-│   ├── conf-builder-main.js         # Entry point & node registration
-│   ├── conf-builder-utilities.js    # Data fetching & parsing
-│   ├── conf-builder-ui-components.js # Reusable UI elements
-│   └── conf-builder-config-management.js # Rendering & state logic
-├── trigger_words.py                 # LoRA trigger word handling
-├── batch_encoding.py                # CLIP batch encoding with caching
-├── manifest_utils.py                # Manifest file management
-├── model_loader.py                  # Model/LoRA loading and patching
-├── image_generation.py              # Image generation and sampling
-└── generation_orchestrator.py       # Main orchestration layer
+├── __init__.py                      # Server routes, API endpoints, node mappings
+├── sampler_node.py                  # Main "Sampler Grid" node
+├── dashboard_node.py                # "Dashboard Viewer" node
+├── config_builder_node.py           # "Config Builder" node backend
+├── json_text_node.py                # "Smart JSON" node
+│
+├── generation_orchestrator.py       # Main orchestration layer & generation loop
+├── image_generation.py              # KSampler & VAE wrappers
+├── model_loader.py                  # Checkpoint/LoRA/VAE loading and patching
+├── model_cache.py                   # 3-tier model caching system
+├── remote_vae.py                    # Remote VAE offloading
+│
+├── batch_encoding.py                # CLIP batch encoding with combinator support
+├── conditioning_cache.py            # Disk-based conditioning cache
+├── lora_utils.py                    # LoRA searching & validation
+├── trigger_words.py                 # CivitAI trigger word fetching & prompt assembly
+├── config_utils.py                  # Config parsing, expansion & Cartesian products
+├── directory_scanner.py             # External directory session scanner
+├── metadata_packer.py               # PNG/WebP metadata embedding for exports
+├── manifest_utils.py                # Manifest read/write/merge helpers
+├── html_generator.py                # Reads /resources/ to build dashboard HTML
+│
+├── distribution_manager.py          # Distributed job queue coordinator (master)
+├── distribution_worker.py           # Worker thread for remote processing
+├── distribution_routes.py           # Distribution API endpoints
+│
+├── web/                             # [ComfyUI Integration Layer]
+│   ├── dashboard.js                 # Dashboard node registration & messaging
+│   ├── smart_json_text.js           # JSON node & syntax highlighting
+│   └── conf_builder/                # [Config Builder UI Modules]
+│       ├── conf-builder-main.js           # Entry point, widget registration
+│       ├── conf-builder-ui-components.js  # Reusable UI (dropdowns, sliders, cards)
+│       ├── conf-builder-config-management.js # Save/Load/state rendering logic
+│       ├── conf-builder-utilities.js      # Data fetching, caching, calculations
+│       └── conf-builder-distribution.js   # Distribution settings UI
+│
+└── resources/                       # [Dashboard SPA Core]
+    ├── template.html                # HTML skeleton for dashboard
+    ├── report.css                   # Styling (infinite canvas, cards, modals)
+    ├── logic_state.js               # Global state variables
+    ├── logic_utils.js               # API & helper functions
+    ├── logic_ui.js                  # UI renderer (DOM creation, modals)
+    ├── logic_virtual.js             # Virtual scroll engine & viewport
+    ├── logic_pipeline.js            # Sorting & filtering pipeline
+    ├── logic_events.js              # Event listeners (messages, keyboard)
+    └── logic_init.js                # Initialization & startup
 ```
 
 ---
@@ -1169,6 +1220,19 @@ Scan an external directory for image sessions and load them into the dashboard.
 }
 ```
 
+### Distribution API (registered via `distribution_routes.py`)
+
+These endpoints are used internally by the distribution system:
+
+| Method | Route | Purpose |
+|--------|-------|---------|
+| GET | `/distribution/claim_job` | Worker claims next pending job (200 + job JSON, 204 = no jobs, 503 = inactive) |
+| POST | `/distribution/submit_result` | Worker uploads completed image (multipart: metadata + image) |
+| GET | `/distribution/status` | Get distribution status and worker stats |
+| POST | `/distribution/register_worker` | Worker registration with master |
+| GET | `/distribution/download_model` | Download model file for model sync |
+| POST | `/distribution/heartbeat` | Worker keepalive signal |
+
 ---
 
 ## File Locations
@@ -1229,7 +1293,160 @@ ComfyUI/output/benchmarks/model-data/
 
 ---
 
+## 🌐 Distributed Processing
+
+Distribute large grid runs across multiple ComfyUI instances for parallel image generation.
+
+### Setting Up Distribution
+
+1. **Ensure Workers Are Running:** Each worker must be a separate ComfyUI instance with this node suite installed and running.
+2. **Open Config Builder:** In the Config Builder node, scroll to the **Distribution Settings** section.
+3. **Add Worker URLs:** Enter the full URL of each worker (e.g., `http://192.168.1.100:8188`). Click **+ Add Worker** for additional workers.
+4. **Test Connections:** Click the test button next to each worker URL. A green dot means the worker is reachable.
+5. **Enable Distribution:** Toggle the distribution switch ON.
+6. **Run Generation:** Queue the workflow. The master node will coordinate job distribution automatically.
+
+**How It Works:**
+```
+Master (your machine):
+  1. Expands configs into individual jobs
+  2. [Optional] Pre-encodes all prompts (Master Text Encoding)
+  3. Notifies workers to start polling
+  4. Processes its own jobs while workers claim theirs
+  5. Workers upload completed images back to master
+  6. Master saves everything to the session manifest
+```
+
+### Master Text Encoding
+
+When enabled, the master pre-encodes ALL unique positive/negative prompts for every (model, LoRA) combination before distributing jobs. Workers receive the encoded conditionings in their job claim response and skip CLIP encoding entirely.
+
+**Benefits:**
+- Workers don't need to load text encoders at all
+- Eliminates duplicate CLIP encoding across workers
+- Significant time savings for prompt-heavy grids
+
+**Enable:** Toggle "Use Master Text Encoding" in Distribution Settings.
+
+**Technical Notes:**
+- Encoded conditionings are serialized as base64-encoded NumPy arrays (~640KB per job)
+- Multi-entry conditionings (AND combinator) are fully supported
+- Workers fall back to local encoding if pre-encoded data is unavailable (backward compatible)
+
+### Model Sync
+
+When enabled, the master automatically transfers checkpoint and LoRA files to workers that don't have them.
+
+**Enable:** Toggle "Sync Models to Workers" in Distribution Settings.
+
+### Distribution Troubleshooting
+
+* **Workers not connecting:** Verify the worker URL is correct (include port). Check firewalls. Both master and worker must have this node suite installed.
+* **Jobs timing out:** Increase the "Claim Timeout" slider (default 600s). First-time model loads on workers can take several minutes.
+* **Duplicate images:** If a worker times out but actually completes the job, duplicates may appear. Increase claim timeout to prevent this.
+* **Workers not using pre-encoded prompts:** Ensure "Use Master Text Encoding" is enabled. Check worker console for `"Using master pre-encoded conditionings"` log message.
+* **Model sync failing:** Ensure both master and worker have sufficient disk space. Check worker console for download errors.
+
+---
+
+## 🤖 Notes for AI Development
+
+This section provides critical context for AI assistants (Claude, GPT, etc.) working on this codebase.
+
+### Critical Constraints
+
+**DO NOT REMOVE ANY CODE. DO NOT REMOVE ANY COMMENTS. ONLY CHANGE WHAT IS NECESSARY.** This is the #1 rule for all code changes. The codebase has many interconnected parts and removing code often breaks things in unexpected ways.
+
+### Architecture Mental Model
+
+This is a **hybrid application** with three layers:
+1. **Python Backend** — Runs inside ComfyUI's server process. Handles generation, caching, file I/O, and API endpoints.
+2. **JS Frontend Bridge** (`web/` directory) — Runs in the ComfyUI browser tab. Registers custom nodes, manages widget state, and forwards server events.
+3. **Dashboard SPA** (`resources/` directory) — Runs **inside an iframe** in the dashboard node. A standalone app with its own state management, virtual scrolling, and event handling.
+
+### Key Gotchas for AI Development
+
+1. **Config Builder output is ALWAYS wrapped** — `config_builder_node.py` outputs `{"configs": [...], "_distribution": {...}}`. The `sampler_node.py` MUST unwrap the `"configs"` key before passing to `expand_configs()`. If you add new top-level keys to the config output, update the extraction logic in `sampler_node.py` lines 269-286.
+
+2. **Two independent config-to-JSON implementations** — `convertStateToConfigs()` in `conf-builder-utilities.js` (JS preview) and `generate_config()` in `config_builder_node.py` (Python output) both transform `node.state` into config JSON. **Both must stay in sync** when adding new config fields.
+
+3. **Dashboard runs in an iframe** — The dashboard HTML is set via `iframe.srcdoc`. All JS/CSS is inlined (no external requests). Communication between the parent ComfyUI page and the iframe uses `postMessage()`. The `dashboard.js` file bridges server events to iframe messages.
+
+4. **Dashboard auto-loads on node creation** — `web/dashboard.js` calls `forceLoadSession()` with a 500ms delay when a dashboard node is created. The `get_session_html` API endpoint returns a full HTML template with empty manifest for non-existent sessions (NOT a 404).
+
+5. **`logic_pipeline.js` has a legacy init block** — Lines 489-505 have a `DOMContentLoaded` handler that calls `loadSession()` only when `fullManifest.items.length > 0`. The proper initialization happens in `logic_init.js` which calls `init()`. Don't add a second unconditional `loadSession()` call — it causes alert popups for empty sessions.
+
+6. **Manifest merge on save** — `save_manifest()` always reloads from disk first to preserve user favorites/rejected/notes. This is intentional for concurrent access (generation + user interaction). Don't bypass this.
+
+7. **`onNodeCreated` must be synchronous** — In `conf-builder-main.js`, async work runs inside fire-and-forget `(async () => { ... })()`. Making `onNodeCreated` async breaks ComfyUI widget registration.
+
+8. **Optional inputs disable caches** — When `optional_model`/`optional_clip`/`optional_positive`/`optional_negative` are connected to the sampler node, conditioning cache is disabled and `IS_CHANGED()` returns `NaN` (forces re-execution every time).
+
+9. **Distribution conditionings are serialized with np.copy()** — `np.frombuffer()` returns read-only arrays. Must call `.copy()` before `torch.from_numpy()` or GPU tensor operations will fail.
+
+10. **Default state migration** — When adding new fields to the Config Builder state (in `conf-builder-main.js`), also add a migration check in the `onNodeCreated` function (around line 363) to backfill the default value for existing saved workflows.
+
+11. **claim_timeout default is 600** — This value appears in `distribution_manager.py`, `config_builder_node.py`, `conf-builder-distribution.js`, and `conf-builder-main.js`. Keep all four in sync.
+
+12. **ComfyUI Registry security** — No `import requests`, no `subprocess`/`eval`/`exec`, no custom file-serving endpoints. Use `urllib.request` for HTTP and ComfyUI's `/view` endpoint for serving files. See `ProjectStructure.md` for full rules.
+
+### File Dependencies (Import Graph)
+
+```
+sampler_node.py
+  → generation_orchestrator.py (main entry point)
+    → config_utils.py (expand_configs, prepare_input_jobs)
+    → model_loader.py (load_checkpoint, load_loras)
+    → image_generation.py (generate_image, flush_batch)
+    → batch_encoding.py (encode_prompt_with_combinators)
+    → trigger_words.py (build_prompt_with_triggers)
+    → manifest_utils.py (save_manifest, load_existing_manifest)
+    → model_cache.py (ModelCache)
+    → conditioning_cache.py (ConditioningCache)
+    → remote_vae.py (RemoteVAEDecodeWorker)
+    → html_generator.py (get_html_template)
+    → distribution_manager.py (DistributionManager)
+    → distribution_worker.py (WorkerThread)
+
+config_builder_node.py
+  → lora_utils.py (trigger word lookup)
+
+__init__.py
+  → all node classes
+  → distribution_routes.py (distribution API endpoints)
+  → html_generator.py (on-demand HTML generation)
+  → metadata_packer.py (export favorites)
+  → directory_scanner.py (scan external directories)
+  → manifest_utils.py (save/load manifests)
+```
+
+### Server Event Types
+
+| Event Name | Sender | Data | Purpose |
+|---|---|---|---|
+| `ultimate_grid.update` | `generation_orchestrator.py` | `{session_name, node, manifest, meta, new_items}` | New images generated |
+| `ultimate_grid.progress` | `generation_orchestrator.py` | `{session_name, progress_pct, eta_str, ...}` | ETA/progress updates |
+| `ultimate_grid.distribution_status` | `generation_orchestrator.py` | `{session_name, workers, stats}` | Distribution status |
+
+### Testing Changes
+
+After modifying backend Python files, restart ComfyUI. After modifying `web/` JS files, refresh the browser (Ctrl+F5). After modifying `resources/` JS/CSS/HTML files, the dashboard HTML must be regenerated — either re-run the sampler node or call the `/config_tester/get_session_html` endpoint.
+
+---
+
 ## 📝 Changelog
+
+### Update 3/6/26 — Distributed Processing & Dashboard Improvements
+* 🌐 **Multi-Worker Distribution:** Split grid runs across multiple ComfyUI instances with automatic job coordination, claiming, timeout handling, and result upload.
+* 🧠 **Master Text Encoding:** Master pre-encodes all prompts and sends conditionings to workers, eliminating duplicate CLIP encoding.
+* 📦 **Model Sync:** Optionally transfer checkpoint and LoRA files from master to workers automatically.
+* 📊 **Per-Worker Logging:** Final summary shows each worker's completed/failed job counts.
+* ⚙️ **Distribution Settings UI:** Config Builder section with worker URL management, connection testing, and toggles for text encoding and model sync.
+* 🏠 **Session Landing Page:** Dashboard now auto-loads and shows a session picker on startup instead of a blank black box.
+* 🔄 **Dashboard Auto-Load:** Dashboard iframe automatically loads session HTML on node creation with 500ms delay.
+* 🛠️ **Non-Existent Session Handling:** `get_session_html` endpoint returns a full template with empty manifest instead of 404.
+* ⏱️ **Claim Timeout Update:** Default claim timeout increased from 300s to 600s across all files.
+* 🤖 **AI Development Notes:** Added comprehensive development notes to README and ProjectStructure for AI-assisted development.
 
 ### Update 2/16/26 — Config Builder & Dashboard Overhaul
 * 🎛️ **VAE Selection & Iteration:** Test multiple VAEs per config with searchable dropdown and folder expansion. VAEs are a full Cartesian dimension.
@@ -1309,5 +1526,5 @@ Created for the ComfyUI community. Special thanks to all contributors and tester
 
 **Support development:** [Buy me a coffee on Ko-fi](https://ko-fi.com/jasonhoku) ☕
 
-**Version:** 2.0  
-**Last Updated:** February 2026
+**Version:** 3.0
+**Last Updated:** March 2026

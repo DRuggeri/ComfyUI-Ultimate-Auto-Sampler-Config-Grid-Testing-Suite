@@ -36,9 +36,9 @@ ComfyUI-Ultimate-Sampler-Grid/
 ├── config_builder_node.py       # "Config Builder" Node
 ├── json_text_node.py            # "Smart JSON" Node
 │
-├── generation_orchestrator.py   # The "Conductor" (Loop Logic)
+├── generation_orchestrator.py   # The "Conductor" (Loop Logic, ~1700 lines)
 ├── image_generation.py          # KSampler & VAE Wrappers
-├── model_loader.py              # Checkpoint/LoRA Loading Logic
+├── model_loader.py              # Checkpoint/LoRA/VAE/GGUF Loading Logic
 ├── model_cache.py               # 3-Tier Model Caching System
 ├── remote_vae.py                # Remote VAE Offloading
 │
@@ -52,15 +52,19 @@ ComfyUI-Ultimate-Sampler-Grid/
 ├── manifest_utils.py            # Manifest Read/Write/Merge Helpers
 ├── html_generator.py            # Reads /resources/ to build the Dashboard HTML
 │
+├── distribution_manager.py      # Distributed Job Queue Coordinator (Master)
+├── distribution_worker.py       # Worker Thread for Remote Processing
+├── distribution_routes.py       # Distribution REST API Endpoints
+│
 ├── web/                         # [ComfyUI Integration Layer]
 │   ├── dashboard.js             # Registers Dashboard Node & Message Handling
-│   ├── config_builder.js        # Registers Builder Node & Custom UI Widget
 │   ├── smart_json_text.js       # Registers JSON Node & Syntax Highlighting
 │   └── conf_builder/            # [Config Builder UI Modules]
 │       ├── conf-builder-main.js           # Main entry, widget registration
 │       ├── conf-builder-ui-components.js  # UI rendering (dropdowns, sliders, cards)
 │       ├── conf-builder-config-management.js # Save/Load/Duplicate config logic
-│       └── conf-builder-utilities.js      # State-to-JSON conversion, iteration counting
+│       ├── conf-builder-utilities.js      # State-to-JSON conversion, iteration counting
+│       └── conf-builder-distribution.js   # Distribution settings UI (workers, toggles)
 │
 └── resources/                   # [The Dashboard SPA Core]
     ├── template.html            # HTML Skeleton for the generated report
@@ -143,6 +147,17 @@ All routes registered in `__init__.py` via `PromptServer.instance.routes`.
 | POST | `/config_tester/export_favorites` | Export favorited images `{session_name, pack_metadata, organize_by_prompt, organize_by_lora}` |
 | POST | `/config_tester/scan_directory` | Scan external dir, create symlinks, use built-in `/view` `{directory_path, session_name}` |
 
+**Distribution APIs** (`/distribution/`, registered in `distribution_routes.py`):
+
+| Method | Route | Purpose |
+|---|---|---|
+| GET | `/distribution/claim_job` | Worker claims next pending job (200 + job JSON, 204 = no jobs, 503 = inactive) |
+| POST | `/distribution/submit_result` | Worker uploads completed image (multipart: {metadata, image}) |
+| GET | `/distribution/status` | Get distribution status, worker stats, job counts |
+| POST | `/distribution/register_worker` | Worker registration with master |
+| GET | `/distribution/download_model` | Download model file for model sync `{category, filename}` |
+| POST | `/distribution/heartbeat` | Worker keepalive signal |
+
 ---
 
 ### **1. The Backend: Core Logic & Orchestration**
@@ -157,9 +172,9 @@ All routes registered in `__init__.py` via `PromptServer.instance.routes`.
 * **Optional Inputs:** `optional_model` (MODEL), `optional_clip` (CLIP), `optional_vae` (VAE), `optional_positive` (CONDITIONING), `optional_negative` (CONDITIONING), `optional_latent` (LATENT)
 
 
-* **`generation_orchestrator.py`** (The Conductor — largest file, ~987 lines)
-* **Role:** Manages the generation loop.
-* **Key Functions:** `run_generation_loop()`, `check_if_job_completed()`, `setup_session_directories()`, `load_model_by_type()`, `get_model_cache_key()`, `calculate_clip_hash()`
+* **`generation_orchestrator.py`** (The Conductor — largest file, ~1700 lines)
+* **Role:** Manages the generation loop, distributed processing, and master text encoding.
+* **Key Functions:** `run_generation_loop()`, `check_if_job_completed()`, `setup_session_directories()`, `load_model_by_type()`, `get_model_cache_key()`, `calculate_clip_hash()`, `_conditioning_to_serializable()`, `_serializable_to_conditioning()`, `_preencode_all_conditionings()`, `_run_distributed_generation()`, `_send_distribution_status()`
 * **Key Logic:**
 * **Smart Skip:** `check_if_job_completed()` matches against manifest items by seed/resolution/sampler/scheduler/steps/cfg/denoise. Skips model/lora/prompt matching when optional inputs connected.
 * **Lookahead:** Triggers `model_cache.preload_lora_model()` / `preload_base_model()` for the *next* job while the current one runs.
@@ -168,6 +183,9 @@ All routes registered in `__init__.py` via `PromptServer.instance.routes`.
 * **Node Change Detection:** Detects when connected upstream nodes have changed for smarter job resuming.
 * **Pre-encoding:** Single model → batch-encode all unique prompts upfront. Multi-model → re-encode per model switch.
 * **VAE Switching:** Flushes pending batch before switching VAE. Tracks `default_model_vae` for reverting to "Default".
+* **Distribution:** `_run_distributed_generation()` manages the distributed pipeline — populates job queue, optionally pre-encodes conditionings, notifies workers, and processes master's share of jobs.
+* **Master Text Encoding:** `_preencode_all_conditionings()` groups configs by (model, LoRA), loads each combination, encodes all unique prompts, and serializes via `_conditioning_to_serializable()`. Handles multi-entry conditionings (AND combinator).
+* **Per-Worker Logging:** Final summary prints each worker's completed/failed job counts from `manager.get_status()["workers"]`.
 
 
 
@@ -181,6 +199,7 @@ All routes registered in `__init__.py` via `PromptServer.instance.routes`.
 * **Role:** `UltimateConfigBuilder` node. All state stored in single `lora_config` widget as JSON string.
 * **Key Functions:** `generate_config()`, `process_lora_array()`, `get_available_sessions()`, `expand_lora_folders()`, `lookup_lora_triggers()`
 * **Key Logic:** Python reads ONLY `lora_config` widget — all other INPUT_TYPES widgets (samplers, schedulers, steps, cfg) are vestigial and ignored. Also defines API routes for trigger/metadata lookup and model lists.
+* **Distribution Output:** When distribution is enabled, wraps configs in `{"configs": [...], "_distribution": {...}}` with keys: `enabled`, `worker_urls`, `claim_timeout` (default 600), `use_master_encoding`, `sync_models_to_workers`. When disabled, still wraps in `{"configs": [...]}` — `sampler_node.py` must unwrap in both cases.
 
 
 * **`html_generator.py`** (The Builder)
@@ -249,6 +268,39 @@ All routes registered in `__init__.py` via `PromptServer.instance.routes`.
 
 ---
 
+### **2b. The Backend: Distribution System**
+
+*Located in the root directory. Enables multi-machine parallel processing.*
+
+* **`distribution_manager.py`** (The Job Coordinator)
+* **Role:** Thread-safe distributed job queue running on the master. Manages job lifecycle: PENDING → CLAIMED → COMPLETED/FAILED.
+* **Classes:** `JobState` (constants), `DistributedJob` (individual job), `DistributionManager` (coordinator)
+* **Key Methods:** `populate_jobs()`, `claim_job(worker_id)`, `complete_job(job_id)`, `get_stats()`, `set_encoded_conditionings()`, `get_encoded_conditionings_for_job()`
+* **Key Logic:**
+  * Thread-safe with `RLock` for concurrent worker access
+  * Job timeout handling (default 600s) — re-queues timed-out jobs as PENDING
+  * `MAX_FAIL_COUNT = 3` — jobs that fail 3 times are abandoned
+  * `_job_to_dict()` attaches pre-encoded conditionings to job claim response if available
+  * Tracks per-worker stats (completed, failed, last_seen)
+
+* **`distribution_worker.py`** (The Remote Worker)
+* **Role:** Background thread running on remote ComfyUI instances. Polls master for jobs, processes locally, uploads results.
+* **Class:** `WorkerThread(threading.Thread)` — daemon thread
+* **Key Methods:** `run()` (main loop), `_process_job()`, `_download_model_from_master()`, `_prefetch_models()`, `stop()`
+* **Key Logic:**
+  * Polls `/distribution/claim_job` every 2 seconds
+  * Caches model/CLIP/VAE between jobs (reuses when same model)
+  * Checks for `encoded_positive`/`encoded_negative` in job data — uses master conditionings if available, falls back to local CLIP encoding otherwise
+  * Model sync: downloads models from master via `/distribution/download_model` if enabled
+  * Exits after 30 consecutive empty polls or 503 response (master finished)
+
+* **`distribution_routes.py`** (The API Layer)
+* **Role:** Registers `/distribution/*` API endpoints on the PromptServer.
+* **Global State:** `_distribution_manager` (active manager, master mode), `_worker_thread` (active worker, worker mode) — both thread-safe via getters/setters
+* **Key Endpoints:** `claim_job` (GET), `submit_result` (POST multipart), `status` (GET), `register_worker` (POST), `download_model` (GET), `heartbeat` (POST)
+
+---
+
 ### **Key Data Shapes**
 
 **Config Array State** (`node.state.config_arrays[n]` in JS, parsed from `lora_config` widget in Python):
@@ -274,10 +326,46 @@ All routes registered in `__init__.py` via `PromptServer.instance.routes`.
   "model_prompt_prefix": "",
   "model_prompt_suffix": "",
   "attention_modes": ["default"],
+  "resolutions": [],
   "seed_behavior": "fixed",
   "text_encoders": [],
   "clip_type": "stable_diffusion",
-  "gguf_options": {}
+  "gguf_options": {},
+  "model_sampling_override": "None",
+  "model_sampling_shift": 3.0,
+  "use_advanced_sampling": false,
+  "advanced_guider": "Basic",
+  "use_flux_guidance": false,
+  "flux_guidance_value": 3.5
+}
+```
+
+**Distribution Config** (embedded in `config_builder_node.py` output as `_distribution` key):
+```json
+{
+  "enabled": true,
+  "worker_urls": ["http://192.168.1.100:8188", "http://192.168.1.101:8188"],
+  "claim_timeout": 600,
+  "use_master_encoding": false,
+  "sync_models_to_workers": false
+}
+```
+
+**Top-level state fields** (in `conf-builder-main.js` default state, outside `config_arrays`):
+```json
+{
+  "session_name": "my_session",
+  "config_name": "my_config",
+  "auto_save": false,
+  "include_none": true,
+  "label_mode": "full",
+  "global_positive_groups": [],
+  "global_negative": "",
+  "distribution_enabled": false,
+  "worker_urls": [],
+  "claim_timeout": 600,
+  "use_master_encoding": false,
+  "sync_models_to_workers": false
 }
 ```
 
@@ -327,6 +415,25 @@ iframe postMessage({type: 'toggle_fullscreen', node_id})
   → dashboard.js listener → toggle .dashboard-fullscreen class
 ```
 
+**Distribution Status Updates (Server → Dashboard iframe):**
+```
+generation_orchestrator → PromptServer.send_sync("ultimate_grid.distribution_status")
+  → dashboard.js api.addEventListener → postMessage({type: 'distribution_status'})
+  → iframe displays worker activity
+```
+
+**Distribution Job Flow (Master ↔ Worker):**
+```
+Master:
+  1. generation_orchestrator → DistributionManager.populate_jobs()
+  2. [Optional] _preencode_all_conditionings() → manager.set_encoded_conditionings()
+  3. POST /distribution/register_worker on each worker
+  4. Workers poll GET /distribution/claim_job
+  5. manager._job_to_dict() attaches encoded_positive/encoded_negative if available
+  6. Worker processes job → POST /distribution/submit_result (multipart: metadata + image)
+  7. Master saves image + updates manifest
+```
+
 ---
 
 ### **3. The Frontend: ComfyUI Integration**
@@ -334,9 +441,14 @@ iframe postMessage({type: 'toggle_fullscreen', node_id})
 *Located in `/web/`.*
 
 * **`dashboard.js`**
-* **Role:** Registers the Dashboard node (`UltimateGridDashboard`). Listens for `ultimate_grid.update` and `ultimate_grid.progress` server events.
-* **Key Logic:** Forwards events to matching iframe via `postMessage()`. Auto-loads session when update received for unloaded session. Handles fullscreen toggle via `.dashboard-fullscreen` CSS class.
+* **Role:** Registers the Dashboard node (`UltimateGridDashboard`). Listens for `ultimate_grid.update`, `ultimate_grid.progress`, and `ultimate_grid.distribution_status` server events.
+* **Key Logic:** Forwards events to matching iframe via `postMessage()`. Auto-loads session when update received for unloaded session. Handles fullscreen toggle via `.dashboard-fullscreen` CSS class. **Auto-loads on node creation** with 500ms delay via `forceLoadSession()` so the dashboard shows content immediately (landing page or session grid) instead of a blank black box.
 * **Widgets:** "RELOAD / SHOW SESSION" button → `forceLoadSession()`, "DELETE SESSION" button → POST `/config_tester/delete_session`
+* **Event Listeners (Singletons):** Each uses `window.__ultimateGrid*ListenerInstalled` guard to prevent duplicate registration:
+  * `ultimate_grid.update` — Live data updates to iframe
+  * `ultimate_grid.progress` — ETA/progress bar updates
+  * `ultimate_grid.distribution_status` — Distribution worker status
+  * `window "message"` — Fullscreen toggle from iframe
 
 
 * **`config_builder.js`** (entry point, loads `conf_builder/` modules)
@@ -359,8 +471,13 @@ iframe postMessage({type: 'toggle_fullscreen', node_id})
 
 
 * **`conf_builder/conf-builder-ui-components.js`** (The Widget Library)
-* **Key Exports:** `createSearchableSelect()`, `createSlider()`, `createInputGroup()`, `getStyles()`
+* **Key Exports:** `createSearchableSelect()`, `createSlider()`, `createInputGroup()`, `createTopBar()`, `createSidebar()`, `createSectionHeader()`, `getStyles()`
 
+
+* **`conf_builder/conf-builder-distribution.js`** (Distribution Settings UI)
+* **Role:** Renders the distribution settings section in the Config Builder.
+* **Key Exports:** `renderDistributionSection()`, `renderDistributionSettingsSection()`
+* **Features:** Worker URL management (add/remove), connection testing via `/distribution/test_worker`, status indicators (green/yellow/red dots), claim timeout slider (30-900s, default 600), toggles for "Use Master Text Encoding" and "Sync Models to Workers".
 
 
 ---
@@ -430,7 +547,7 @@ iframe postMessage({type: 'toggle_fullscreen', node_id})
 |---|---|
 | `sampler_node.py` | `run_tests()`, `find_existing_match()`, `get_latent_channels()`, `IS_CHANGED()` |
 | `config_builder_node.py` | `generate_config()`, `process_lora_array()`, `get_available_sessions()`, `expand_lora_folders()` |
-| `generation_orchestrator.py` | `run_generation_loop()`, `check_if_job_completed()`, `setup_session_directories()`, `load_model_by_type()` |
+| `generation_orchestrator.py` | `run_generation_loop()`, `check_if_job_completed()`, `setup_session_directories()`, `load_model_by_type()`, `_preencode_all_conditionings()`, `_conditioning_to_serializable()`, `_serializable_to_conditioning()`, `_run_distributed_generation()` |
 | `batch_encoding.py` | `encode_prompt_with_combinators()`, `batch_encode_prompts()` |
 | `config_utils.py` | `expand_configs()`, `parse_prompt_input_nested()`, `prepare_input_jobs()`, `parse_lora_definition()` |
 | `model_loader.py` | `load_checkpoint()`, `load_loras()`, `load_vae_by_name()`, `load_diffusion_model_and_clip()` |
@@ -439,6 +556,9 @@ iframe postMessage({type: 'toggle_fullscreen', node_id})
 | `manifest_utils.py` | `load_existing_manifest()`, `save_manifest()`, `merge_manifest_user_changes()` |
 | `directory_scanner.py` | `scan_directory_for_images()`, `parse_a1111_parameters()` |
 | `metadata_packer.py` | `pack_metadata_into_image()`, `extract_metadata_from_image()`, `calculate_file_hash()` |
+| `distribution_manager.py` | `DistributionManager.populate_jobs()`, `.claim_job()`, `.complete_job()`, `.get_stats()`, `.set_encoded_conditionings()`, `.get_encoded_conditionings_for_job()` |
+| `distribution_worker.py` | `WorkerThread.run()`, `._process_job()`, `._download_model_from_master()`, `._prefetch_models()`, `.stop()` |
+| `distribution_routes.py` | `get_distribution_manager()`, `set_distribution_manager()`, endpoint handlers for `/distribution/*` |
 
 **JavaScript (by file):**
 
@@ -447,7 +567,8 @@ iframe postMessage({type: 'toggle_fullscreen', node_id})
 | `conf-builder-utilities.js` | `convertStateToConfigs()`, `getIterationCount()`, `parseLoraString()`, `buildLoraString()`, `refreshAllConfigBuilders()` |
 | `conf-builder-config-management.js` | `renderUI()`, `updatePreview()`, `createConfigArrayElement()`, `createModelElement()` |
 | `conf-builder-ui-components.js` | `createSearchableSelect()`, `createSlider()`, `getStyles()` |
-| `conf-builder-main.js` | `ensureModulesLoaded()`, `node.saveState()`, `node.renderUI()`, `node.loadSession()` |
+| `conf-builder-main.js` | `ensureModulesLoaded()`, `node.saveState()`, `node.renderUI()`, `node.loadSession()`, `node.triggerAutoSave()` |
+| `conf-builder-distribution.js` | `renderDistributionSection()`, `renderDistributionSettingsSection()` |
 | `logic_ui.js` | `toggleCogMenu()`, `toggleFiltersPopup()`, `initFilters()` |
 | `logic_utils.js` | `loadSession()`, `exportFavorites()`, `scanDirectory()`, `triggerGen()`, `toggleFullscreen()` |
 | `logic_virtual.js` | `renderDOM()`, `updateVisibleItems()`, `calculateVisibleRange()`, `autoFitZoom()`, `goToImage()` |
@@ -458,18 +579,22 @@ iframe postMessage({type: 'toggle_fullscreen', node_id})
 
 ### **Summary of Data Flow**
 
-1. **User Config:** You set parameters in the **Sampler Node** (Python).
-2. **Expansion:** `generation_orchestrator.py` expands this into a list of jobs.
-3. **Generation:** The backend loops through jobs, using **ModelCache** and **ConditioningCache** for speed.
-4. **Storage:** Images are saved to disk; metadata is appended to `manifest.json`.
-5. **Compilation:** `html_generator.py` reads the `manifest.json` and all `.js` files in `/resources/`, baking them into a single `dashboard_html` string.
-6. **Display:** The **Dashboard Node** (JS) renders this HTML in an iframe.
-7. **Boot:** `logic_init.js` wakes up, loads the data into `logic_state.js`, and `logic_virtual.js` starts rendering cards.
-8. **Interaction:** You click "Favorite" in the UI -> `logic_events.js` sends an API request to `__init__.py` -> Python updates `manifest.json` on disk.
+1. **User Config:** You set parameters in the **Config Builder** (visual UI) or **Sampler Node** (JSON text).
+2. **Config Output:** `config_builder_node.py` wraps configs in `{"configs": [...], "_distribution": {...}}`. The `sampler_node.py` unwraps the `"configs"` key and extracts distribution settings.
+3. **Expansion:** `generation_orchestrator.py` expands configs into a full list of jobs (Cartesian product).
+4. **Distribution (optional):** If enabled, `_run_distributed_generation()` populates the job queue, optionally pre-encodes conditionings, and notifies workers. Workers poll for jobs, process locally, and upload results.
+5. **Generation:** The backend loops through its share of jobs, using **ModelCache** and **ConditioningCache** for speed.
+6. **Storage:** Images are saved to disk; metadata is appended to `manifest.json`.
+7. **Compilation:** `html_generator.py` reads the `manifest.json` and all `.js` files in `/resources/`, baking them into a single `dashboard_html` string.
+8. **Display:** The **Dashboard Node** (JS) renders this HTML in an iframe. Auto-loads on node creation.
+9. **Boot:** `logic_init.js` calls `init()` which calls `showSessionLandingIfEmpty()`. If no data, the session landing page is shown. If data exists, `logic_virtual.js` renders the grid.
+10. **Interaction:** You click "Favorite" in the UI -> `logic_events.js` sends an API request to `__init__.py` -> Python updates `manifest.json` on disk.
 
 ---
 
 ### **Critical Development Gotchas**
+
+> ⚠️ **GOLDEN RULE: DO NOT REMOVE ANY CODE. DO NOT REMOVE ANY COMMENTS. ONLY CHANGE WHAT IS NECESSARY.**
 
 1. **Dual Data Path** — Frontend `convertStateToConfigs()` (in `conf-builder-utilities.js`) and Python `generate_config()` (in `config_builder_node.py`) are **independent implementations** that both transform `node.state` into config JSON. Both must stay in sync when adding new config fields or the UI preview will mismatch the actual output.
 
@@ -494,3 +619,104 @@ iframe postMessage({type: 'toggle_fullscreen', node_id})
 11. **Field Name Inconsistency: `favorite` vs `favorited`** — `manifest_utils.py` `merge_manifest_user_changes()` uses the key `"favorite"`. But `__init__.py` routes like `save_manifest` and `export_favorites` check `"favorited"`. When touching favorite/unfavorite logic, check which key name the specific code path uses.
 
 12. **Prompt Expansion is Recursive** — `parse_prompt_input_nested()` in `config_utils.py` supports arbitrarily deep nested arrays. Flat list = OR (options). List containing sub-lists = AND (Cartesian product). This is used by both the node text inputs and per-config prompt groups from the builder UI.
+
+13. **Config Builder Output is ALWAYS Wrapped** — `config_builder_node.py` always outputs `{"configs": [...]}` (with optional `"_distribution"` key). The `sampler_node.py` MUST unwrap the `"configs"` key before passing to `expand_configs()`. Both the `_distribution` present AND absent cases must be handled (see lines 269-286 of `sampler_node.py`).
+
+14. **Dashboard Auto-Load on Creation** — `web/dashboard.js` calls `forceLoadSession()` with 500ms delay when a dashboard node is created. The `get_session_html` endpoint in `__init__.py` returns a full HTML template with empty manifest for non-existent sessions (NOT a 404). This ensures the landing page shows immediately.
+
+15. **`logic_pipeline.js` Legacy Init Guard** — Lines 489-505 have a `DOMContentLoaded` handler that calls `loadSession()` ONLY when `fullManifest.items.length > 0`. Without this guard, `loadSession()` triggers an alert popup for non-existent sessions. The proper initialization path is `logic_init.js` → `init()` → `showSessionLandingIfEmpty()`.
+
+16. **Distribution Default Values Must Stay in Sync** — `claim_timeout` default (600) appears in: `distribution_manager.py` (constructor), `config_builder_node.py` (fallback), `conf-builder-distribution.js` (slider default), `conf-builder-main.js` (default state). All four must match. Same for `use_master_encoding` default (false).
+
+17. **Conditioning Serialization Uses np.copy()** — `_serializable_to_conditioning()` in `generation_orchestrator.py` must call `np.frombuffer(...).copy()` before `torch.from_numpy()` because `np.frombuffer()` returns read-only arrays that are incompatible with GPU tensor operations.
+
+18. **Multi-Entry Conditioning (AND combinator)** — The AND combinator creates multiple `[tensor, {pooled_output}]` entries in a conditioning list. Serialization in `_conditioning_to_serializable()` must iterate ALL entries, not just `[0]`. Deserialization in `_serializable_to_conditioning()` must reconstruct the full list.
+
+19. **State Migration for New Fields** — When adding new fields to the Config Builder default state in `conf-builder-main.js` (around line 89), also add a migration check (around line 363) to backfill the default for existing saved workflows. Without migration, old workflows will have `undefined` for the new field.
+
+20. **ComfyUI Registry Security** — No `import requests`, no `subprocess`/`os.system`/`eval()`/`exec()`, no runtime `pip install`, no custom file-serving endpoints, no code obfuscation. Use `urllib.request` for HTTP. Use ComfyUI's `/view` endpoint for serving files. Sanitize all user-supplied paths. See top of this file for full rules.
+
+---
+
+### **Notes for AI Development**
+
+This section provides critical context for AI assistants working on this codebase.
+
+**Architecture Mental Model:**
+```
+┌─────────────────────────────────────────────────────────────┐
+│ ComfyUI Browser Tab                                         │
+│  ┌──────────────────┐  ┌──────────────────────────────────┐│
+│  │ Config Builder    │  │ Dashboard Node                   ││
+│  │ (conf-builder-*) │  │ (dashboard.js)                   ││
+│  │ Direct DOM widget │  │  ┌──────────────────────────────┐││
+│  │                   │  │  │ iframe (srcdoc)              │││
+│  │                   │  │  │ Dashboard SPA                │││
+│  │                   │  │  │ (resources/logic_*.js)       │││
+│  │                   │  │  │ postMessage() ↕              │││
+│  │                   │  │  └──────────────────────────────┘││
+│  └──────────────────┘  └──────────────────────────────────┘│
+│           ↕ widget value              ↕ server events       │
+├─────────────────────────────────────────────────────────────┤
+│ ComfyUI Server (Python)                                     │
+│  ┌──────────────┐  ┌────────────────┐  ┌────────────────┐  │
+│  │config_builder│  │sampler_node.py │  │__init__.py     │  │
+│  │_node.py      │→ │                │  │(API endpoints) │  │
+│  └──────────────┘  │  ↓             │  └────────────────┘  │
+│                    │generation_     │                       │
+│                    │orchestrator.py │                       │
+│                    │  ↓             │                       │
+│  ┌─────────┐     │model_loader +  │  ┌─────────────────┐ │
+│  │ModelCache│←────│image_generation│  │DistributionMgr  │ │
+│  └─────────┘     │  ↓             │  │(master jobs)    │ │
+│                    │html_generator │  └─────────────────┘ │
+│                    └────────────────┘         ↕ HTTP       │
+│                                        ┌─────────────────┐ │
+│                                        │WorkerThread     │ │
+│                                        │(remote workers) │ │
+│                                        └─────────────────┘ │
+└─────────────────────────────────────────────────────────────┘
+```
+
+**File Dependency Graph (Python):**
+```
+sampler_node.py
+  → generation_orchestrator.py (main entry)
+    → config_utils.py (expand_configs, prepare_input_jobs)
+    → model_loader.py (load_checkpoint, load_loras)
+    → image_generation.py (generate_image, flush_batch)
+    → batch_encoding.py (encode_prompt_with_combinators)
+    → trigger_words.py (build_prompt_with_triggers)
+    → manifest_utils.py (save_manifest, load_existing_manifest)
+    → model_cache.py (ModelCache)
+    → conditioning_cache.py (ConditioningCache)
+    → remote_vae.py (RemoteVAEDecodeWorker)
+    → html_generator.py (get_html_template)
+    → distribution_manager.py (DistributionManager)
+    → distribution_worker.py (WorkerThread)
+
+config_builder_node.py
+  → lora_utils.py (trigger word lookup, CivitAI API)
+
+__init__.py
+  → all node classes (sampler, dashboard, config_builder, json_text)
+  → distribution_routes.py (distribution API endpoints)
+  → html_generator.py (on-demand HTML generation)
+  → metadata_packer.py (export favorites)
+  → directory_scanner.py (scan external directories)
+  → manifest_utils.py (save/load manifests)
+```
+
+**Server Event Types:**
+
+| Event Name | Sender | Data Fields | Purpose |
+|---|---|---|---|
+| `ultimate_grid.update` | `generation_orchestrator.py` | `session_name, node, manifest, meta, new_items` | New images generated |
+| `ultimate_grid.progress` | `generation_orchestrator.py` | `session_name, progress_pct, eta_str, current_job, total_jobs, avg_duration, total_generated, total_elapsed, finish_time` | ETA/progress bar |
+| `ultimate_grid.distribution_status` | `generation_orchestrator.py` | `session_name, workers, stats` | Distribution worker status |
+
+**Testing Changes:**
+- **Python backend files:** Restart ComfyUI
+- **`web/` JS files:** Refresh browser (Ctrl+F5)
+- **`resources/` JS/CSS/HTML files:** Dashboard HTML must be regenerated — re-run the sampler node or call `/config_tester/get_session_html`
+- **Config Builder state fields:** Also update migration checks in `conf-builder-main.js`
