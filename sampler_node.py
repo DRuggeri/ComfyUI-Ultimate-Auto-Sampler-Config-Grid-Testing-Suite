@@ -276,6 +276,10 @@ class SamplerGridTester:
                 # Replace configs_json with just the configs array for downstream
                 configs_json = json.dumps(parsed["configs"], indent=2, ensure_ascii=False)
                 print(f"[GridTester] 🌐 Distribution config extracted: {len(dist_config.get('worker_urls', []))} worker(s), enabled={dist_config.get('enabled')}")
+            elif isinstance(parsed, dict) and "configs" in parsed:
+                # Configs wrapped in dict but no distribution settings — unwrap for downstream
+                configs_json = json.dumps(parsed["configs"], indent=2, ensure_ascii=False)
+                print(f"[GridTester] ℹ️ No distribution settings in configs_json")
             else:
                 print(f"[GridTester] ℹ️ No distribution settings in configs_json")
         except Exception as e:
