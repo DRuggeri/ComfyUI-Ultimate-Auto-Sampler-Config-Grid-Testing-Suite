@@ -1501,7 +1501,7 @@ def _run_distributed_generation(
     )
 
     worker_urls = distribution_config.get("worker_urls", [])
-    claim_timeout = distribution_config.get("claim_timeout", 300)
+    claim_timeout = distribution_config.get("claim_timeout", 600)
 
     # Inject trigger word mode into configs so workers can use it
     for conf in expanded:
