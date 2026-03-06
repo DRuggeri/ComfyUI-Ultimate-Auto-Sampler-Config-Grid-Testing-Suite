@@ -135,7 +135,6 @@ async function loadSession() {
         document.body.style.overflow = '';
         // Hide landing page, show viewport
         const landing = document.getElementById('session-landing');
-        const viewport = document.getElementById('viewport');
         if (landing) landing.style.display = 'none';
         if (viewport) viewport.style.display = 'block';
 
