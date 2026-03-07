@@ -4,6 +4,255 @@
  * Added: Favorites feature, Filters popup, Prompt/Size/Seed filters
  */
 
+// --- LABEL MODE FUNCTIONS ---
+
+/**
+ * Compute which values are global (same on every card) across activeData.
+ * Called once when label mode is toggled on or when data changes while labels are active.
+ */
+function computeLabelGlobalValues() {
+    if (!activeData || activeData.length === 0) {
+        labelGlobalValues = null;
+        return;
+    }
+
+    const fields = ['model', 'lora', 'sampler', 'scheduler', 'cfg', 'steps', 'seed', 'denoise', 'positive'];
+    const valueSets = {};
+    fields.forEach(f => valueSets[f] = new Set());
+
+    for (const item of activeData) {
+        valueSets.model.add(item.model || meta.model || "Default");
+        valueSets.lora.add(item.lora || "None");
+        valueSets.sampler.add(item.sampler || "");
+        valueSets.scheduler.add(item.scheduler || "");
+        valueSets.cfg.add(String(item.cfg));
+        valueSets.steps.add(String(item.steps));
+        valueSets.seed.add(String(item.seed));
+        valueSets.denoise.add(String(item.denoise));
+        valueSets.positive.add(item.positive || meta.positive || "");
+    }
+
+    // A value is "global" if only 1 unique value exists for that field
+    labelGlobalValues = {};
+    fields.forEach(f => {
+        labelGlobalValues[f] = valueSets[f].size === 1;
+    });
+
+    // For lora unique-only: also track which individual loras appear on every card
+    if (labelMode.fields.loraUniqueOnly) {
+        const loraCountMap = {};
+        let totalCards = activeData.length;
+        for (const item of activeData) {
+            const loraStr = item.lora || "None";
+            if (loraStr === "None") continue;
+            const parts = loraStr.split(" + ");
+            const seen = new Set();
+            for (const part of parts) {
+                const name = part.split(":")[0];
+                if (!seen.has(name)) {
+                    seen.add(name);
+                    loraCountMap[name] = (loraCountMap[name] || 0) + 1;
+                }
+            }
+        }
+        labelGlobalValues._loraGlobalNames = new Set();
+        for (const [name, count] of Object.entries(loraCountMap)) {
+            if (count === totalCards) {
+                labelGlobalValues._loraGlobalNames.add(name);
+            }
+        }
+    }
+}
+
+/**
+ * Build label overlay HTML for a single card data item.
+ */
+function buildLabelOverlay(d) {
+    if (!labelMode.enabled) return '';
+
+    const uniqueOnly = labelMode.fields.loraUniqueOnly;
+    const tags = [];
+
+    if (labelMode.fields.model) {
+        const val = d.model || meta.model || "Default";
+        if (!uniqueOnly || !labelGlobalValues || !labelGlobalValues.model) {
+            const short = val.replace(/\\/g, '/').split('/').pop().replace(/\.[^.]+$/, '');
+            tags.push(`<span class="label-tag label-model" title="${val}">${short}</span>`);
+        }
+    }
+
+    if (labelMode.fields.lora) {
+        const loraStr = d.lora || "None";
+        if (loraStr !== "None") {
+            const parts = loraStr.split(" + ");
+            for (const part of parts) {
+                const name = part.split(":")[0];
+                const shortName = name.replace(/\\/g, '/').split('/').pop().replace(/\.[^.]+$/, '');
+                // Skip loras that are on every card when unique-only is on
+                if (uniqueOnly && labelGlobalValues && labelGlobalValues._loraGlobalNames && labelGlobalValues._loraGlobalNames.has(name)) continue;
+                tags.push(`<span class="label-tag label-lora" title="${part}">${shortName}</span>`);
+            }
+        }
+    }
+
+    if (labelMode.fields.prompt) {
+        const val = d.positive || meta.positive || "";
+        if (val && (!uniqueOnly || !labelGlobalValues || !labelGlobalValues.positive)) {
+            const short = val.length > 40 ? val.substring(0, 38) + '...' : val;
+            tags.push(`<span class="label-tag label-prompt" title="${val}">${short}</span>`);
+        }
+    }
+
+    if (labelMode.fields.sampler) {
+        const val = d.sampler || "";
+        if (val && (!uniqueOnly || !labelGlobalValues || !labelGlobalValues.sampler)) {
+            tags.push(`<span class="label-tag label-sampler">${val}</span>`);
+        }
+    }
+
+    if (labelMode.fields.scheduler) {
+        const val = d.scheduler || "";
+        if (val && (!uniqueOnly || !labelGlobalValues || !labelGlobalValues.scheduler)) {
+            tags.push(`<span class="label-tag label-scheduler">${val}</span>`);
+        }
+    }
+
+    if (labelMode.fields.cfg) {
+        const val = d.cfg;
+        if (val !== undefined && (!uniqueOnly || !labelGlobalValues || !labelGlobalValues.cfg)) {
+            tags.push(`<span class="label-tag label-cfg">CFG:${val}</span>`);
+        }
+    }
+
+    if (labelMode.fields.steps) {
+        const val = d.steps;
+        if (val !== undefined && (!uniqueOnly || !labelGlobalValues || !labelGlobalValues.steps)) {
+            tags.push(`<span class="label-tag label-steps">Steps:${val}</span>`);
+        }
+    }
+
+    if (labelMode.fields.seed) {
+        const val = d.seed;
+        if (val !== undefined && (!uniqueOnly || !labelGlobalValues || !labelGlobalValues.seed)) {
+            tags.push(`<span class="label-tag label-seed">Seed:${val}</span>`);
+        }
+    }
+
+    if (labelMode.fields.denoise) {
+        const val = d.denoise;
+        if (val !== undefined && (!uniqueOnly || !labelGlobalValues || !labelGlobalValues.denoise)) {
+            tags.push(`<span class="label-tag label-denoise">Dn:${val}</span>`);
+        }
+    }
+
+    if (tags.length === 0) return '';
+    return `<div class="label-overlay">${tags.join('')}</div>`;
+}
+
+/**
+ * Toggle label mode on/off
+ */
+function toggleLabelMode(enabled) {
+    labelMode.enabled = enabled;
+    const fieldsContainer = document.getElementById('label-fields-container');
+    if (fieldsContainer) fieldsContainer.style.display = enabled ? 'block' : 'none';
+
+    if (enabled) {
+        computeLabelGlobalValues();
+    }
+    saveLabelPreferences();
+    refreshLabelOverlays();
+}
+
+/**
+ * Update label field selections from checkboxes
+ */
+function updateLabelFields() {
+    const fields = ['model', 'lora', 'prompt', 'sampler', 'scheduler', 'cfg', 'steps', 'seed', 'denoise'];
+    fields.forEach(f => {
+        const cb = document.getElementById(`label-field-${f}`);
+        if (cb) labelMode.fields[f] = cb.checked;
+    });
+    const uniqueCb = document.getElementById('label-unique-only');
+    if (uniqueCb) labelMode.fields.loraUniqueOnly = uniqueCb.checked;
+
+    if (labelMode.enabled) {
+        computeLabelGlobalValues();
+    }
+    saveLabelPreferences();
+    refreshLabelOverlays();
+}
+
+/**
+ * Save label preferences to localStorage
+ */
+function saveLabelPreferences() {
+    try {
+        localStorage.setItem('ultimate_grid_labels', JSON.stringify(labelMode));
+    } catch (e) { /* ignore */ }
+}
+
+/**
+ * Load label preferences from localStorage and sync UI checkboxes
+ */
+function loadLabelPreferences() {
+    try {
+        const saved = localStorage.getItem('ultimate_grid_labels');
+        if (saved) {
+            const parsed = JSON.parse(saved);
+            labelMode.enabled = parsed.enabled || false;
+            if (parsed.fields) {
+                Object.assign(labelMode.fields, parsed.fields);
+            }
+        }
+    } catch (e) { /* ignore */ }
+
+    // Sync UI checkboxes
+    const toggle = document.getElementById('label-mode-toggle');
+    if (toggle) toggle.checked = labelMode.enabled;
+
+    const fieldsContainer = document.getElementById('label-fields-container');
+    if (fieldsContainer) fieldsContainer.style.display = labelMode.enabled ? 'block' : 'none';
+
+    const fields = ['model', 'lora', 'prompt', 'sampler', 'scheduler', 'cfg', 'steps', 'seed', 'denoise'];
+    fields.forEach(f => {
+        const cb = document.getElementById(`label-field-${f}`);
+        if (cb) cb.checked = labelMode.fields[f] || false;
+    });
+
+    const uniqueCb = document.getElementById('label-unique-only');
+    if (uniqueCb) uniqueCb.checked = labelMode.fields.loraUniqueOnly !== false;
+
+    if (labelMode.enabled) {
+        computeLabelGlobalValues();
+    }
+}
+
+/**
+ * Refresh label overlays on all visible cards (add/remove/update)
+ */
+function refreshLabelOverlays() {
+    for (const [id, card] of nodeMap) {
+        const d = card._dataItem;
+        if (!d) continue;
+
+        // Remove existing label overlay
+        const existing = card.querySelector('.label-overlay');
+        if (existing) existing.remove();
+
+        // Add new one if enabled
+        if (labelMode.enabled) {
+            const html = buildLabelOverlay(d);
+            if (html) {
+                const wrapper = card.querySelector('.img-wrapper');
+                if (wrapper) {
+                    wrapper.insertAdjacentHTML('beforeend', html);
+                }
+            }
+        }
+    }
+}
+
 // Cache for filter buttons
 let filterButtonCache = {};
 
@@ -818,6 +1067,7 @@ function createCard(d) {
             <button class="revise-btn" onclick="openM(${d.id})">REVISE</button>
             <div class="time-tag">${d.duration}s</div>
             <div class="index-tag">#${totalIndex}</div>
+            ${buildLabelOverlay(d)}
         </div>
         <div class="info">
             <div class="stat" title="${modelName}"><b>Model:</b> <span>${finalModel}</span></div>

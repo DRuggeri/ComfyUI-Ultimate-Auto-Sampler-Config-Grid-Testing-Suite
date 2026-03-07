@@ -82,3 +82,24 @@ const RENDER_THROTTLE_MS = 16;
 
 // --- DEBOUNCE TIMER (Prevents rapid re-renders) ---
 let updateDebounceTimer = null;
+
+// --- LABEL MODE STATE ---
+// Which fields to show as overlays on cards (persisted to localStorage)
+var labelMode = labelMode || {
+    enabled: false,
+    fields: {
+        model: false,
+        lora: false,
+        loraUniqueOnly: true,   // When true, skip loras that appear on every card
+        prompt: false,
+        sampler: false,
+        scheduler: false,
+        cfg: false,
+        steps: false,
+        seed: false,
+        denoise: false
+    }
+};
+
+// Cache of values that are the same across ALL items (computed once per dataset)
+var labelGlobalValues = labelGlobalValues || null;

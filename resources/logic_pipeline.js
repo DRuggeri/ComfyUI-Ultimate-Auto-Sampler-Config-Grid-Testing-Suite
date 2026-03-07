@@ -362,6 +362,11 @@ function processNewData(newItems) {
     // (activeData already contains the new items via fullManifest.items reference)
     refreshIndices();
 
+    // Recompute label global values when data changes (new items may change what's unique)
+    if (typeof computeLabelGlobalValues === 'function' && labelMode && labelMode.enabled) {
+        computeLabelGlobalValues();
+    }
+
     // Update filter options
     updateFiltersForNewData(newItems);
 

@@ -45,6 +45,11 @@ function init() {
             loadSortPreference();
         }
 
+        // Load label mode preferences from localStorage
+        if (typeof loadLabelPreferences === 'function') {
+            loadLabelPreferences();
+        }
+
         // Start
         refreshIndices();
 

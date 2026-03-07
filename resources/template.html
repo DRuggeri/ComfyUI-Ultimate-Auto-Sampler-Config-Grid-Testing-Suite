@@ -114,7 +114,73 @@
                 </div>
             </div>
 
-            <!-- Section 3: Export Favorites -->
+            <!-- Section 3: Label Mode -->
+            <div class="cog-panel-section">
+                <div class="cog-panel-section-title">LABEL MODE</div>
+                <div style="font-size: 9px; color: #666; margin-bottom: 8px;">
+                    Show metadata labels as overlays on card images. Unique-only filters out values shared by every card.
+                </div>
+                <div style="display: flex; align-items: center; gap: 6px; margin-bottom: 8px;">
+                    <input type="checkbox" id="label-mode-toggle"
+                        style="width: 14px; height: 14px; cursor: pointer;"
+                        onchange="toggleLabelMode(this.checked)">
+                    <label for="label-mode-toggle"
+                        style="font-size: 11px; color: #ccc; cursor: pointer; user-select: none; font-weight: bold;">
+                        Enable Label Overlays
+                    </label>
+                </div>
+                <div id="label-fields-container" style="display: none;">
+                    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 4px;">
+                        <div style="display: flex; align-items: center; gap: 4px;">
+                            <input type="checkbox" id="label-field-model" onchange="updateLabelFields()" style="width: 12px; height: 12px; cursor: pointer;">
+                            <label for="label-field-model" style="font-size: 10px; color: #b43cc8; cursor: pointer; user-select: none;">Model</label>
+                        </div>
+                        <div style="display: flex; align-items: center; gap: 4px;">
+                            <input type="checkbox" id="label-field-lora" onchange="updateLabelFields()" style="width: 12px; height: 12px; cursor: pointer;">
+                            <label for="label-field-lora" style="font-size: 10px; color: #c88c28; cursor: pointer; user-select: none;">LoRA</label>
+                        </div>
+                        <div style="display: flex; align-items: center; gap: 4px;">
+                            <input type="checkbox" id="label-field-prompt" onchange="updateLabelFields()" style="width: 12px; height: 12px; cursor: pointer;">
+                            <label for="label-field-prompt" style="font-size: 10px; color: #28a078; cursor: pointer; user-select: none;">Prompt</label>
+                        </div>
+                        <div style="display: flex; align-items: center; gap: 4px;">
+                            <input type="checkbox" id="label-field-sampler" onchange="updateLabelFields()" style="width: 12px; height: 12px; cursor: pointer;">
+                            <label for="label-field-sampler" style="font-size: 10px; color: #3c82c8; cursor: pointer; user-select: none;">Sampler</label>
+                        </div>
+                        <div style="display: flex; align-items: center; gap: 4px;">
+                            <input type="checkbox" id="label-field-scheduler" onchange="updateLabelFields()" style="width: 12px; height: 12px; cursor: pointer;">
+                            <label for="label-field-scheduler" style="font-size: 10px; color: #3c82c8; cursor: pointer; user-select: none;">Scheduler</label>
+                        </div>
+                        <div style="display: flex; align-items: center; gap: 4px;">
+                            <input type="checkbox" id="label-field-cfg" onchange="updateLabelFields()" style="width: 12px; height: 12px; cursor: pointer;">
+                            <label for="label-field-cfg" style="font-size: 10px; color: #c85050; cursor: pointer; user-select: none;">CFG</label>
+                        </div>
+                        <div style="display: flex; align-items: center; gap: 4px;">
+                            <input type="checkbox" id="label-field-steps" onchange="updateLabelFields()" style="width: 12px; height: 12px; cursor: pointer;">
+                            <label for="label-field-steps" style="font-size: 10px; color: #c85050; cursor: pointer; user-select: none;">Steps</label>
+                        </div>
+                        <div style="display: flex; align-items: center; gap: 4px;">
+                            <input type="checkbox" id="label-field-seed" onchange="updateLabelFields()" style="width: 12px; height: 12px; cursor: pointer;">
+                            <label for="label-field-seed" style="font-size: 10px; color: #888; cursor: pointer; user-select: none;">Seed</label>
+                        </div>
+                        <div style="display: flex; align-items: center; gap: 4px;">
+                            <input type="checkbox" id="label-field-denoise" onchange="updateLabelFields()" style="width: 12px; height: 12px; cursor: pointer;">
+                            <label for="label-field-denoise" style="font-size: 10px; color: #00b4a0; cursor: pointer; user-select: none;">Denoise</label>
+                        </div>
+                    </div>
+                    <div style="margin-top: 8px; display: flex; align-items: center; gap: 6px;">
+                        <input type="checkbox" id="label-unique-only" checked
+                            onchange="updateLabelFields()"
+                            style="width: 12px; height: 12px; cursor: pointer;">
+                        <label for="label-unique-only"
+                            style="font-size: 10px; color: #999; cursor: pointer; user-select: none;">
+                            Hide values shared by every card (unique-only)
+                        </label>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Section 4: Export Favorites -->
             <div class="cog-panel-section">
                 <div class="cog-panel-section-title">EXPORT FAVORITES</div>
                 <button class="session-action-btn"
@@ -162,7 +228,7 @@
                 <div id="export-status" style="margin-top: 8px; font-size: 10px; color: #666; min-height: 16px;"></div>
             </div>
 
-            <!-- Section 4: Manifest Analytics -->
+            <!-- Section 5: Manifest Analytics -->
             <div class="cog-panel-section">
                 <div class="cog-panel-section-title">MANIFEST ANALYTICS</div>
                 <div style="font-size: 9px; color: #666; margin-bottom: 8px;">
@@ -191,7 +257,7 @@
                 <div id="analytics-status" style="margin-top: 4px; font-size: 10px; color: #666; min-height: 16px;"></div>
             </div>
 
-            <!-- Section 5: Scan External Directory -->
+            <!-- Section 6: Scan External Directory -->
             <div class="cog-panel-section">
                 <div class="cog-panel-section-title">SCAN EXTERNAL DIRECTORY</div>
                 <div style="font-size: 9px; color: #666; margin-bottom: 8px;">
