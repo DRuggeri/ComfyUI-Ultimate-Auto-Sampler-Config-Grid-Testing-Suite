@@ -434,6 +434,7 @@ class WorkerThread(threading.Thread):
             print(f"[Worker {self.worker_id}] ⚠️ Claim failed: {e}")
             return None
 
+    @torch.inference_mode()
     def _process_job(self, job):
         """
         Process a single job using local ComfyUI infrastructure.
@@ -451,6 +452,11 @@ class WorkerThread(threading.Thread):
 
         Returns:
             tuple: (image_bytes, metadata_dict)
+
+        Note: @torch.inference_mode() is required because worker threads run
+        outside ComfyUI's execution engine which wraps everything in
+        inference_mode. Without it, Dynamic VRAM's lazy weight loading can
+        produce NaN values during VAE decode.
         """
         from .model_loader import (
             load_checkpoint, load_loras, load_vae_by_name,
