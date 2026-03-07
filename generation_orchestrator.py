@@ -876,7 +876,7 @@ def run_generation_loop(
                     if model_unique_positives:
                         print(f"[GridTester] 🧠 Batch encoding {len(model_unique_positives)} prompts for {target_model_name}")
                         import comfy.model_management as mm_batch
-                        mm_batch.load_models_gpu([patched_clip.patcher], force_patch_weights=True)
+                        mm_batch.load_models_gpu([patched_clip.patcher])
 
                         clip_skip = conf.get("clip_skip", 0)
 
@@ -1453,7 +1453,7 @@ def _preencode_all_conditionings(
 
             # Force CLIP onto GPU for encoding
             import comfy.model_management as mm_enc
-            mm_enc.load_models_gpu([patched_clip.patcher], force_patch_weights=True)
+            mm_enc.load_models_gpu([patched_clip.patcher])
 
             clip_skip = first_conf.get("clip_skip", 0)
 
