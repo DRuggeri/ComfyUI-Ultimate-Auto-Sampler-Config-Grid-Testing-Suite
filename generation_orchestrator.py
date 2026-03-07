@@ -159,11 +159,16 @@ def calculate_clip_hash(clip_model):
 def check_if_job_completed(existing_items, conf, seed, width, height, batch_idx, positive_prompt, negative_prompt, has_optional_inputs=False):
     """Independent check to see if a specific generation job already exists.
 
-    When has_optional_inputs is True, we skip the model/lora/prompt matching since
-    those values came from upstream nodes whose changes we cannot reliably track.
-    We still match on seed/resolution/sampler/scheduler/steps/cfg/denoise so that
-    if the user is ONLY changing upstream model/conditioning, old jobs get re-run.
+    When has_optional_inputs is True, we cannot reliably detect changes from
+    upstream nodes (models, LoRAs, conditionings, latents), so we disable
+    skip detection entirely and return -1 (no match) to force re-generation.
     """
+    # When optional inputs are connected, we can't reliably match on model,
+    # lora, prompts, or latents because those may come from upstream nodes
+    # whose changes we can't detect. Disable skip detection entirely.
+    if has_optional_inputs:
+        return -1
+
     FLOAT_TOLERANCE = 0.0001
 
     for idx, item in enumerate(existing_items):
@@ -186,48 +191,40 @@ def check_if_job_completed(existing_items, conf, seed, width, height, batch_idx,
         except (ValueError, TypeError):
             continue
 
-        if has_optional_inputs:
-            # When optional inputs are connected, we can't reliably match on model,
-            # lora, or prompts because those may come from upstream nodes whose
-            # changes we can't detect. Skip these checks entirely so the job
-            # is always re-run when optional inputs are connected (unless the user
-            # explicitly sets overwrite_existing=False, handled by the caller).
-            pass
-        else:
-            # Standard matching - check model, lora, and prompts
-            if item.get("model") != conf["model"]: continue
-            if item.get("positive", "").strip() != positive_prompt.strip(): continue
-            if item.get("negative", "").strip() != negative_prompt.strip(): continue
+        # Standard matching - check model, lora, and prompts
+        if item.get("model") != conf["model"]: continue
+        if item.get("positive", "").strip() != positive_prompt.strip(): continue
+        if item.get("negative", "").strip() != negative_prompt.strip(): continue
 
-            item_lora = item.get("lora", "None")
-            conf_lora = conf.get("lora_expanded", "None")
-            if item_lora != conf_lora: continue
+        item_lora = item.get("lora", "None")
+        conf_lora = conf.get("lora_expanded", "None")
+        if item_lora != conf_lora: continue
 
-            # Check model_type and text_encoders — different text encoders produce
-            # different conditioning even with the same model file, so they must
-            # NOT be considered duplicate jobs
-            item_model_type = item.get("model_type", "checkpoint")
-            conf_model_type = conf.get("model_type", "checkpoint")
-            if item_model_type != conf_model_type: continue
+        # Check model_type and text_encoders — different text encoders produce
+        # different conditioning even with the same model file, so they must
+        # NOT be considered duplicate jobs
+        item_model_type = item.get("model_type", "checkpoint")
+        conf_model_type = conf.get("model_type", "checkpoint")
+        if item_model_type != conf_model_type: continue
 
-            item_te = item.get("text_encoders", [])
-            conf_te = conf.get("text_encoders", [])
-            if item_te != conf_te: continue
+        item_te = item.get("text_encoders", [])
+        conf_te = conf.get("text_encoders", [])
+        if item_te != conf_te: continue
 
-            # Check clip_type — different clip types produce different conditioning
-            item_clip_type = item.get("clip_type", "stable_diffusion")
-            conf_clip_type = conf.get("clip_type", "stable_diffusion")
-            if item_clip_type != conf_clip_type: continue
+        # Check clip_type — different clip types produce different conditioning
+        item_clip_type = item.get("clip_type", "stable_diffusion")
+        conf_clip_type = conf.get("clip_type", "stable_diffusion")
+        if item_clip_type != conf_clip_type: continue
 
-            # Check clip_skip — different clip_skip values produce different conditioning
-            item_clip_skip = item.get("clip_skip", 0)
-            conf_clip_skip = conf.get("clip_skip", 0)
-            if item_clip_skip != conf_clip_skip: continue
+        # Check clip_skip — different clip_skip values produce different conditioning
+        item_clip_skip = item.get("clip_skip", 0)
+        conf_clip_skip = conf.get("clip_skip", 0)
+        if item_clip_skip != conf_clip_skip: continue
 
-            # Check VAE — different VAEs produce different decoded images
-            item_vae = item.get("vae", "Default")
-            conf_vae = conf.get("vae", "Default")
-            if item_vae != conf_vae: continue
+        # Check VAE — different VAEs produce different decoded images
+        item_vae = item.get("vae", "Default")
+        conf_vae = conf.get("vae", "Default")
+        if item_vae != conf_vae: continue
 
         return idx
 
@@ -407,11 +404,10 @@ def run_generation_loop(
     ])
 
     if has_optional_inputs and not overwrite_existing:
-        print(f"[GridTester] ⚠️ Optional inputs connected with Resume mode (overwrite_existing=False).")
-        print(f"[GridTester] ⚠️ Changes to upstream nodes (models, LoRAs, prompts) connected via optional inputs")
-        print(f"[GridTester] ⚠️ CANNOT be automatically detected. Jobs matching sampler/scheduler/steps/cfg/denoise/seed")
-        print(f"[GridTester] ⚠️ will be SKIPPED even if upstream model/conditioning changed.")
-        print(f"[GridTester] ⚠️ Set overwrite_existing=True to force re-generation of all jobs.")
+        print(f"[GridTester] ⚠️ Optional inputs connected — job skip/resume DISABLED.")
+        print(f"[GridTester] ⚠️ Changes to upstream nodes (models, LoRAs, prompts, latents) connected via optional inputs")
+        print(f"[GridTester] ⚠️ cannot be automatically detected, so all jobs will be re-generated.")
+        print(f"[GridTester] ⚠️ To use resume mode, disconnect optional inputs and use the built-in config fields instead.")
 
     # ==== DISTRIBUTED PROCESSING BRANCH ====
     # If distribution_config is provided and enabled, delegate to distributed processing
