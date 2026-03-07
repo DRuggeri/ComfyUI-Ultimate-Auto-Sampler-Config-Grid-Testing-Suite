@@ -393,6 +393,13 @@ function updateZoom(delta, mouseX, mouseY) {
     panOffsetX = offsetX - (offsetX - panOffsetX) * scaleFactor;
     panOffsetY = offsetY - (offsetY - panOffsetY) * scaleFactor;
 
+    // If panning while zooming, update panStart so the next mousemove
+    // doesn't overwrite the zoom-adjusted offsets (prevents flicker/jump)
+    if (isPanning || isMiddleMousePanning) {
+        panStartX = lastMouseX - panOffsetX;
+        panStartY = lastMouseY - panOffsetY;
+    }
+
     updateTransform();
 }
 
@@ -488,6 +495,9 @@ function goToImage(imageNumber) {
 }
 
 // --- MOUSE CONTROLS ---
+let lastMouseX = 0;
+let lastMouseY = 0;
+
 if (viewport) {
     viewport.addEventListener('mousedown', (e) => {
         viewport.focus();
@@ -518,6 +528,8 @@ if (viewport) {
     });
 
     window.addEventListener('mousemove', (e) => {
+        lastMouseX = e.clientX;
+        lastMouseY = e.clientY;
         if (!isPanning && !isMiddleMousePanning) return;
         e.preventDefault();
 
