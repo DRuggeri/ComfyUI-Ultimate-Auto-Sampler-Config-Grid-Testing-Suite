@@ -597,24 +597,32 @@ class WorkerThread(threading.Thread):
         )
 
         # --- VAE Decode ---
+        # Clone latent samples and free UNet-related tensors BEFORE VAE decode.
+        # With Dynamic VRAM, the model manager needs to evict the UNet to load
+        # the VAE. Holding references to UNet output tensors on GPU can interfere
+        # with memory eviction, causing the VAE to run in a degraded state that
+        # produces NaN values.
+        latent_for_decode = result_latent["samples"].clone()
+        del result_latent, latent_in, pos_cond, neg_cond
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+
         if _remote_vae_url:
             # Remote VAE: send latents to HuggingFace endpoint for decoding
             from .remote_vae import remote_decode_hf
             from PIL import Image as PILImage
             import numpy as np
-            latent_samples = result_latent["samples"]
-            if latent_samples.ndim == 3:
-                latent_samples = latent_samples.unsqueeze(0)
-            decoded = remote_decode_hf(_remote_vae_url, latent_samples, h, w)
+            if latent_for_decode.ndim == 3:
+                latent_for_decode = latent_for_decode.unsqueeze(0)
+            decoded = remote_decode_hf(_remote_vae_url, latent_for_decode, h, w)
+            del latent_for_decode
             # Denormalize from [-1, 1] → [0, 1] (same as VaeImageProcessor.postprocess)
             decoded = (decoded / 2 + 0.5).clamp(0, 1)
             img_data = decoded[0].permute(1, 2, 0).cpu().numpy()
             image = PILImage.fromarray((img_data * 255).round().astype(np.uint8))
         else:
-            image = decode_latent_with_vae(vae, result_latent["samples"])
-
-        # Free latent tensors ASAP (before image conversion, which is CPU-only)
-        del result_latent, latent_in, pos_cond, neg_cond
+            image = decode_latent_with_vae(vae, latent_for_decode)
+            del latent_for_decode
 
         # --- Convert to bytes ---
         buf = io.BytesIO()

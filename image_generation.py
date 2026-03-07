@@ -265,35 +265,52 @@ def generate_image(
 def decode_latent_with_vae(vae, latent_samples):
     """
     Decode latent samples to pixel space using VAE.
-    
+
     Args:
         vae: VAE model
         latent_samples: Latent tensor to decode
-        
+
     Returns:
         PIL.Image: Decoded image
     """
+    import torch
+
+    # Check for NaN in input latent
+    if torch.isnan(latent_samples).any():
+        print(f"[GridTester] ⚠️ VAE decode: input latent contains NaN! shape={latent_samples.shape} dtype={latent_samples.dtype}")
+
     decoded = vae.decode(latent_samples)
-    
+
+    # Check for NaN in decoded output and attempt float32 retry
+    if torch.isnan(decoded).any():
+        print(f"[GridTester] ⚠️ VAE decode produced NaN! decoded shape={decoded.shape} dtype={decoded.dtype}")
+        print(f"[GridTester] ⚠️ Input latent: shape={latent_samples.shape} dtype={latent_samples.dtype} device={latent_samples.device}")
+        print(f"[GridTester] 🔄 Retrying VAE decode with float32 latent...")
+        decoded = vae.decode(latent_samples.to(torch.float32))
+        if torch.isnan(decoded).any():
+            print(f"[GridTester] ❌ VAE decode still NaN after float32 retry")
+        else:
+            print(f"[GridTester] ✅ float32 retry succeeded")
+
     # Convert to PIL Image
     # .detach() is required because the tensor may have requires_grad=True
     # (e.g., when called from distributed worker threads outside ComfyUI's
     # normal execution context where autograd state may differ)
-    img_np = decoded.detach().cpu().numpy()
-    
+    img_np = decoded.detach().cpu().float().numpy()
+
     # Remove extra dimensions (handle shapes like (1, 1, H, W, C) or (1, H, W, C))
     while img_np.ndim > 3:
         img_np = img_np[0]
-    
+
     # Now should be (H, W, C) or (C, H, W)
     img_np = np.clip(img_np * 255, 0, 255).astype(np.uint8)
-    
+
     # Handle different channel orders
     if img_np.shape[0] == 3 and img_np.ndim == 3:  # CHW format
         img_np = np.transpose(img_np, (1, 2, 0))
     elif img_np.shape[-1] != 3 and img_np.ndim == 3:  # Not HWC format
         img_np = np.transpose(img_np, (1, 2, 0))
-    
+
     return Image.fromarray(img_np)
 
 
