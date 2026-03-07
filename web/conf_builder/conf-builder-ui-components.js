@@ -235,6 +235,17 @@ export function getStyles() {
             .cb-list-grid { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; padding-top: 10px; border-top: 1px dashed #444; }
             .cb-item-card { background: #2a2a2a; border-radius: 4px; padding: 10px; border-left: 3px solid #0066cc; flex: 1 1 300px; min-width: 250px; display: flex; flex-direction: column; gap: 6px; }
             .cb-item-card.model-card { border-left-color: #cc6600; }
+
+            /* Drag-and-drop reorder styles */
+            .cb-item-card.cb-dragging { opacity: 0.4; }
+            .cb-item-card.cb-drop-above { border-top: 2px solid #0088ff; }
+            .cb-item-card.cb-drop-below { border-bottom: 2px solid #0088ff; }
+            .cb-drag-handle { opacity: 0.4; transition: opacity 0.15s; }
+            .cb-header-bar:hover .cb-drag-handle { opacity: 1; }
+            .cb-te-row.cb-dragging { opacity: 0.4; }
+            .cb-te-row.cb-drop-above { border-top: 2px solid #0088ff; }
+            .cb-te-row.cb-drop-below { border-bottom: 2px solid #0088ff; }
+
             .cb-slider-container { display: flex; align-items: center; gap: 10px; }
             .cb-slider { flex: 1; height: 6px; background: #1a1a1a; border-radius: 3px; outline: none; }
             

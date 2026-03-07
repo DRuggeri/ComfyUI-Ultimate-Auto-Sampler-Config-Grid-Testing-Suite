@@ -59,6 +59,92 @@ function debouncedRenderUI(node) {
     }, 150);
 }
 
+// --- DRAG-AND-DROP REORDER HELPER ---
+// Makes item cards within a list reorderable by dragging their header bar.
+// stateArray: the backing array in node.state (e.g. config_arrays[arrayIdx].loras)
+// arrayIdx: which config array this belongs to
+// itemIdx: the index of this item in the array
+// node: the config builder node (for saveState/renderUI)
+function setupDragReorder(cardDiv, headerBar, stateArrayGetter, itemIdx, node) {
+    headerBar.draggable = true;
+    headerBar.style.cursor = "grab";
+
+    // Drag handle icon prepended to header
+    const handle = document.createElement("span");
+    handle.textContent = "⠿";
+    handle.style.cssText = "color: #666; font-size: 14px; margin-right: 6px; cursor: grab; user-select: none;";
+    handle.className = "cb-drag-handle";
+    headerBar.insertBefore(handle, headerBar.firstChild);
+
+    headerBar.addEventListener("dragstart", (e) => {
+        e.stopPropagation();
+        cardDiv.classList.add("cb-dragging");
+        e.dataTransfer.effectAllowed = "move";
+        e.dataTransfer.setData("text/plain", String(itemIdx));
+        // Store which list this came from so we don't mix lists
+        e.dataTransfer.setData("application/x-cb-list-id", cardDiv.parentElement?.id || "");
+    });
+
+    headerBar.addEventListener("dragend", (e) => {
+        cardDiv.classList.remove("cb-dragging");
+        // Clean up all drop indicators
+        document.querySelectorAll(".cb-drop-above, .cb-drop-below").forEach(el => {
+            el.classList.remove("cb-drop-above", "cb-drop-below");
+        });
+    });
+
+    cardDiv.addEventListener("dragover", (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        e.dataTransfer.dropEffect = "move";
+        // Show drop indicator based on mouse position relative to card center
+        const rect = cardDiv.getBoundingClientRect();
+        const midY = rect.top + rect.height / 2;
+        cardDiv.classList.remove("cb-drop-above", "cb-drop-below");
+        if (e.clientY < midY) {
+            cardDiv.classList.add("cb-drop-above");
+        } else {
+            cardDiv.classList.add("cb-drop-below");
+        }
+    });
+
+    cardDiv.addEventListener("dragleave", (e) => {
+        cardDiv.classList.remove("cb-drop-above", "cb-drop-below");
+    });
+
+    cardDiv.addEventListener("drop", (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        cardDiv.classList.remove("cb-drop-above", "cb-drop-below");
+
+        // Verify same list
+        const sourceListId = e.dataTransfer.getData("application/x-cb-list-id");
+        if (sourceListId && sourceListId !== (cardDiv.parentElement?.id || "")) return;
+
+        const fromIdx = parseInt(e.dataTransfer.getData("text/plain"));
+        if (isNaN(fromIdx) || fromIdx === itemIdx) return;
+
+        // Determine insert position based on mouse position
+        const rect = cardDiv.getBoundingClientRect();
+        const midY = rect.top + rect.height / 2;
+        let toIdx = e.clientY < midY ? itemIdx : itemIdx + 1;
+        // Adjust for removal shifting indices
+        if (fromIdx < toIdx) toIdx--;
+
+        if (fromIdx === toIdx) return;
+
+        const arr = stateArrayGetter();
+        if (!arr || fromIdx >= arr.length) return;
+
+        // Splice: remove from old position, insert at new
+        const [item] = arr.splice(fromIdx, 1);
+        arr.splice(toIdx, 0, item);
+
+        node.saveState();
+        debouncedRenderUI(node);
+    });
+}
+
 // --- SESSION SECTION RENDERER ---
 
 export function renderSessionSection(node, container, availableSessions, refreshAllConfigBuilders) {
@@ -762,6 +848,9 @@ export function createModelElement(node, modelEntry, arrayIdx, modelIdx, modelLi
     header.appendChild(deleteBtn);
     div.appendChild(header);
 
+    // Drag-and-drop reorder
+    setupDragReorder(div, header, () => node.state.config_arrays[arrayIdx].models, modelIdx, node);
+
     // Apply bypass visual state
     if (isBypassed) {
         div.style.opacity = "0.5";
@@ -1031,6 +1120,9 @@ export function createLoraElement(node, loraStr, arrayIdx, loraIdx, availableLor
     };
     header.appendChild(deleteBtn);
     div.appendChild(header);
+
+    // Drag-and-drop reorder
+    setupDragReorder(div, header, () => node.state.config_arrays[arrayIdx].loras, loraIdx, node);
 
     // Apply bypass visual state
     if (isBypassed) {
@@ -2185,7 +2277,18 @@ function renderTextEncodersSection(node, container, configArray, arrayIdx, model
         const isTeBypassed = node.state.config_arrays[arrayIdx].te_bypass_states[tePath] || false;
 
         const teRow = document.createElement("div");
+        teRow.className = "cb-te-row";
         teRow.style.cssText = "display: flex; gap: 4px; align-items: center; margin-bottom: 4px;";
+
+        // Drag handle for text encoder reorder
+        const teDragHandle = document.createElement("span");
+        teDragHandle.textContent = "⠿";
+        teDragHandle.className = "cb-drag-handle";
+        teDragHandle.draggable = true;
+        teDragHandle.style.cssText = "color: #666; font-size: 14px; cursor: grab; user-select: none; padding: 0 4px;";
+        teRow.appendChild(teDragHandle);
+        // Reuse drag reorder with the handle as the draggable trigger and the row as the card
+        setupDragReorder(teRow, teDragHandle, () => node.state.config_arrays[arrayIdx].text_encoders, teIdx, node);
 
         // Apply bypass visual state
         if (isTeBypassed) {
@@ -2849,6 +2952,9 @@ function createVAEElement(node, vaeName, arrayIdx, vaeIdx, vaeList, vFolders) {
     };
     header.appendChild(deleteBtn);
     div.appendChild(header);
+
+    // Drag-and-drop reorder
+    setupDragReorder(div, header, () => node.state.config_arrays[arrayIdx].vaes, vaeIdx, node);
 
     // Apply bypass visual state
     if (isBypassed) {
