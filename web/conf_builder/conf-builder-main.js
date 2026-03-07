@@ -329,6 +329,28 @@ app.registerExtension({
 
                                 this.state.config_arrays = loadedArrays;
 
+                                // Restore global prompts from loaded configs
+                                // When configs have _prompt_source: "global", extract those prompts
+                                // as global prompts rather than per-config custom prompts
+                                const firstGlobalConfig = configs.find(c => c._prompt_source === "global");
+                                if (firstGlobalConfig) {
+                                    if (firstGlobalConfig.positive) {
+                                        if (Array.isArray(firstGlobalConfig.positive)) {
+                                            this.state.global_positive_groups = firstGlobalConfig.positive;
+                                        } else if (typeof firstGlobalConfig.positive === 'string' && firstGlobalConfig.positive.trim()) {
+                                            this.state.global_positive_groups = [[firstGlobalConfig.positive]];
+                                        }
+                                    }
+                                    if (firstGlobalConfig.negative) {
+                                        this.state.global_negative = typeof firstGlobalConfig.negative === 'string'
+                                            ? firstGlobalConfig.negative : "";
+                                    }
+                                } else {
+                                    // No global prompts in loaded session
+                                    this.state.global_positive_groups = [];
+                                    this.state.global_negative = "";
+                                }
+
                             } catch (e) {
                                 console.error("[ConfigBuilder] Error parsing configs_json:", e);
                             }

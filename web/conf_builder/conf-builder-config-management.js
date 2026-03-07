@@ -3920,6 +3920,14 @@ export function renderConfigPromptsSection(node, div, configArray, arrayIdx) {
     toggleLabel.appendChild(document.createTextNode("Use Custom Prompts (Override Global/Node)"));
     contentDiv.appendChild(toggleLabel);
 
+    // Helper to update the prompt count in the section header
+    const updatePromptCountDisplay = () => {
+        const groups = node.state.config_arrays[arrayIdx].positive_prompt_groups;
+        const count = node.state.config_arrays[arrayIdx].use_custom_prompts && groups
+            ? countPromptCombinations(groups) : 0;
+        titleSpan.textContent = `Prompts${count > 0 ? ` (${count} combinations)` : ''}`;
+    };
+
     if (configArray.use_custom_prompts) {
         // Positive Prompt Editor
         const positiveSection = document.createElement("div");
@@ -3930,6 +3938,7 @@ export function renderConfigPromptsSection(node, div, configArray, arrayIdx) {
             (newGroups) => {
                 node.state.config_arrays[arrayIdx].positive_prompt_groups = newGroups;
                 node.saveState();
+                updatePromptCountDisplay();
             },
             "✅ Positive Prompt Groups",
             "#9966cc"

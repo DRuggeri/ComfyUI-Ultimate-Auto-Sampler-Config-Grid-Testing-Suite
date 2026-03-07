@@ -631,11 +631,13 @@ class UltimateConfigBuilder:
                 config["positive"] = per_config_positive_groups
                 if per_config_negative:
                     config["negative"] = per_config_negative
+                config["_prompt_source"] = "custom"
             elif global_positive_groups:
                 # Global prompts override node inputs
                 config["positive"] = global_positive_groups
                 if global_negative:
                     config["negative"] = global_negative
+                config["_prompt_source"] = "global"
             # If neither, omit "positive"/"negative" keys - node inputs will be used as fallback
 
             configs_output.append(config)

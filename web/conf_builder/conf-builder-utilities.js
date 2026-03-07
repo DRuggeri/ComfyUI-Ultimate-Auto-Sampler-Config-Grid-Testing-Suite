@@ -639,11 +639,13 @@ export function convertStateToConfigs(state) {
             if (configArray.negative_prompt) {
                 config.negative = configArray.negative_prompt;
             }
+            config._prompt_source = "custom";
         } else if (globalPositiveGroups.length > 0) {
             config.positive = globalPositiveGroups;
             if (globalNegative) {
                 config.negative = globalNegative;
             }
+            config._prompt_source = "global";
         }
 
         // ==== MODEL PROMPT PREFIX/SUFFIX ====
@@ -790,8 +792,13 @@ export function convertConfigsToConfigArrays(configs) {
         let negativePrompt = "";
         let useCustomPrompts = false;
 
-        if (config.positive) {
-            // Config has per-config prompts
+        // _prompt_source distinguishes global vs per-config prompts on round-trip.
+        // "global" = prompts came from the Global Prompts section (should NOT populate custom prompts)
+        // "custom" or missing = prompts are per-config custom prompts
+        const promptSource = config._prompt_source || "custom";
+
+        if (config.positive && promptSource !== "global") {
+            // Config has per-config custom prompts
             useCustomPrompts = true;
             if (Array.isArray(config.positive)) {
                 // Check if this is a recursive/nested structure (any element is a sub-array)
@@ -810,7 +817,7 @@ export function convertConfigsToConfigArrays(configs) {
             }
         }
 
-        if (config.negative) {
+        if (config.negative && promptSource !== "global") {
             if (typeof config.negative === 'string') {
                 negativePrompt = config.negative;
             } else if (Array.isArray(config.negative)) {
