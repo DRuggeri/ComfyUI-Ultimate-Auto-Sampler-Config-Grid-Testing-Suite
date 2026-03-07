@@ -28,17 +28,39 @@ import {
 
 import { renderDistributionSection, renderDistributionSettingsSection } from './conf-builder-distribution.js';
 
-const RESOLUTION_PRESETS = [
-    { group: "SD 1.5 — Square",    items: ["512x512"] },
-    { group: "SD 1.5 — Portrait",  items: ["512x896", "512x768"] },
-    { group: "SD 1.5 — Landscape", items: ["896x512", "768x512"] },
-    { group: "SDXL — Square",      items: ["1024x1024"] },
-    { group: "SDXL — Portrait",    items: ["768x1344", "832x1216", "896x1152"] },
-    { group: "SDXL — Landscape",   items: ["1344x768", "1216x832", "1152x896"] },
-    { group: "Flux — Square",      items: ["1024x1024"] },
-    { group: "Flux — Portrait",    items: ["768x1344", "832x1216"] },
-    { group: "Flux — Landscape",   items: ["1344x768", "1216x832"] },
-];
+// 3-level hierarchy: Model Type > Orientation > Sizes
+const RESOLUTION_PRESETS = {
+    "SD 1.5": {
+        "Square":    ["512x512", "640x640", "768x768"],
+        "Portrait":  ["384x640", "384x704", "448x576", "448x640", "512x768", "512x896", "576x1024"],
+        "Landscape": ["640x384", "704x384", "576x448", "640x448", "768x512", "896x512", "1024x576"]
+    },
+    "SDXL": {
+        "Square":    ["1024x1024", "896x896", "768x768"],
+        "Portrait":  ["640x1536", "768x1344", "832x1216", "896x1152", "960x1088"],
+        "Landscape": ["1536x640", "1344x768", "1216x832", "1152x896", "1088x960"]
+    },
+    "Illustrious / Pony": {
+        "Square":    ["1024x1024", "896x896"],
+        "Portrait":  ["832x1216", "768x1344", "640x1536", "896x1152"],
+        "Landscape": ["1216x832", "1344x768", "1536x640", "1152x896"]
+    },
+    "Flux": {
+        "Square":    ["1024x1024", "768x768", "512x512"],
+        "Portrait":  ["768x1344", "832x1216", "896x1152", "640x1536"],
+        "Landscape": ["1344x768", "1216x832", "1152x896", "1536x640"]
+    },
+    "Wan / Video": {
+        "Square":    ["480x480", "512x512", "832x832"],
+        "Portrait":  ["480x832", "480x720", "576x1024", "720x1280"],
+        "Landscape": ["832x480", "720x480", "1024x576", "1280x720"]
+    },
+    "HiRes / Upscale": {
+        "Square":    ["1536x1536", "2048x2048", "2560x2560"],
+        "Portrait":  ["1024x1536", "1152x1728", "1536x2048"],
+        "Landscape": ["1536x1024", "1728x1152", "2048x1536"]
+    }
+};
 
 // HF Remote VAE endpoint presets (mirrors remote_vae.py HF_ENDPOINTS)
 const REMOTE_VAE_PRESETS = {
@@ -403,6 +425,384 @@ function createChipListBuilder({ label, stateKey, options, node, arrayIdx, confi
     return container;
 }
 
+// ===== CUSTOM RESOLUTIONS CACHE =====
+let _customResolutionsCache = null;
+let _customResolutionsLoaded = false;
+
+async function loadCustomResolutions() {
+    if (_customResolutionsLoaded && _customResolutionsCache) return _customResolutionsCache;
+    try {
+        const resp = await fetch("/configbuilder/custom_resolutions");
+        if (resp.ok) {
+            _customResolutionsCache = await resp.json();
+        } else {
+            _customResolutionsCache = { categories: [] };
+        }
+    } catch {
+        _customResolutionsCache = { categories: [] };
+    }
+    _customResolutionsLoaded = true;
+    return _customResolutionsCache;
+}
+
+async function saveCustomResolutions(data) {
+    _customResolutionsCache = data;
+    try {
+        await fetch("/configbuilder/custom_resolutions", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(data)
+        });
+    } catch (e) {
+        console.error("[ConfigBuilder] Error saving custom resolutions:", e);
+    }
+}
+
+// ===== CUSTOM RESOLUTIONS EDITOR MODAL =====
+function openCustomResolutionsEditor(onSaved) {
+    // Load current data
+    loadCustomResolutions().then(data => {
+        // Deep clone so edits don't mutate cache until save
+        const editData = JSON.parse(JSON.stringify(data));
+
+        // Create overlay
+        const overlay = document.createElement("div");
+        overlay.style.cssText = "position: fixed; inset: 0; background: rgba(0,0,0,0.7); z-index: 100000; display: flex; align-items: center; justify-content: center;";
+
+        const modal = document.createElement("div");
+        modal.style.cssText = "background: #2a2a2a; border: 1px solid #555; border-radius: 8px; width: 560px; max-height: 80vh; display: flex; flex-direction: column; box-shadow: 0 8px 32px rgba(0,0,0,0.5);";
+
+        // Header
+        const header = document.createElement("div");
+        header.style.cssText = "padding: 14px 18px; border-bottom: 1px solid #444; display: flex; justify-content: space-between; align-items: center;";
+        const title = document.createElement("div");
+        title.style.cssText = "font-size: 15px; font-weight: bold; color: #ffcc44;";
+        title.textContent = "Custom Resolutions Editor";
+        const closeBtn = document.createElement("button");
+        closeBtn.textContent = "×";
+        closeBtn.style.cssText = "background: none; border: none; color: #999; font-size: 20px; cursor: pointer; padding: 0 4px;";
+        closeBtn.onclick = () => overlay.remove();
+        header.appendChild(title);
+        header.appendChild(closeBtn);
+        modal.appendChild(header);
+
+        // Body (scrollable)
+        const body = document.createElement("div");
+        body.style.cssText = "padding: 14px 18px; overflow-y: auto; flex: 1;";
+
+        const renderCategories = () => {
+            body.innerHTML = "";
+
+            if (editData.categories.length === 0) {
+                const empty = document.createElement("div");
+                empty.style.cssText = "color: #666; font-style: italic; padding: 20px; text-align: center;";
+                empty.textContent = "No custom categories yet. Add one below!";
+                body.appendChild(empty);
+            }
+
+            editData.categories.forEach((cat, catIdx) => {
+                const catDiv = document.createElement("div");
+                catDiv.style.cssText = "margin-bottom: 14px; background: #333; border-radius: 6px; padding: 10px; border: 1px solid #444;";
+
+                // Category header
+                const catHeader = document.createElement("div");
+                catHeader.style.cssText = "display: flex; align-items: center; gap: 8px; margin-bottom: 8px;";
+
+                const catInput = document.createElement("input");
+                catInput.type = "text";
+                catInput.value = cat.name || "";
+                catInput.placeholder = "Category name";
+                catInput.style.cssText = "flex: 1; background: #222; color: #eee; border: 1px solid #555; border-radius: 4px; padding: 4px 8px; font-size: 13px;";
+                catInput.onchange = () => { editData.categories[catIdx].name = catInput.value; };
+
+                const deleteCatBtn = document.createElement("button");
+                deleteCatBtn.textContent = "Delete";
+                deleteCatBtn.style.cssText = "background: #442222; color: #ff6666; border: 1px solid #663333; border-radius: 4px; padding: 3px 10px; font-size: 11px; cursor: pointer;";
+                deleteCatBtn.onclick = () => { editData.categories.splice(catIdx, 1); renderCategories(); };
+
+                catHeader.appendChild(catInput);
+                catHeader.appendChild(deleteCatBtn);
+                catDiv.appendChild(catHeader);
+
+                // Resolution items
+                (cat.items || []).forEach((res, resIdx) => {
+                    const resRow = document.createElement("div");
+                    resRow.style.cssText = "display: flex; align-items: center; gap: 6px; margin-bottom: 4px; margin-left: 12px;";
+
+                    const resLabel = document.createElement("span");
+                    resLabel.style.cssText = "color: #ccc; font-size: 12px; min-width: 90px;";
+                    resLabel.textContent = res.replace("x", " × ");
+
+                    const removeResBtn = document.createElement("button");
+                    removeResBtn.textContent = "×";
+                    removeResBtn.style.cssText = "background: none; border: none; color: #ff6666; cursor: pointer; font-size: 14px; font-weight: bold; padding: 0 4px;";
+                    removeResBtn.onclick = () => { editData.categories[catIdx].items.splice(resIdx, 1); renderCategories(); };
+
+                    resRow.appendChild(resLabel);
+                    resRow.appendChild(removeResBtn);
+                    catDiv.appendChild(resRow);
+                });
+
+                // Add resolution row
+                const addResRow = document.createElement("div");
+                addResRow.style.cssText = "display: flex; align-items: center; gap: 4px; margin-left: 12px; margin-top: 6px;";
+
+                const addW = document.createElement("input");
+                addW.type = "number"; addW.placeholder = "W"; addW.min = 64; addW.max = 8192; addW.step = 8;
+                addW.style.cssText = "width: 70px; background: #222; color: #eee; border: 1px solid #555; border-radius: 4px; padding: 3px 6px; font-size: 11px;";
+
+                const xLbl = document.createElement("span");
+                xLbl.textContent = "×"; xLbl.style.cssText = "color: #888; font-size: 11px;";
+
+                const addH = document.createElement("input");
+                addH.type = "number"; addH.placeholder = "H"; addH.min = 64; addH.max = 8192; addH.step = 8;
+                addH.style.cssText = "width: 70px; background: #222; color: #eee; border: 1px solid #555; border-radius: 4px; padding: 3px 6px; font-size: 11px;";
+
+                const addResBtn = document.createElement("button");
+                addResBtn.textContent = "+ Add";
+                addResBtn.style.cssText = "background: #335522; color: #88cc44; border: 1px solid #447733; border-radius: 4px; padding: 3px 10px; font-size: 11px; cursor: pointer;";
+                addResBtn.onclick = () => {
+                    const w = parseInt(addW.value), h = parseInt(addH.value);
+                    if (w > 0 && h > 0) {
+                        if (!editData.categories[catIdx].items) editData.categories[catIdx].items = [];
+                        const res = `${w}x${h}`;
+                        if (!editData.categories[catIdx].items.includes(res)) {
+                            editData.categories[catIdx].items.push(res);
+                            renderCategories();
+                        }
+                    }
+                };
+
+                addResRow.appendChild(addW);
+                addResRow.appendChild(xLbl);
+                addResRow.appendChild(addH);
+                addResRow.appendChild(addResBtn);
+                catDiv.appendChild(addResRow);
+
+                body.appendChild(catDiv);
+            });
+        };
+        renderCategories();
+        modal.appendChild(body);
+
+        // Footer
+        const footer = document.createElement("div");
+        footer.style.cssText = "padding: 12px 18px; border-top: 1px solid #444; display: flex; justify-content: space-between; align-items: center;";
+
+        const addCatBtn = document.createElement("button");
+        addCatBtn.textContent = "+ Add Category";
+        addCatBtn.style.cssText = "background: #224455; color: #44aadd; border: 1px solid #336677; border-radius: 4px; padding: 6px 14px; font-size: 12px; cursor: pointer;";
+        addCatBtn.onclick = () => { editData.categories.push({ name: "New Category", items: [] }); renderCategories(); };
+
+        const saveBtn = document.createElement("button");
+        saveBtn.textContent = "Save";
+        saveBtn.style.cssText = "background: #335522; color: #88ff44; border: 1px solid #447733; border-radius: 4px; padding: 6px 20px; font-size: 13px; font-weight: bold; cursor: pointer;";
+        saveBtn.onclick = async () => {
+            await saveCustomResolutions(editData);
+            overlay.remove();
+            if (onSaved) onSaved();
+        };
+
+        footer.appendChild(addCatBtn);
+        footer.appendChild(saveBtn);
+        modal.appendChild(footer);
+
+        overlay.appendChild(modal);
+        overlay.onclick = (e) => { if (e.target === overlay) overlay.remove(); };
+        document.body.appendChild(overlay);
+    });
+}
+
+// ===== NESTED RESOLUTION DROPDOWN =====
+function createResolutionDropdown({ onSelect, currentItems, onEditCustom }) {
+    const wrapper = document.createElement("div");
+    wrapper.style.cssText = "position: relative; display: inline-block;";
+
+    // Trigger button — large, visible
+    const triggerBtn = document.createElement("button");
+    triggerBtn.className = "cb-button";
+    triggerBtn.style.cssText = "padding: 4px 12px; font-size: 12px; display: flex; align-items: center; gap: 6px; cursor: pointer; min-width: 140px; justify-content: space-between; background: #333; border: 1px solid #555; color: #ccc; border-radius: 4px;";
+    triggerBtn.innerHTML = '<span>Add Resolution</span><span style="font-size: 10px;">&#9660;</span>';
+    wrapper.appendChild(triggerBtn);
+
+    // Dropdown panel
+    const dropdown = document.createElement("div");
+    dropdown.style.cssText = "display: none; position: absolute; top: 100%; left: 0; background: #2a2a2a; border: 1px solid #555; border-radius: 6px; min-width: 200px; z-index: 99999; box-shadow: 0 6px 24px rgba(0,0,0,0.6); max-height: 400px; overflow-y: auto;";
+    wrapper.appendChild(dropdown);
+
+    let isOpen = false;
+
+    const closeDropdown = () => {
+        dropdown.style.display = "none";
+        isOpen = false;
+    };
+
+    const buildMenu = async () => {
+        dropdown.innerHTML = "";
+        const alreadyAdded = currentItems() || [];
+        const customData = await loadCustomResolutions();
+
+        // --- Custom category (always first) ---
+        const customCats = customData.categories || [];
+        if (customCats.length > 0) {
+            const customEntry = createMenuCategory("Custom", null);
+            customCats.forEach(cat => {
+                const available = (cat.items || []).filter(r => !alreadyAdded.includes(r));
+                if (available.length === 0) return;
+                const subEntry = createSubMenu(cat.name || "Unnamed", available, onSelect, closeDropdown);
+                customEntry._submenu.appendChild(subEntry);
+            });
+            dropdown.appendChild(customEntry);
+            // Separator
+            const sep = document.createElement("div");
+            sep.style.cssText = "height: 1px; background: #444; margin: 4px 0;";
+            dropdown.appendChild(sep);
+        }
+
+        // "Create New Custom" button
+        const createBtn = document.createElement("div");
+        createBtn.style.cssText = "padding: 6px 14px; color: #44aadd; cursor: pointer; font-size: 12px; display: flex; align-items: center; gap: 6px;";
+        createBtn.innerHTML = '<span style="font-size: 14px;">&#9998;</span> Edit Custom Resolutions...';
+        createBtn.onmouseenter = () => { createBtn.style.background = "#333"; };
+        createBtn.onmouseleave = () => { createBtn.style.background = ""; };
+        createBtn.onclick = () => {
+            closeDropdown();
+            onEditCustom();
+        };
+        dropdown.appendChild(createBtn);
+
+        // Separator
+        const sep2 = document.createElement("div");
+        sep2.style.cssText = "height: 1px; background: #444; margin: 4px 0;";
+        dropdown.appendChild(sep2);
+
+        // --- Built-in presets (3-level: Model > Orientation > Sizes) ---
+        for (const [modelType, orientations] of Object.entries(RESOLUTION_PRESETS)) {
+            const modelEntry = createMenuCategory(modelType, null);
+
+            for (const [orientation, sizes] of Object.entries(orientations)) {
+                const available = sizes.filter(r => !alreadyAdded.includes(r));
+                if (available.length === 0) continue;
+                const orientEntry = createSubMenu(orientation, available, onSelect, closeDropdown);
+                modelEntry._submenu.appendChild(orientEntry);
+            }
+
+            dropdown.appendChild(modelEntry);
+        }
+    };
+
+    // Create a top-level category with a submenu
+    function createMenuCategory(label, _unused) {
+        const item = document.createElement("div");
+        item.style.cssText = "position: relative;";
+
+        const row = document.createElement("div");
+        row.style.cssText = "padding: 6px 14px; color: #eee; cursor: pointer; font-size: 12px; display: flex; justify-content: space-between; align-items: center; white-space: nowrap;";
+        row.innerHTML = `<span>${label}</span><span style="font-size: 9px; color: #888; margin-left: 12px;">&#9654;</span>`;
+        item.appendChild(row);
+
+        const submenu = document.createElement("div");
+        submenu.style.cssText = "display: none; position: absolute; left: 100%; top: 0; background: #2a2a2a; border: 1px solid #555; border-radius: 6px; min-width: 180px; z-index: 100000; box-shadow: 0 4px 16px rgba(0,0,0,0.5); max-height: 350px; overflow-y: auto;";
+        item.appendChild(submenu);
+        item._submenu = submenu;
+
+        row.onmouseenter = () => {
+            // Close sibling submenus
+            const siblings = item.parentElement?.children || [];
+            for (const s of siblings) {
+                const sm = s.querySelector("div:nth-child(2)");
+                if (sm && sm !== submenu) sm.style.display = "none";
+                if (s.querySelector("div:first-child")) s.querySelector("div:first-child").style.background = "";
+            }
+            submenu.style.display = "block";
+            row.style.background = "#444";
+        };
+        item.onmouseleave = () => {
+            submenu.style.display = "none";
+            row.style.background = "";
+        };
+
+        return item;
+    }
+
+    // Create a sub-category (orientation) with resolution items
+    function createSubMenu(label, sizes, onSelect, closeDropdown) {
+        const item = document.createElement("div");
+        item.style.cssText = "position: relative;";
+
+        const row = document.createElement("div");
+        row.style.cssText = "padding: 5px 12px; color: #ccc; cursor: pointer; font-size: 12px; display: flex; justify-content: space-between; align-items: center; white-space: nowrap;";
+        row.innerHTML = `<span>${label}</span><span style="font-size: 9px; color: #888; margin-left: 12px;">&#9654;</span>`;
+        item.appendChild(row);
+
+        const submenu = document.createElement("div");
+        submenu.style.cssText = "display: none; position: absolute; left: 100%; top: 0; background: #2a2a2a; border: 1px solid #555; border-radius: 6px; min-width: 140px; z-index: 100001; box-shadow: 0 4px 16px rgba(0,0,0,0.5);";
+
+        sizes.forEach(res => {
+            const resItem = document.createElement("div");
+            resItem.style.cssText = "padding: 5px 14px; color: #ffcc44; cursor: pointer; font-size: 12px; white-space: nowrap;";
+            resItem.textContent = res.replace("x", " × ");
+            resItem.onmouseenter = () => { resItem.style.background = "#554400"; };
+            resItem.onmouseleave = () => { resItem.style.background = ""; };
+            resItem.onclick = (e) => {
+                e.stopPropagation();
+                onSelect(res);
+                closeDropdown();
+            };
+            submenu.appendChild(resItem);
+        });
+
+        item.appendChild(submenu);
+
+        row.onmouseenter = () => {
+            const siblings = item.parentElement?.children || [];
+            for (const s of siblings) {
+                const sm = s.querySelector("div:nth-child(2)");
+                if (sm && sm !== submenu) sm.style.display = "none";
+                if (s.querySelector("div:first-child")) s.querySelector("div:first-child").style.background = "";
+            }
+            submenu.style.display = "block";
+            row.style.background = "#3a3a3a";
+        };
+        item.onmouseleave = () => {
+            submenu.style.display = "none";
+            row.style.background = "";
+        };
+
+        return item;
+    }
+
+    triggerBtn.onclick = async (e) => {
+        e.stopPropagation();
+        if (isOpen) {
+            closeDropdown();
+        } else {
+            await buildMenu();
+            dropdown.style.display = "block";
+            isOpen = true;
+        }
+    };
+
+    // Close on outside click
+    const outsideHandler = (e) => {
+        if (isOpen && !wrapper.contains(e.target)) {
+            closeDropdown();
+        }
+    };
+    document.addEventListener("mousedown", outsideHandler);
+    // Cleanup when element is removed
+    const observer = new MutationObserver(() => {
+        if (!document.body.contains(wrapper)) {
+            document.removeEventListener("mousedown", outsideHandler);
+            observer.disconnect();
+        }
+    });
+    observer.observe(document.body, { childList: true, subtree: true });
+
+    return wrapper;
+}
+
+// ===== RESOLUTION BUILDER (main component) =====
 function createResolutionBuilder({ node, arrayIdx, configArray }) {
     const container = document.createElement("div");
     container.style.cssText = "width: 100%; margin-bottom: 2px;";
@@ -444,7 +844,6 @@ function createResolutionBuilder({ node, arrayIdx, configArray }) {
                 node.state.config_arrays[arrayIdx].resolutions.splice(idx, 1);
                 node.saveState();
                 renderChips();
-                populateSelect();
             };
             chip.appendChild(closeBtn);
             chipsContainer.appendChild(chip);
@@ -453,66 +852,36 @@ function createResolutionBuilder({ node, arrayIdx, configArray }) {
     renderChips();
     container.appendChild(chipsContainer);
 
-    // ===== PRESET DROPDOWN =====
+    // ===== INPUT ROW: Dropdown + Custom WxH + Edit + Clear =====
     const inputRow = document.createElement("div");
-    inputRow.style.cssText = "display: flex; gap: 4px; align-items: center;";
+    inputRow.style.cssText = "display: flex; gap: 4px; align-items: center; flex-wrap: wrap;";
 
-    const select = document.createElement("select");
-    select.className = "cb-select";
-    select.style.cssText = "flex: 1; font-size: 11px; padding: 3px 4px;";
-
-    const populateSelect = () => {
-        select.innerHTML = "";
-        const currentItems = configArray.resolutions || [];
-
-        // Placeholder option
-        const placeholder = document.createElement("option");
-        placeholder.value = "";
-        placeholder.textContent = "Add resolution...";
-        placeholder.disabled = true;
-        placeholder.selected = true;
-        select.appendChild(placeholder);
-
-        // Optgroups from presets
-        for (const preset of RESOLUTION_PRESETS) {
-            const available = preset.items.filter(r => !currentItems.includes(r));
-            if (available.length === 0) continue;
-
-            const optgroup = document.createElement("optgroup");
-            optgroup.label = preset.group;
-            for (const res of available) {
-                const opt = document.createElement("option");
-                opt.value = res;
-                opt.textContent = res.replace("x", " × ");
-                optgroup.appendChild(opt);
+    // Nested dropdown
+    const resDropdown = createResolutionDropdown({
+        onSelect: (res) => {
+            if (!configArray.resolutions.includes(res)) {
+                node.state.config_arrays[arrayIdx].resolutions.push(res);
+                node.saveState();
+                renderChips();
             }
-            select.appendChild(optgroup);
+        },
+        currentItems: () => configArray.resolutions || [],
+        onEditCustom: () => {
+            openCustomResolutionsEditor(() => {
+                // Invalidate cache so next dropdown open picks up changes
+                _customResolutionsLoaded = false;
+            });
         }
-    };
-    populateSelect();
+    });
+    inputRow.appendChild(resDropdown);
 
-    // Add on selection change (instant add)
-    select.onchange = () => {
-        const val = select.value;
-        if (val && !configArray.resolutions.includes(val)) {
-            node.state.config_arrays[arrayIdx].resolutions.push(val);
-            node.saveState();
-            renderChips();
-            populateSelect();
-        }
-    };
-
-    inputRow.appendChild(select);
-
-    // ===== CUSTOM W x H INPUT =====
+    // Custom W x H input
     const customW = document.createElement("input");
     customW.type = "number";
     customW.className = "cb-input";
     customW.placeholder = "W";
     customW.style.cssText = "width: 55px; font-size: 11px; padding: 3px 4px;";
-    customW.min = 64;
-    customW.max = 8192;
-    customW.step = 8;
+    customW.min = 64; customW.max = 8192; customW.step = 8;
 
     const xLabel = document.createElement("span");
     xLabel.textContent = "×";
@@ -523,9 +892,7 @@ function createResolutionBuilder({ node, arrayIdx, configArray }) {
     customH.className = "cb-input";
     customH.placeholder = "H";
     customH.style.cssText = "width: 55px; font-size: 11px; padding: 3px 4px;";
-    customH.min = 64;
-    customH.max = 8192;
-    customH.step = 8;
+    customH.min = 64; customH.max = 8192; customH.step = 8;
 
     const addCustomBtn = document.createElement("button");
     addCustomBtn.className = "cb-button primary";
@@ -541,11 +908,22 @@ function createResolutionBuilder({ node, arrayIdx, configArray }) {
                 node.state.config_arrays[arrayIdx].resolutions.push(res);
                 node.saveState();
                 renderChips();
-                populateSelect();
             }
             customW.value = "";
             customH.value = "";
         }
+    };
+
+    // Edit custom resolutions button
+    const editBtn = document.createElement("button");
+    editBtn.className = "cb-button";
+    editBtn.textContent = "✏️";
+    editBtn.title = "Edit custom resolutions";
+    editBtn.style.cssText = "padding: 3px 6px; font-size: 12px; min-width: 28px; cursor: pointer;";
+    editBtn.onclick = () => {
+        openCustomResolutionsEditor(() => {
+            _customResolutionsLoaded = false;
+        });
     };
 
     // Clear all button
@@ -559,13 +937,13 @@ function createResolutionBuilder({ node, arrayIdx, configArray }) {
         configArray.resolutions = [];
         node.saveState();
         renderChips();
-        populateSelect();
     };
 
     inputRow.appendChild(customW);
     inputRow.appendChild(xLabel);
     inputRow.appendChild(customH);
     inputRow.appendChild(addCustomBtn);
+    inputRow.appendChild(editBtn);
     inputRow.appendChild(clearBtn);
     container.appendChild(inputRow);
 

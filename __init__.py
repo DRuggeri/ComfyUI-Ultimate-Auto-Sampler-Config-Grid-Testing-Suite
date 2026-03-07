@@ -34,6 +34,9 @@ def _is_path_within(path, base):
 CONFIGS_DIR = os.path.join(folder_paths.get_output_directory(), "ultimate-configs")
 os.makedirs(CONFIGS_DIR, exist_ok=True)
 
+# --- CUSTOM RESOLUTIONS FILE ---
+CUSTOM_RESOLUTIONS_FILE = os.path.join(folder_paths.get_output_directory(), "USCG-custom-resolutions.json")
+
 
 # =============================================================================
 # API: CONFIG MANAGEMENT
@@ -77,6 +80,28 @@ async def save_config(request):
         return web.Response(status=200, text="Saved")
     except Exception as e:
         print(f"[ConfigBuilder] Error saving config: {e}")
+        return web.Response(status=500, text=str(e))
+
+@server.PromptServer.instance.routes.get("/configbuilder/custom_resolutions")
+async def get_custom_resolutions(request):
+    try:
+        if os.path.exists(CUSTOM_RESOLUTIONS_FILE):
+            with open(CUSTOM_RESOLUTIONS_FILE, "r") as f:
+                data = json.load(f)
+            return web.json_response(data)
+        return web.json_response({"categories": []})
+    except Exception as e:
+        return web.json_response({"categories": []})
+
+@server.PromptServer.instance.routes.post("/configbuilder/custom_resolutions")
+async def save_custom_resolutions(request):
+    try:
+        data = await request.json()
+        with open(CUSTOM_RESOLUTIONS_FILE, "w") as f:
+            json.dump(data, f, indent=2)
+        return web.Response(status=200, text="Saved")
+    except Exception as e:
+        print(f"[ConfigBuilder] Error saving custom resolutions: {e}")
         return web.Response(status=500, text=str(e))
 
 @server.PromptServer.instance.routes.post("/configbuilder/load_config")
