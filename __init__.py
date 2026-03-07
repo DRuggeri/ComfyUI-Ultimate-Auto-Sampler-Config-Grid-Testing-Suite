@@ -35,7 +35,7 @@ CONFIGS_DIR = os.path.join(folder_paths.get_output_directory(), "ultimate-config
 os.makedirs(CONFIGS_DIR, exist_ok=True)
 
 # --- CUSTOM RESOLUTIONS FILE ---
-CUSTOM_RESOLUTIONS_FILE = os.path.join(folder_paths.get_output_directory(), "USCG-custom-resolutions.json")
+CUSTOM_RESOLUTIONS_FILE = os.path.join(folder_paths.get_output_directory(), "benchmarks", "USCG-custom-resolutions.json")
 
 
 # =============================================================================

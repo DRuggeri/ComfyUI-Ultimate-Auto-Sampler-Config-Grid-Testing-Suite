@@ -852,9 +852,9 @@ function createResolutionBuilder({ node, arrayIdx, configArray }) {
     renderChips();
     container.appendChild(chipsContainer);
 
-    // ===== INPUT ROW: Dropdown + Custom WxH + Edit + Clear =====
-    const inputRow = document.createElement("div");
-    inputRow.style.cssText = "display: flex; gap: 4px; align-items: center; flex-wrap: wrap;";
+    // ===== DROPDOWN ROW =====
+    const dropdownRow = document.createElement("div");
+    dropdownRow.style.cssText = "display: flex; gap: 4px; align-items: center; margin-bottom: 6px;";
 
     // Nested dropdown
     const resDropdown = createResolutionDropdown({
@@ -868,14 +868,31 @@ function createResolutionBuilder({ node, arrayIdx, configArray }) {
         currentItems: () => configArray.resolutions || [],
         onEditCustom: () => {
             openCustomResolutionsEditor(() => {
-                // Invalidate cache so next dropdown open picks up changes
                 _customResolutionsLoaded = false;
             });
         }
     });
-    inputRow.appendChild(resDropdown);
+    dropdownRow.appendChild(resDropdown);
 
-    // Custom W x H input
+    // Clear all button (next to dropdown)
+    const clearBtn = document.createElement("button");
+    clearBtn.className = "cb-button";
+    clearBtn.textContent = "Clear";
+    clearBtn.title = "Remove all resolutions";
+    clearBtn.style.cssText = "padding: 4px 10px; font-size: 11px; min-width: 40px; color: #ff8888;";
+    clearBtn.onclick = () => {
+        node.state.config_arrays[arrayIdx].resolutions = [];
+        configArray.resolutions = [];
+        node.saveState();
+        renderChips();
+    };
+    dropdownRow.appendChild(clearBtn);
+    container.appendChild(dropdownRow);
+
+    // ===== CUSTOM W x H ROW =====
+    const customRow = document.createElement("div");
+    customRow.style.cssText = "display: flex; gap: 4px; align-items: center;";
+
     const customW = document.createElement("input");
     customW.type = "number";
     customW.className = "cb-input";
@@ -914,38 +931,11 @@ function createResolutionBuilder({ node, arrayIdx, configArray }) {
         }
     };
 
-    // Edit custom resolutions button
-    const editBtn = document.createElement("button");
-    editBtn.className = "cb-button";
-    editBtn.textContent = "✏️";
-    editBtn.title = "Edit custom resolutions";
-    editBtn.style.cssText = "padding: 3px 6px; font-size: 12px; min-width: 28px; cursor: pointer;";
-    editBtn.onclick = () => {
-        openCustomResolutionsEditor(() => {
-            _customResolutionsLoaded = false;
-        });
-    };
-
-    // Clear all button
-    const clearBtn = document.createElement("button");
-    clearBtn.className = "cb-button";
-    clearBtn.textContent = "Clear";
-    clearBtn.title = "Remove all resolutions";
-    clearBtn.style.cssText = "padding: 3px 8px; font-size: 11px; min-width: 40px; color: #ff8888;";
-    clearBtn.onclick = () => {
-        node.state.config_arrays[arrayIdx].resolutions = [];
-        configArray.resolutions = [];
-        node.saveState();
-        renderChips();
-    };
-
-    inputRow.appendChild(customW);
-    inputRow.appendChild(xLabel);
-    inputRow.appendChild(customH);
-    inputRow.appendChild(addCustomBtn);
-    inputRow.appendChild(editBtn);
-    inputRow.appendChild(clearBtn);
-    container.appendChild(inputRow);
+    customRow.appendChild(customW);
+    customRow.appendChild(xLabel);
+    customRow.appendChild(customH);
+    customRow.appendChild(addCustomBtn);
+    container.appendChild(customRow);
 
     return container;
 }
