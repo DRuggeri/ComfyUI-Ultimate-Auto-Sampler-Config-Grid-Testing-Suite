@@ -418,7 +418,7 @@ def run_generation_loop(
     # which handles the generation loop, then jump to finalization
     dist_enabled = (
         distribution_config
-        and isinstance(distribution_config, dict)
+        and isinstance(distribution_config, dict) 
         and distribution_config.get("enabled")
         and distribution_config.get("worker_urls")
     )
@@ -1321,14 +1321,25 @@ def _conditioning_to_serializable(conditioning):
             }
         }
 
-        pooled_tensor = extra.get("pooled_output") if isinstance(extra, dict) else None
-        if pooled_tensor is not None:
-            pooled_np = pooled_tensor.cpu().numpy()
-            entry["pooled"] = {
-                "data": base64.b64encode(pooled_np.tobytes()).decode('utf-8'),
-                "shape": list(pooled_np.shape),
-                "dtype": str(pooled_np.dtype)
-            }
+        # Serialize ALL keys from the extra dict, not just pooled_output.
+        # Models like Wan/T5 rely on attention_mask and other keys for proper sampling.
+        if isinstance(extra, dict):
+            extra_serialized = {}
+            for key, val in extra.items():
+                if val is None:
+                    extra_serialized[key] = {"type": "none"}
+                elif isinstance(val, torch.Tensor):
+                    val_np = val.cpu().numpy()
+                    extra_serialized[key] = {
+                        "type": "tensor",
+                        "data": base64.b64encode(val_np.tobytes()).decode('utf-8'),
+                        "shape": list(val_np.shape),
+                        "dtype": str(val_np.dtype)
+                    }
+                else:
+                    # Scalar or other JSON-serializable value
+                    extra_serialized[key] = {"type": "value", "data": val}
+            entry["extra"] = extra_serialized
 
         entries.append(entry)
 
@@ -1360,17 +1371,30 @@ def _serializable_to_conditioning(entries):
         # and torch.from_numpy cannot send read-only arrays to GPU
         cond_tensor = torch.from_numpy(cond_np.copy())
 
-        # Reconstruct pooled output if present
-        pooled_tensor = None
-        if "pooled" in entry:
+        # Reconstruct ALL extra dict keys (attention_mask, pooled_output, etc.)
+        extra_dict = {}
+        if "extra" in entry:
+            for key, val_info in entry["extra"].items():
+                if val_info.get("type") == "none":
+                    extra_dict[key] = None
+                elif val_info.get("type") == "tensor":
+                    val_bytes = base64.b64decode(val_info["data"])
+                    val_np = np.frombuffer(val_bytes, dtype=np.dtype(val_info["dtype"])).reshape(
+                        tuple(val_info["shape"])
+                    )
+                    extra_dict[key] = torch.from_numpy(val_np.copy())
+                elif val_info.get("type") == "value":
+                    extra_dict[key] = val_info["data"]
+        elif "pooled" in entry:
+            # Backwards compatibility with old serialization format
             pooled_data = entry["pooled"]
             pooled_bytes = base64.b64decode(pooled_data["data"])
             pooled_np = np.frombuffer(pooled_bytes, dtype=np.dtype(pooled_data["dtype"])).reshape(
                 tuple(pooled_data["shape"])
             )
-            pooled_tensor = torch.from_numpy(pooled_np.copy())
+            extra_dict["pooled_output"] = torch.from_numpy(pooled_np.copy())
 
-        conditioning.append([cond_tensor, {"pooled_output": pooled_tensor}])
+        conditioning.append([cond_tensor, extra_dict])
 
     return conditioning
 
