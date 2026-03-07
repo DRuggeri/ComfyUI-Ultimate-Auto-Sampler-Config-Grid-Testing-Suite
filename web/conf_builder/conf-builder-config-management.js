@@ -625,9 +625,9 @@ function createResolutionDropdown({ onSelect, currentItems, onEditCustom }) {
     triggerBtn.innerHTML = '<span>Add Resolution</span><span style="font-size: 10px;">&#9660;</span>';
     wrapper.appendChild(triggerBtn);
 
-    // Dropdown panel
+    // Dropdown panel — no overflow clipping so submenus can extend outside
     const dropdown = document.createElement("div");
-    dropdown.style.cssText = "display: none; position: absolute; top: 100%; left: 0; background: #2a2a2a; border: 1px solid #555; border-radius: 6px; min-width: 200px; z-index: 99999; box-shadow: 0 6px 24px rgba(0,0,0,0.6); max-height: 400px; overflow-y: auto;";
+    dropdown.style.cssText = "display: none; position: absolute; top: 100%; left: 0; background: #2a2a2a; border: 1px solid #555; border-radius: 6px; min-width: 200px; z-index: 99999; box-shadow: 0 6px 24px rgba(0,0,0,0.6); overflow: visible;";
     wrapper.appendChild(dropdown);
 
     let isOpen = false;
@@ -702,7 +702,7 @@ function createResolutionDropdown({ onSelect, currentItems, onEditCustom }) {
         item.appendChild(row);
 
         const submenu = document.createElement("div");
-        submenu.style.cssText = "display: none; position: absolute; left: 100%; top: 0; background: #2a2a2a; border: 1px solid #555; border-radius: 6px; min-width: 180px; z-index: 100000; box-shadow: 0 4px 16px rgba(0,0,0,0.5); max-height: 350px; overflow-y: auto;";
+        submenu.style.cssText = "display: none; position: absolute; left: 100%; top: 0; background: #2a2a2a; border: 1px solid #555; border-radius: 6px; min-width: 180px; z-index: 100000; box-shadow: 0 4px 16px rgba(0,0,0,0.5); overflow: visible;";
         item.appendChild(submenu);
         item._submenu = submenu;
 
@@ -736,7 +736,7 @@ function createResolutionDropdown({ onSelect, currentItems, onEditCustom }) {
         item.appendChild(row);
 
         const submenu = document.createElement("div");
-        submenu.style.cssText = "display: none; position: absolute; left: 100%; top: 0; background: #2a2a2a; border: 1px solid #555; border-radius: 6px; min-width: 140px; z-index: 100001; box-shadow: 0 4px 16px rgba(0,0,0,0.5);";
+        submenu.style.cssText = "display: none; position: absolute; left: 100%; top: 0; background: #2a2a2a; border: 1px solid #555; border-radius: 6px; min-width: 140px; z-index: 100001; box-shadow: 0 4px 16px rgba(0,0,0,0.5); overflow: visible;";
 
         sizes.forEach(res => {
             const resItem = document.createElement("div");
