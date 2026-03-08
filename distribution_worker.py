@@ -593,7 +593,17 @@ class WorkerThread(threading.Thread):
             self._patched_model, config["seed"], config["steps"], config["cfg"],
             config["sampler"], config["scheduler"], pos_cond, neg_cond,
             latent_in, config["denoise"],
-            attention_mode=attention_mode
+            attention_mode=attention_mode,
+            model_sampling_override=config.get("model_sampling_override", "none"),
+            model_sampling_shift=config.get("model_sampling_shift", 1.73),
+            model_sampling_flux_max_shift=config.get("model_sampling_flux_max_shift", 1.15),
+            model_sampling_flux_base_shift=config.get("model_sampling_flux_base_shift", 0.5),
+            use_advanced_sampling=config.get("use_advanced_sampling", False),
+            advanced_guider=config.get("advanced_guider", "cfg_guider"),
+            advanced_scheduler=config.get("advanced_scheduler", "basic"),
+            flux_guidance_value=config.get("flux_guidance_value", 0.0),
+            width=w,
+            height=h
         )
 
         # --- VAE Decode ---
