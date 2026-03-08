@@ -521,7 +521,14 @@ class UltimateConfigBuilder:
         
         configs_output = []
         total_lora_configs = 0
-        
+
+        # ============================================================================
+        # SYNC WARNING: This config-building loop MUST stay in sync with the JS-side
+        # convertStateToConfigs() in web/conf_builder/conf-builder-utilities.js.
+        # That function generates the preview JSON in the Builder UI.
+        # If you add a new config field here, add it there too (and vice versa).
+        # Fields consumed by config_utils.expand_configs() must be output by BOTH.
+        # ============================================================================
         for config_array in config_arrays:
             # Parse values from this config array
             sampler_list = self.parse_comma_list(config_array.get("samplers", "euler"))
@@ -602,6 +609,37 @@ class UltimateConfigBuilder:
             # Add trigger append settings if present
             if lora_triggerwords_append_settings and any(v != "none" for v in lora_triggerwords_append_settings.values()):
                 config["lora_triggerwords_append_settings"] = lora_triggerwords_append_settings
+
+            # Per-config resolutions (override sampler's resolutions_json)
+            raw_resolutions = config_array.get("resolutions", [])
+            if raw_resolutions and len(raw_resolutions) > 0:
+                # Convert "WxH" strings to [W, H] arrays for config_utils.expand_configs()
+                parsed_res = []
+                for r in raw_resolutions:
+                    if isinstance(r, str) and "x" in r:
+                        parts = r.split("x")
+                        parsed_res.append([int(parts[0]), int(parts[1])])
+                    elif isinstance(r, (list, tuple)) and len(r) == 2:
+                        parsed_res.append([int(r[0]), int(r[1])])
+                if parsed_res:
+                    config["resolutions"] = parsed_res
+
+            # Attention mode(s) for testing different attention implementations
+            attention_modes = config_array.get("attention_modes", ["default"])
+            if isinstance(attention_modes, list):
+                filtered = [a for a in attention_modes if a and a != "default"]
+                if filtered:
+                    config["attention_mode"] = filtered if len(filtered) > 1 else filtered[0]
+            elif isinstance(attention_modes, str) and attention_modes != "default":
+                config["attention_mode"] = attention_modes
+
+            # Model prompt prefix/suffix (quality tags prepended/appended to prompts)
+            model_prompt_prefix = config_array.get("model_prompt_prefix", "")
+            if model_prompt_prefix and model_prompt_prefix.strip():
+                config["model_prompt_prefix"] = model_prompt_prefix.strip()
+            model_prompt_suffix = config_array.get("model_prompt_suffix", "")
+            if model_prompt_suffix and model_prompt_suffix.strip():
+                config["model_prompt_suffix"] = model_prompt_suffix.strip()
 
             # Add extra model & sampling options if enabled
             if model_sampling_override and model_sampling_override != "none":

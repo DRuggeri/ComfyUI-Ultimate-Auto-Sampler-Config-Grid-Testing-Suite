@@ -4427,6 +4427,9 @@ export function updatePreview(node) {
     if (!preview) return;
     const configs = convertStateToConfigs(node.state);
 
+    // NOTE: This preview shows what convertStateToConfigs() produces (JS-side).
+    // The ACTUAL configs_json output comes from generate_config() in config_builder_node.py.
+    // Both must output the same fields — see SYNC WARNING in each file.
     // Build the full output object matching what configs_json will contain
     const output = { configs };
     if (node.state.distribution_enabled) {

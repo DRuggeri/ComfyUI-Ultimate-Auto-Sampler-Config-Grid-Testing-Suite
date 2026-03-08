@@ -477,6 +477,13 @@ export function getIterationCount(configArray) {
 }
 
 // --- CONFIG CONVERSION ---
+// ============================================================================
+// SYNC WARNING: This function MUST stay in sync with the Python-side
+// generate_config() in config_builder_node.py.
+// That function produces the actual configs_json consumed by the sampler node.
+// If you add a new config field here, add it there too (and vice versa).
+// Fields consumed by config_utils.expand_configs() must be output by BOTH.
+// ============================================================================
 
 export function convertStateToConfigs(state) {
     const configs = [];
