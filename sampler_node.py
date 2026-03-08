@@ -268,16 +268,23 @@ class SamplerGridTester:
 
         # Extract distribution config from configs_json (embedded as _distribution key)
         dist_config = None
+        session_settings = None
         try:
             import json
             parsed = json.loads(configs_json)
             if isinstance(parsed, dict) and "_distribution" in parsed:
                 dist_config = parsed["_distribution"]
+                session_settings = parsed.get("_session_settings")
+                if session_settings:
+                    print(f"[GridTester] ⚙️ Session settings extracted: {list(session_settings.keys())}")
                 # Replace configs_json with just the configs array for downstream
                 configs_json = json.dumps(parsed["configs"], indent=2, ensure_ascii=False)
                 print(f"[GridTester] 🌐 Distribution config extracted: {len(dist_config.get('worker_urls', []))} worker(s), enabled={dist_config.get('enabled')}")
             elif isinstance(parsed, dict) and "configs" in parsed:
                 # Configs wrapped in dict but no distribution settings — unwrap for downstream
+                session_settings = parsed.get("_session_settings")
+                if session_settings:
+                    print(f"[GridTester] ⚙️ Session settings extracted: {list(session_settings.keys())}")
                 configs_json = json.dumps(parsed["configs"], indent=2, ensure_ascii=False)
                 print(f"[GridTester] ℹ️ No distribution settings in configs_json")
             else:
@@ -293,7 +300,8 @@ class SamplerGridTester:
             remote_vae_endpoint, save_conditioning_cache_to_file, enable_model_cache,
             optional_model, optional_clip, optional_vae,
             optional_positive, optional_negative, optional_latent,
-            distribution_config=dist_config  # Extracted from configs_json
+            distribution_config=dist_config,  # Extracted from configs_json
+            session_settings=session_settings  # Extracted from configs_json
         )
 
 

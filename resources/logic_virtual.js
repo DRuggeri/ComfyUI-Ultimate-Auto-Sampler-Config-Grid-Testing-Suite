@@ -19,6 +19,15 @@ let panStartY = 0;
 let panOffsetX = 0;
 let panOffsetY = 0;
 
+// --- RAF BATCHING STATE (prevents flicker from simultaneous pan+zoom) ---
+let rafPending = false;
+let pendingPanDeltaX = 0;
+let pendingPanDeltaY = 0;
+let pendingZoomDelta = 0;
+let pendingZoomMouseX = 0;
+let pendingZoomMouseY = 0;
+let hasPendingZoom = false;
+
 // --- GRID METRICS (Auto-calculated from image data) ---
 let itemHeight = 420;  // Will be auto-calculated
 let itemWidth = 260;   // Will be auto-calculated
@@ -368,6 +377,38 @@ function updateTransform() {
     if (typeof scheduleViewportSave === 'function') scheduleViewportSave();
 }
 
+/**
+ * Apply all pending pan+zoom transforms in a single animation frame.
+ * This prevents flicker when zooming and panning simultaneously,
+ * because both transforms are applied atomically before the next paint.
+ */
+function applyPendingTransforms() {
+    rafPending = false;
+
+    // Apply zoom first (adjusts panOffset to keep cursor stable)
+    if (hasPendingZoom) {
+        updateZoom(pendingZoomDelta, pendingZoomMouseX, pendingZoomMouseY);
+        hasPendingZoom = false;
+        pendingZoomDelta = 0;
+    }
+
+    // Apply pan delta
+    if (pendingPanDeltaX !== 0 || pendingPanDeltaY !== 0) {
+        panOffsetX += pendingPanDeltaX;
+        panOffsetY += pendingPanDeltaY;
+        pendingPanDeltaX = 0;
+        pendingPanDeltaY = 0;
+        updateTransform();
+    }
+}
+
+function scheduleRAF() {
+    if (!rafPending) {
+        rafPending = true;
+        requestAnimationFrame(applyPendingTransforms);
+    }
+}
+
 function getZoomDelta() {
     if (currentScale < 0.5) return 0.05;
     else if (currentScale < 1) return 0.15;
@@ -533,14 +574,32 @@ if (viewport) {
         if (!isPanning && !isMiddleMousePanning) return;
         e.preventDefault();
 
-        panOffsetX = e.clientX - panStartX;
-        panOffsetY = e.clientY - panStartY;
-        updateTransform();
+        // If a zoom is also pending, batch the pan via rAF to prevent flicker
+        if (hasPendingZoom) {
+            pendingPanDeltaX = e.clientX - panStartX - panOffsetX;
+            pendingPanDeltaY = e.clientY - panStartY - panOffsetY;
+            scheduleRAF();
+        } else {
+            // No pending zoom — apply pan immediately for responsiveness
+            panOffsetX = e.clientX - panStartX;
+            panOffsetY = e.clientY - panStartY;
+            updateTransform();
+        }
     });
 
     viewport.addEventListener('wheel', (e) => {
         e.preventDefault();
-        updateZoom(e.deltaY > 0 ? -1 : 1, e.clientX, e.clientY);
+        // Batch zoom via rAF to prevent flicker with simultaneous pan
+        if (isPanning || isMiddleMousePanning) {
+            pendingZoomDelta += (e.deltaY > 0 ? -1 : 1);
+            pendingZoomMouseX = e.clientX;
+            pendingZoomMouseY = e.clientY;
+            hasPendingZoom = true;
+            scheduleRAF();
+        } else {
+            // Not panning — apply zoom immediately for responsiveness
+            updateZoom(e.deltaY > 0 ? -1 : 1, e.clientX, e.clientY);
+        }
     }, { passive: false });
 
     viewport.addEventListener('contextmenu', (e) => {

@@ -602,6 +602,7 @@ def expand_configs(raw_configs, pos_prompts, neg_prompts, denoise_values, seed, 
                 "resolution": combo[19],  # (w, h) tuple or None
                 "seed": seed,
                 "seed_behavior": entry.get("seed_behavior", "fixed"),
+                "full_run_seed_behavior": entry.get("full_run_seed_behavior", "fixed"),
                 "model_type": model_type,
                 "clip_type": clip_type_str,
                 "text_encoders": list(text_encoders),

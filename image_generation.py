@@ -262,6 +262,154 @@ def generate_image(
     return result[0], duration
 
 
+def upscale_image(result_latent, vae, patched_model, upscaling_config, config, positive_conditioning, negative_conditioning, width, height):
+    """
+    Apply upscaling to a generated latent based on upscaling settings.
+
+    Args:
+        result_latent: Generated latent dict with "samples" key
+        vae: VAE model for encode/decode
+        patched_model: Patched model for re-sampling (HiRes fix)
+        upscaling_config: Dict with mode, upscale_ratio, hires_denoise, etc.
+        config: Current generation config (steps, sampler, scheduler, etc.)
+        positive_conditioning: Positive conditioning
+        negative_conditioning: Negative conditioning
+        width: Original image width
+        height: Original image height
+
+    Returns:
+        tuple: (result, duration) where result is either a latent dict or PIL Image
+    """
+    import torch
+    import time
+
+    mode = upscaling_config.get("mode", "hires_only")
+    upscale_ratio = float(upscaling_config.get("upscale_ratio", 1.5))
+    hires_denoise = float(upscaling_config.get("hires_denoise", 0.5))
+    hires_steps = int(upscaling_config.get("hires_steps", 0)) or config.get("steps", 20)
+    tiled_vae = upscaling_config.get("tiled_vae", False)
+    tile_size = int(upscaling_config.get("tile_size", 512))
+    upscale_model_name = upscaling_config.get("upscale_model", "")
+    upscale_size = float(upscaling_config.get("upscale_size", 2.0))
+
+    new_w = int(width * upscale_ratio)
+    new_h = int(height * upscale_ratio)
+
+    t0 = time.time()
+    print(f"[GridTester] 🔍 Upscaling: mode={mode}, ratio={upscale_ratio}, target={new_w}x{new_h}")
+
+    if mode == "hires_only":
+        # Upscale latent in latent space → re-sample with denoise
+        import comfy.utils
+        latent_samples = result_latent["samples"]
+        # Latent space is 8x smaller than pixel space
+        upscaled_latent = comfy.utils.common_upscale(
+            latent_samples, new_w // 8, new_h // 8, "bilinear", "disabled"
+        )
+
+        hires_latent, hires_duration = generate_image(
+            patched_model, config.get("seed", 0), hires_steps, config.get("cfg", 7),
+            config.get("sampler", "euler"), config.get("scheduler", "normal"),
+            positive_conditioning, negative_conditioning,
+            {"samples": upscaled_latent}, hires_denoise,
+            width=new_w, height=new_h
+        )
+
+        duration = round(time.time() - t0, 3)
+        print(f"[GridTester] 🔍 HiRes fix complete in {duration}s → {new_w}x{new_h}")
+        return hires_latent, duration
+
+    elif mode == "model_only":
+        # Decode → model upscale → optional resize to target → return as PIL image
+        from comfy_extras.nodes_upscale_model import UpscaleModelLoader, ImageUpscaleWithModel
+        import numpy as np
+
+        # Use tiled VAE decode if enabled (prevents OOM on large images)
+        if tiled_vae:
+            from comfy_extras.nodes_post_processing import ImageScaleToTotalPixels
+            vae.first_stage_model.tile_sample_min_size = tile_size
+            vae.first_stage_model.tile_latent_min_size = tile_size // 8
+        pil_image = decode_latent_with_vae(vae, result_latent["samples"])
+
+        img_np = np.array(pil_image).astype(np.float32) / 255.0
+        img_tensor = torch.from_numpy(img_np).unsqueeze(0)  # (1, H, W, C)
+
+        loader = UpscaleModelLoader()
+        (up_model,) = loader.load_model(upscale_model_name)
+        upscaler = ImageUpscaleWithModel()
+        (upscaled_tensor,) = upscaler.upscale(up_model, img_tensor)
+
+        # If upscale_size differs from model's native scale, resize the output
+        target_w = int(width * upscale_size)
+        target_h = int(height * upscale_size)
+        actual_h, actual_w = upscaled_tensor.shape[1], upscaled_tensor.shape[2]
+        if abs(actual_w - target_w) > 4 or abs(actual_h - target_h) > 4:
+            import comfy.utils
+            # Resize from model's native output to user-specified upscale_size
+            upscaled_tensor = upscaled_tensor.permute(0, 3, 1, 2)  # NHWC → NCHW
+            upscaled_tensor = comfy.utils.common_upscale(upscaled_tensor, target_w, target_h, "bilinear", "disabled")
+            upscaled_tensor = upscaled_tensor.permute(0, 2, 3, 1)  # NCHW → NHWC
+
+        up_np = upscaled_tensor[0].cpu().float().numpy()
+        up_np = np.clip(up_np * 255, 0, 255).astype(np.uint8)
+        from PIL import Image as PILImage
+        upscaled_image = PILImage.fromarray(up_np)
+
+        duration = round(time.time() - t0, 3)
+        print(f"[GridTester] 🔍 Model upscale complete in {duration}s → {upscaled_image.size[0]}x{upscaled_image.size[1]}")
+        return upscaled_image, duration
+
+    elif mode == "model_then_hires":
+        # Model upscale first → optional resize → encode to latent → HiRes fix
+        from comfy_extras.nodes_upscale_model import UpscaleModelLoader, ImageUpscaleWithModel
+        import numpy as np
+
+        # Use tiled VAE decode if enabled
+        if tiled_vae:
+            vae.first_stage_model.tile_sample_min_size = tile_size
+            vae.first_stage_model.tile_latent_min_size = tile_size // 8
+        pil_image = decode_latent_with_vae(vae, result_latent["samples"])
+
+        img_np = np.array(pil_image).astype(np.float32) / 255.0
+        img_tensor = torch.from_numpy(img_np).unsqueeze(0)
+
+        loader = UpscaleModelLoader()
+        (up_model,) = loader.load_model(upscale_model_name)
+        upscaler = ImageUpscaleWithModel()
+        (upscaled_tensor,) = upscaler.upscale(up_model, img_tensor)
+
+        # If upscale_size differs from model's native scale, resize before HiRes fix
+        target_w = int(width * upscale_size)
+        target_h = int(height * upscale_size)
+        actual_h, actual_w = upscaled_tensor.shape[1], upscaled_tensor.shape[2]
+        if abs(actual_w - target_w) > 4 or abs(actual_h - target_h) > 4:
+            import comfy.utils
+            upscaled_tensor = upscaled_tensor.permute(0, 3, 1, 2)  # NHWC → NCHW
+            upscaled_tensor = comfy.utils.common_upscale(upscaled_tensor, target_w, target_h, "bilinear", "disabled")
+            upscaled_tensor = upscaled_tensor.permute(0, 2, 3, 1)  # NCHW → NHWC
+
+        up_h, up_w = upscaled_tensor.shape[1], upscaled_tensor.shape[2]
+
+        # Encode back to latent space for HiRes fix
+        encoded_latent = vae.encode(upscaled_tensor[:, :, :, :3])
+
+        hires_latent, hires_duration = generate_image(
+            patched_model, config.get("seed", 0), hires_steps, config.get("cfg", 7),
+            config.get("sampler", "euler"), config.get("scheduler", "normal"),
+            positive_conditioning, negative_conditioning,
+            {"samples": encoded_latent}, hires_denoise,
+            width=up_w, height=up_h
+        )
+
+        duration = round(time.time() - t0, 3)
+        print(f"[GridTester] 🔍 Model+HiRes upscale complete in {duration}s → {up_w}x{up_h}")
+        return hires_latent, duration
+
+    else:
+        print(f"[GridTester] ⚠️ Unknown upscale mode: {mode}")
+        return result_latent, 0
+
+
 def decode_latent_with_vae(vae, latent_samples):
     """
     Decode latent samples to pixel space using VAE.

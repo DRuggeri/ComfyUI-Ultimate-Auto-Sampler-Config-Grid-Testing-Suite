@@ -278,7 +278,8 @@ def run_generation_loop(
     remote_vae_endpoint, save_conditioning_cache_to_file, enable_model_cache,
     optional_model, optional_clip, optional_vae,
     optional_positive, optional_negative, optional_latent,
-    distribution_config=None
+    distribution_config=None,
+    session_settings=None
 ):
     """Main generation loop orchestrator."""
 
@@ -429,6 +430,9 @@ def run_generation_loop(
 
     if dist_enabled:
         print(f"[GridTester] 🌐 ENTERING DISTRIBUTED MODE with {len(distribution_config.get('worker_urls', []))} worker(s)")
+        # Warn if upscaling is enabled — not yet supported in distributed mode
+        if session_settings and session_settings.get("upscaling", {}).get("enabled", False):
+            print(f"[GridTester] ⚠️ WARNING: Upscaling is enabled but not supported in distributed mode. Workers will generate images without upscaling.")
         return _run_distributed_generation(
             self, distribution_config, expanded, input_jobs, existing_data,
             overwrite_existing, has_optional_inputs, lora_triggerwords_mode,
@@ -437,7 +441,8 @@ def run_generation_loop(
             resolutions_json, flush_batch_every, use_remote_vae,
             remote_vae_endpoint, save_conditioning_cache_to_file,
             enable_model_cache, optional_model, optional_clip, optional_vae,
-            optional_positive, optional_negative, optional_latent, model_cache
+            optional_positive, optional_negative, optional_latent, model_cache,
+            session_settings=session_settings
         )
 
     # ==== OPTIONAL CONDITIONING SETUP ====
@@ -624,9 +629,17 @@ def run_generation_loop(
         cond_cache = None
         latent_channels = 4
     
+    # ==== FULL RUN SEED BEHAVIOR (PRE-RUN) ====
+    # Apply "random_before" full run seed behavior: randomize seed before the entire session
+    for conf_idx_pre, conf_pre in enumerate(expanded):
+        if conf_pre.get("full_run_seed_behavior") == "random_before":
+            import random
+            conf_pre["seed"] = random.randint(0, 2**63 - 1)
+            print(f"[GridTester] 🎲 Full run random_before: config {conf_idx_pre} seed → {conf_pre['seed']}")
+
     # ==== MAIN GENERATION LOOP ====
     print(f"\n{'='*80}\n")
-    
+
     for job_idx, job in enumerate(input_jobs):
         w, h = job["width"], job["height"]
         batch_idx = job["batch_idx"]
@@ -1080,6 +1093,41 @@ def run_generation_loop(
                     height=h
                 )
 
+                # ==== UPSCALING (if enabled in session settings) ====
+                if session_settings and session_settings.get("upscaling", {}).get("enabled", False) and result_latent is not None:
+                    from .image_generation import upscale_image
+                    upscaling_config = session_settings["upscaling"]
+                    upscale_result, upscale_duration = upscale_image(
+                        result_latent, loaded_vae, patched_model, upscaling_config,
+                        conf, final_positive, final_negative, w, h
+                    )
+                    if isinstance(upscale_result, dict) and "samples" in upscale_result:
+                        # HiRes modes return a latent dict — replace result_latent
+                        result_latent = upscale_result
+                        duration += upscale_duration
+                    else:
+                        # Model-only mode returns PIL.Image — save upscaled image directly
+                        from PIL import Image as PILImage
+                        if isinstance(upscale_result, PILImage.Image):
+                            duration += upscale_duration
+                            upscaled_filename = f"upscaled_{gen_index_offset + total_generated:04d}.webp"
+                            upscale_result.save(
+                                os.path.join(paths["images"], upscaled_filename),
+                                "WEBP", quality=80
+                            )
+                            upscaled_meta = create_image_metadata(
+                                conf, upscale_result.size[0], upscale_result.size[1],
+                                duration, current_seed, batch_idx,
+                                actual_positive_prompt, actual_negative_prompt,
+                                gen_index=gen_index_offset + total_generated
+                            )
+                            upscaled_meta["upscaled"] = True
+                            upscaled_meta["upscale_mode"] = upscaling_config.get("mode", "model_only")
+                            upscaled_meta["file"] = f"filename={upscaled_filename}"
+                            existing_data["items"].append(upscaled_meta)
+                            save_manifest(paths["manifest"], existing_data)
+                            print(f"[GridTester] 🔍 Saved upscaled image: {upscaled_filename}")
+
                 job_durations.append(duration)
                 eta_info = calculate_eta(job_durations, current_job, total_jobs)
                 if eta_info:
@@ -1119,7 +1167,25 @@ def run_generation_loop(
                 
                 pending_batch.append((result_latent["samples"].clone(), meta))
                 total_generated += 1
-            
+
+                # ==== GPU COOLDOWN (if enabled in session settings) ====
+                if session_settings and session_settings.get("cooldown", {}).get("enabled", False):
+                    cooldown_config = session_settings["cooldown"]
+                    cooldown_every_n = int(cooldown_config.get("every_n", 1))
+                    if total_generated > 0 and total_generated % cooldown_every_n == 0:
+                        cooldown_seconds = int(cooldown_config.get("seconds", 5))
+                        clear_vram = cooldown_config.get("clear_vram", False)
+                        print(f"[GridTester] ❄️ GPU Cooldown: pausing {cooldown_seconds}s after {total_generated} generations")
+                        if clear_vram:
+                            import comfy.model_management as mm_cooldown
+                            mm_cooldown.soft_empty_cache()
+                            mm_cooldown.unload_all_models()
+                            print(f"[GridTester] ❄️ VRAM cleared")
+                            cached_model_key = None  # Force model reload on next iteration
+                        import time as time_cooldown
+                        time_cooldown.sleep(cooldown_seconds)
+                        print(f"[GridTester] ❄️ Cooldown complete, resuming generation")
+
             except Exception as e:
                 import comfy.model_management
                 if isinstance(e, InterruptProcessingException):
@@ -1205,6 +1271,36 @@ def run_generation_loop(
     if skipped_count > 0:
         print(f"[GridTester] ⏭️ Skipped {skipped_count} configs")
 
+    # ==== FULL RUN SEED BEHAVIOR (POST-RUN) ====
+    # These modify the seed for the NEXT queue/run, not the current one.
+    # The new seeds are stored in the manifest meta so the user can see/use them.
+    next_run_seeds = {}
+    for conf_idx_post, conf_post in enumerate(expanded):
+        frb = conf_post.get("full_run_seed_behavior", "fixed")
+        if frb == "random_after":
+            import random
+            new_seed = random.randint(0, 2**63 - 1)
+            print(f"[GridTester] 🎲 Full run random_after: config {conf_idx_post} next seed → {new_seed}")
+            conf_post["seed"] = new_seed
+            next_run_seeds[str(conf_idx_post)] = new_seed
+        elif frb == "increment_after":
+            conf_post["seed"] = conf_post["seed"] + 1
+            print(f"[GridTester] ➕ Full run increment_after: config {conf_idx_post} next seed → {conf_post['seed']}")
+            next_run_seeds[str(conf_idx_post)] = conf_post["seed"]
+        elif frb == "decrement_after":
+            conf_post["seed"] = conf_post["seed"] - 1
+            print(f"[GridTester] ➖ Full run decrement_after: config {conf_idx_post} next seed → {conf_post['seed']}")
+            next_run_seeds[str(conf_idx_post)] = conf_post["seed"]
+    # Persist next-run seeds to the node's seed widget via PromptServer
+    if next_run_seeds and PromptServer is not None:
+        try:
+            PromptServer.instance.send_sync("ultimate_grid.next_run_seeds", {
+                "node": unique_id,
+                "seeds": next_run_seeds
+            })
+        except Exception:
+            pass
+
     existing_data["meta"] = {
         "positive": positive_text,
         "negative": negative_text,
@@ -1215,7 +1311,7 @@ def run_generation_loop(
         "resolutions_json": resolutions_json
     }
     save_manifest(paths["manifest"], existing_data)
-    
+
     print(f"[GridTester] 🧹 Cleaning up...")
     loaded_model, loaded_clip, loaded_vae = None, None, None
     patched_model, patched_clip = None, None
@@ -1521,7 +1617,8 @@ def _run_distributed_generation(
     resolutions_json, flush_batch_every, use_remote_vae,
     remote_vae_endpoint, save_conditioning_cache_to_file,
     enable_model_cache, optional_model, optional_clip, optional_vae,
-    optional_positive, optional_negative, optional_latent, model_cache
+    optional_positive, optional_negative, optional_latent, model_cache,
+    session_settings=None
 ):
     """
     Run generation in distributed mode.
@@ -1554,6 +1651,10 @@ def _run_distributed_generation(
         existing_data=existing_data,
         claim_timeout_seconds=claim_timeout
     )
+
+    # Pass session-level settings (cooldown, etc.) to manager for worker passthrough
+    if session_settings:
+        manager._session_settings = session_settings
 
     manager.populate_jobs(
         expanded, input_jobs, existing_data,

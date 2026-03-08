@@ -1019,14 +1019,30 @@ export function createConfigArrayElement(node, configArray, arrayIdx, modelLists
     const seedSelect = document.createElement("select");
     seedSelect.className = "cb-select";
     seedSelect.innerHTML = `
-        <option value="fixed" ${(configArray.seed_behavior || "fixed") === "fixed" ? 'selected' : ''}>Fixed (use node seed)</option>
+        <option value="fixed" ${(configArray.seed_behavior || "fixed") === "fixed" ? 'selected' : ''}>Fixed</option>
         <option value="randomize" ${configArray.seed_behavior === "randomize" ? 'selected' : ''}>Randomize every gen</option>
     `;
     seedSelect.onchange = () => {
         node.state.config_arrays[arrayIdx].seed_behavior = seedSelect.value;
         node.saveState();
     };
-    settingsGrid.appendChild(createInputGroup("Seed Behavior", seedSelect));
+    settingsGrid.appendChild(createInputGroup("Seed Behavior (Per Gen)", seedSelect));
+
+    // Full Run Seed Behavior — applied before/after the entire grid test session
+    const fullRunSeedSelect = document.createElement("select");
+    fullRunSeedSelect.className = "cb-select";
+    fullRunSeedSelect.innerHTML = `
+        <option value="fixed" ${(configArray.full_run_seed_behavior || "fixed") === "fixed" ? 'selected' : ''}>Fixed</option>
+        <option value="random_before" ${configArray.full_run_seed_behavior === "random_before" ? 'selected' : ''}>Random Before Entire Run</option>
+        <option value="random_after" ${configArray.full_run_seed_behavior === "random_after" ? 'selected' : ''}>Random After Entire Run</option>
+        <option value="increment_after" ${configArray.full_run_seed_behavior === "increment_after" ? 'selected' : ''}>Increment After Entire Run</option>
+        <option value="decrement_after" ${configArray.full_run_seed_behavior === "decrement_after" ? 'selected' : ''}>Decrement After Entire Run</option>
+    `;
+    fullRunSeedSelect.onchange = () => {
+        node.state.config_arrays[arrayIdx].full_run_seed_behavior = fullRunSeedSelect.value;
+        node.saveState();
+    };
+    settingsGrid.appendChild(createInputGroup("Full Run Seed Behavior", fullRunSeedSelect));
 
     div.appendChild(settingsGrid);
 
@@ -4404,6 +4420,253 @@ export function renderConfigPromptsSection(node, div, configArray, arrayIdx) {
     div.appendChild(section);
 }
 
+// ============================================================================
+// UPSCALING SETTINGS (Session-level, applies to all configs)
+// ============================================================================
+export function renderUpscalingSection(node, container) {
+    if (!node.state.upscaling) {
+        node.state.upscaling = {
+            enabled: false,
+            mode: "hires_only",
+            upscale_ratio: 1.5,
+            hires_denoise: 0.5,
+            hires_steps: 0,
+            tiled_vae: false,
+            tile_size: 512,
+            upscale_model: "",
+            upscale_size: 2.0
+        };
+    }
+    const ups = node.state.upscaling;
+
+    const section = document.createElement("div");
+    section.className = "cb-section";
+
+    // Header with enable toggle
+    const header = document.createElement("div");
+    header.className = "cb-section-header";
+    header.style.cssText = "display: flex; align-items: center; gap: 8px; padding: 8px 12px; cursor: pointer;";
+
+    const enableCb = document.createElement("input");
+    enableCb.type = "checkbox";
+    enableCb.checked = ups.enabled;
+    enableCb.onclick = (e) => e.stopPropagation();
+    enableCb.onchange = () => {
+        ups.enabled = enableCb.checked;
+        body.style.display = enableCb.checked ? "block" : "none";
+        node.saveState();
+    };
+
+    const title = document.createElement("span");
+    title.textContent = "🔍 Upscaling Settings";
+    title.style.cssText = "font-weight: bold; color: #cc99ff; font-size: 14px;";
+
+    header.appendChild(enableCb);
+    header.appendChild(title);
+    section.appendChild(header);
+
+    // Body (hidden when disabled)
+    const body = document.createElement("div");
+    body.style.display = ups.enabled ? "block" : "none";
+    body.style.padding = "8px 12px";
+
+    const grid = document.createElement("div");
+    grid.className = "cb-flex-grid";
+
+    // Mode select
+    const modeSelect = document.createElement("select");
+    modeSelect.className = "cb-select";
+    modeSelect.innerHTML = `
+        <option value="hires_only" ${ups.mode === "hires_only" ? 'selected' : ''}>HiRes Fix Only</option>
+        <option value="model_only" ${ups.mode === "model_only" ? 'selected' : ''}>Model Upscale Only</option>
+        <option value="model_then_hires" ${ups.mode === "model_then_hires" ? 'selected' : ''}>Model Upscale → HiRes Fix</option>
+    `;
+    modeSelect.onchange = () => {
+        ups.mode = modeSelect.value;
+        updateVisibility();
+        node.saveState();
+    };
+    grid.appendChild(createInputGroup("Upscale Mode", modeSelect));
+
+    // --- HiRes Fix settings ---
+    const hiresRatioInput = document.createElement("input");
+    hiresRatioInput.type = "number";
+    hiresRatioInput.className = "cb-input";
+    hiresRatioInput.value = ups.upscale_ratio;
+    hiresRatioInput.min = 1.1;
+    hiresRatioInput.max = 4.0;
+    hiresRatioInput.step = 0.1;
+    hiresRatioInput.onchange = () => { ups.upscale_ratio = parseFloat(hiresRatioInput.value); node.saveState(); };
+    const hiresRatioGroup = createInputGroup("Upscale Ratio", hiresRatioInput);
+    grid.appendChild(hiresRatioGroup);
+
+    const hiresDenoiseInput = document.createElement("input");
+    hiresDenoiseInput.type = "number";
+    hiresDenoiseInput.className = "cb-input";
+    hiresDenoiseInput.value = ups.hires_denoise;
+    hiresDenoiseInput.min = 0.0;
+    hiresDenoiseInput.max = 1.0;
+    hiresDenoiseInput.step = 0.05;
+    hiresDenoiseInput.onchange = () => { ups.hires_denoise = parseFloat(hiresDenoiseInput.value); node.saveState(); };
+    const hiresDenoiseGroup = createInputGroup("HiRes Denoise", hiresDenoiseInput);
+    grid.appendChild(hiresDenoiseGroup);
+
+    const hiresStepsInput = document.createElement("input");
+    hiresStepsInput.type = "number";
+    hiresStepsInput.className = "cb-input";
+    hiresStepsInput.value = ups.hires_steps;
+    hiresStepsInput.min = 0;
+    hiresStepsInput.max = 150;
+    hiresStepsInput.step = 1;
+    hiresStepsInput.onchange = () => { ups.hires_steps = parseInt(hiresStepsInput.value); node.saveState(); };
+    const hiresStepsGroup = createInputGroup("HiRes Steps (0=same)", hiresStepsInput);
+    grid.appendChild(hiresStepsGroup);
+
+    const tiledVaeCb = document.createElement("input");
+    tiledVaeCb.type = "checkbox";
+    tiledVaeCb.checked = ups.tiled_vae;
+    tiledVaeCb.onchange = () => {
+        ups.tiled_vae = tiledVaeCb.checked;
+        tileSizeGroup.style.display = tiledVaeCb.checked ? "flex" : "none";
+        node.saveState();
+    };
+    const tiledVaeGroup = createInputGroup("Tiled VAE", tiledVaeCb);
+    grid.appendChild(tiledVaeGroup);
+
+    const tileSizeInput = document.createElement("input");
+    tileSizeInput.type = "number";
+    tileSizeInput.className = "cb-input";
+    tileSizeInput.value = ups.tile_size;
+    tileSizeInput.min = 128;
+    tileSizeInput.max = 1024;
+    tileSizeInput.step = 64;
+    tileSizeInput.onchange = () => { ups.tile_size = parseInt(tileSizeInput.value); node.saveState(); };
+    const tileSizeGroup = createInputGroup("Tile Size", tileSizeInput);
+    tileSizeGroup.style.display = ups.tiled_vae ? "flex" : "none";
+    grid.appendChild(tileSizeGroup);
+
+    // --- Model Upscale settings ---
+    const modelInput = document.createElement("input");
+    modelInput.type = "text";
+    modelInput.className = "cb-input";
+    modelInput.value = ups.upscale_model || "";
+    modelInput.placeholder = "e.g. 4x-UltraSharp";
+    modelInput.onchange = () => { ups.upscale_model = modelInput.value; node.saveState(); };
+    const modelGroup = createInputGroup("Upscale Model", modelInput);
+    grid.appendChild(modelGroup);
+
+    const sizeInput = document.createElement("input");
+    sizeInput.type = "number";
+    sizeInput.className = "cb-input";
+    sizeInput.value = ups.upscale_size;
+    sizeInput.min = 1.0;
+    sizeInput.max = 4.0;
+    sizeInput.step = 0.5;
+    sizeInput.onchange = () => { ups.upscale_size = parseFloat(sizeInput.value); node.saveState(); };
+    const sizeGroup = createInputGroup("Model Upscale Size", sizeInput);
+    grid.appendChild(sizeGroup);
+
+    body.appendChild(grid);
+    section.appendChild(body);
+
+    function updateVisibility() {
+        const showHires = ups.mode === "hires_only" || ups.mode === "model_then_hires";
+        const showModel = ups.mode === "model_only" || ups.mode === "model_then_hires";
+        hiresRatioGroup.style.display = showHires ? "flex" : "none";
+        hiresDenoiseGroup.style.display = showHires ? "flex" : "none";
+        hiresStepsGroup.style.display = showHires ? "flex" : "none";
+        tiledVaeGroup.style.display = showHires ? "flex" : "none";
+        tileSizeGroup.style.display = (showHires && ups.tiled_vae) ? "flex" : "none";
+        modelGroup.style.display = showModel ? "flex" : "none";
+        sizeGroup.style.display = showModel ? "flex" : "none";
+    }
+    updateVisibility();
+
+    container.appendChild(section);
+}
+
+// ============================================================================
+// GPU COOLDOWN SETTINGS (Session-level, applies to all configs)
+// ============================================================================
+export function renderCooldownSection(node, container) {
+    if (!node.state.cooldown) {
+        node.state.cooldown = {
+            enabled: false,
+            seconds: 5,
+            every_n: 1,
+            clear_vram: false
+        };
+    }
+    const cd = node.state.cooldown;
+
+    const section = document.createElement("div");
+    section.className = "cb-section";
+
+    // Header with enable toggle
+    const header = document.createElement("div");
+    header.className = "cb-section-header";
+    header.style.cssText = "display: flex; align-items: center; gap: 8px; padding: 8px 12px; cursor: pointer;";
+
+    const enableCb = document.createElement("input");
+    enableCb.type = "checkbox";
+    enableCb.checked = cd.enabled;
+    enableCb.onclick = (e) => e.stopPropagation();
+    enableCb.onchange = () => {
+        cd.enabled = enableCb.checked;
+        body.style.display = enableCb.checked ? "block" : "none";
+        node.saveState();
+    };
+
+    const title = document.createElement("span");
+    title.textContent = "❄️ GPU Cooldown Breaks";
+    title.style.cssText = "font-weight: bold; color: #66ccff; font-size: 14px;";
+
+    header.appendChild(enableCb);
+    header.appendChild(title);
+    section.appendChild(header);
+
+    // Body
+    const body = document.createElement("div");
+    body.style.display = cd.enabled ? "block" : "none";
+    body.style.padding = "8px 12px";
+
+    const grid = document.createElement("div");
+    grid.className = "cb-flex-grid";
+
+    const secondsInput = document.createElement("input");
+    secondsInput.type = "number";
+    secondsInput.className = "cb-input";
+    secondsInput.value = cd.seconds;
+    secondsInput.min = 1;
+    secondsInput.max = 300;
+    secondsInput.step = 1;
+    secondsInput.onchange = () => { cd.seconds = parseInt(secondsInput.value); node.saveState(); };
+    grid.appendChild(createInputGroup("Cooldown Seconds", secondsInput));
+
+    const everyNInput = document.createElement("input");
+    everyNInput.type = "number";
+    everyNInput.className = "cb-input";
+    everyNInput.value = cd.every_n;
+    everyNInput.min = 1;
+    everyNInput.max = 100;
+    everyNInput.step = 1;
+    everyNInput.onchange = () => { cd.every_n = parseInt(everyNInput.value); node.saveState(); };
+    grid.appendChild(createInputGroup("Every N Generations", everyNInput));
+
+    const vramCb = document.createElement("input");
+    vramCb.type = "checkbox";
+    vramCb.checked = cd.clear_vram;
+    vramCb.onchange = () => {
+        cd.clear_vram = vramCb.checked;
+        node.saveState();
+    };
+    grid.appendChild(createInputGroup("Clear VRAM During Cooldown", vramCb));
+
+    body.appendChild(grid);
+    section.appendChild(body);
+    container.appendChild(section);
+}
+
 // --- MAIN RENDER UI FUNCTION ---
 
 export function renderPreviewSection(container) {
@@ -4597,6 +4860,10 @@ export async function renderUI(node, availableLoras, modelLists, loraFolders, av
 
     configSection.appendChild(arraysContainer);
     mainContent.appendChild(configSection);
+
+    // Session-level settings (applies to all configs)
+    renderUpscalingSection(node, mainContent);
+    renderCooldownSection(node, mainContent);
 
     // JSON Preview Section
     renderPreviewSection(mainContent);

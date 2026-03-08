@@ -479,6 +479,30 @@ class WorkerThread(threading.Thread):
         if config.get("seed_behavior") == "randomize":
             config["seed"] = random.randint(0, 2**63 - 1)
 
+        # Full run seed behavior is handled by the orchestrator/master before dispatching jobs.
+        # Workers just use whatever seed is in the config they receive.
+
+        # ==== GPU COOLDOWN (if enabled in session settings) ====
+        cooldown_config = config.get("_session_cooldown", {})
+        if cooldown_config.get("enabled", False):
+            if not hasattr(self, '_gen_count'):
+                self._gen_count = 0
+            self._gen_count += 1
+            cooldown_every_n = int(cooldown_config.get("every_n", 1))
+            if self._gen_count % cooldown_every_n == 0:
+                cooldown_seconds = int(cooldown_config.get("seconds", 5))
+                clear_vram = cooldown_config.get("clear_vram", False)
+                print(f"[Worker {self.worker_id}] ❄️ GPU Cooldown: pausing {cooldown_seconds}s after {self._gen_count} generations")
+                if clear_vram:
+                    import comfy.model_management as mm_cooldown
+                    mm_cooldown.soft_empty_cache()
+                    mm_cooldown.unload_all_models()
+                    print(f"[Worker {self.worker_id}] ❄️ VRAM cleared")
+                    self._cached_model_key = None  # Force model reload on next iteration
+                import time as time_cooldown
+                time_cooldown.sleep(cooldown_seconds)
+                print(f"[Worker {self.worker_id}] ❄️ Cooldown complete, resuming")
+
         # --- Model Loading (with caching between jobs) ---
         target_model_key = get_model_cache_key(config)
         self.current_model = config.get("model", "unknown")

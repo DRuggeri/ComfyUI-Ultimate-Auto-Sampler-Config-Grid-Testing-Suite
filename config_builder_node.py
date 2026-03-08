@@ -582,6 +582,11 @@ class UltimateConfigBuilder:
             if seed_behavior == "randomize":
                 config["seed_behavior"] = "randomize"
 
+            # Full run seed behavior (applied before/after entire grid test session)
+            full_run_seed_behavior = config_array.get("full_run_seed_behavior", "fixed")
+            if full_run_seed_behavior and full_run_seed_behavior != "fixed":
+                config["full_run_seed_behavior"] = full_run_seed_behavior
+
             # Process VAEs
             vaes_raw = config_array.get("vaes", ["None"])
             vae_strings = [str(v) for v in vaes_raw if v and v != "None"]
@@ -692,6 +697,17 @@ class UltimateConfigBuilder:
                 "use_master_encoding": state.get("use_master_encoding", False),
                 "sync_models_to_workers": state.get("sync_models_to_workers", False)
             }
+
+        # Embed session-level settings (upscaling, cooldown) if enabled
+        session_settings = {}
+        upscaling_data = state.get("upscaling", {})
+        if upscaling_data and upscaling_data.get("enabled", False):
+            session_settings["upscaling"] = upscaling_data
+        cooldown_data = state.get("cooldown", {})
+        if cooldown_data and cooldown_data.get("enabled", False):
+            session_settings["cooldown"] = cooldown_data
+        if session_settings:
+            output_obj["_session_settings"] = session_settings
 
         json_output = json.dumps(output_obj, indent=2, ensure_ascii=False)
 

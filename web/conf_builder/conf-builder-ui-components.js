@@ -865,6 +865,7 @@ export function createSidebar(node, mainContent, refreshAllConfigBuilders) {
             steps: "20",
             cfg: "7.0",
             seed_behavior: "fixed",
+            full_run_seed_behavior: "fixed",
             models: ["None"],
             vaes: ["None"],
             text_encoders: [],

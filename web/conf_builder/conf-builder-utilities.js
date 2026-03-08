@@ -639,6 +639,11 @@ export function convertStateToConfigs(state) {
             config.seed_behavior = "randomize";
         }
 
+        // Add full_run_seed_behavior if not fixed
+        if (configArray.full_run_seed_behavior && configArray.full_run_seed_behavior !== "fixed") {
+            config.full_run_seed_behavior = configArray.full_run_seed_behavior;
+        }
+
         // ==== PROMPT HANDLING ====
         // Priority: per-config > global > omit (node inputs used as fallback)
         if (configArray.use_custom_prompts && configArray.positive_prompt_groups && configArray.positive_prompt_groups.length > 0) {
@@ -666,6 +671,26 @@ export function convertStateToConfigs(state) {
 
         configs.push(config);
     });
+
+    // Session-level settings (not per-config, applied globally)
+    // These are attached as a special _session_settings key alongside the configs array
+    const sessionSettings = {};
+
+    // Upscaling settings
+    if (state.upscaling && state.upscaling.enabled) {
+        sessionSettings.upscaling = { ...state.upscaling };
+    }
+
+    // Cooldown settings
+    if (state.cooldown && state.cooldown.enabled) {
+        sessionSettings.cooldown = { ...state.cooldown };
+    }
+
+    // Attach session settings to the configs output if any are enabled
+    if (Object.keys(sessionSettings).length > 0) {
+        configs._session_settings = sessionSettings;
+    }
+
     return configs;
 }
 
@@ -678,6 +703,7 @@ export function convertConfigsToConfigArrays(configs) {
             steps: "20",
             cfg: "7.0",
             seed_behavior: "fixed",
+            full_run_seed_behavior: "fixed",
             models: ["None"],
             text_encoders: [],
             clip_type: "stable_diffusion",
@@ -698,6 +724,12 @@ export function convertConfigsToConfigArrays(configs) {
             model_prompt_suffix: "",
             attention_modes: ["default"]
         }];
+    }
+
+    // Preserve session-level settings if present in imported config
+    if (configs._session_settings) {
+        // These will be applied to node.state directly, not to config arrays
+        // The caller should handle extracting these
     }
 
     const configArrays = [];
@@ -839,6 +871,7 @@ export function convertConfigsToConfigArrays(configs) {
             steps: toString(config.steps || "20"),
             cfg: toString(config.cfg || "7.0"),
             seed_behavior: config.seed_behavior || "fixed",
+            full_run_seed_behavior: config.full_run_seed_behavior || "fixed",
             models: models,
             vaes: vaes,
             text_encoders: config.text_encoders || [],
@@ -881,6 +914,7 @@ export function convertConfigsToConfigArrays(configs) {
         steps: "20",
         cfg: "7.0",
         seed_behavior: "fixed",
+        full_run_seed_behavior: "fixed",
         models: ["None"],
         vaes: ["None"],
         text_encoders: [],

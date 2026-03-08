@@ -71,6 +71,8 @@ class DistributionManager:
         self._encoded_conditionings = {}
         # Model sync: when enabled, job claim responses include upcoming_models for pre-fetching
         self.sync_models_to_workers = False
+        # Session-level settings (upscaling, cooldown) passed through to workers
+        self._session_settings = None
 
     def populate_jobs(self, expanded_configs, input_jobs, existing_data,
                       overwrite_existing, has_optional_inputs, lora_triggerwords_mode):
@@ -608,6 +610,10 @@ class DistributionManager:
             "input_job": job.input_job,
             "gen_index": job.gen_index
         }
+
+        # Attach session-level cooldown settings to worker config
+        if hasattr(self, '_session_settings') and self._session_settings and 'cooldown' in self._session_settings:
+            safe_config["_session_cooldown"] = self._session_settings["cooldown"]
 
         # Attach pre-encoded conditionings if available (master encoding feature)
         encoded = self.get_encoded_conditionings_for_job(job)

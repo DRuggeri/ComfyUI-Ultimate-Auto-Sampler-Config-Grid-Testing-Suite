@@ -125,7 +125,24 @@ app.registerExtension({
                         advanced_scheduler: "basic",
                         use_flux_guidance: false,
                         flux_guidance_value: "3.5"
-                    }]
+                    }],
+                    upscaling: {
+                        enabled: false,
+                        mode: "hires_only",
+                        upscale_ratio: 1.5,
+                        hires_denoise: 0.5,
+                        hires_steps: 0,
+                        tiled_vae: false,
+                        tile_size: 512,
+                        upscale_model: "",
+                        upscale_size: 2.0
+                    },
+                    cooldown: {
+                        enabled: false,
+                        seconds: 5,
+                        every_n: 1,
+                        clear_vram: false
+                    }
                 };
 
                 // Create HTML container immediately
