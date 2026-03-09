@@ -278,6 +278,52 @@ async function exportFavorites() {
     const promptTxtCheckbox = document.getElementById('export-prompt-txt-checkbox');
     const exportPromptTxt = promptTxtCheckbox ? promptTxtCheckbox.checked : false;
 
+    // Get copy manifest checkbox state
+    const copyManifestCheckbox = document.getElementById('copy-manifest-checkbox');
+    const copyManifest = copyManifestCheckbox ? copyManifestCheckbox.checked : true;
+
+    // Get pack workflow checkbox state
+    const packWorkflowCheckbox = document.getElementById('pack-workflow-checkbox');
+    const packWorkflow = packWorkflowCheckbox ? packWorkflowCheckbox.checked : false;
+
+    // Get pack nodes workflow checkbox state
+    const packNodesWorkflowCheckbox = document.getElementById('pack-nodes-workflow-checkbox');
+    const packNodesWorkflow = packNodesWorkflowCheckbox ? packNodesWorkflowCheckbox.checked : false;
+
+    // Capture current ComfyUI workflow if pack_workflow is checked
+    let workflowData = null;
+    if (packWorkflow) {
+        try {
+            const app = window.app || window.parent?.app;
+            if (app && app.graph) {
+                workflowData = app.graph.serialize();
+                console.log('[Export] Captured current ComfyUI workflow');
+            } else {
+                console.warn('[Export] Could not access ComfyUI app.graph — workflow will not be packed');
+            }
+        } catch (e) {
+            console.warn('[Export] Error capturing workflow:', e);
+        }
+    }
+
+    // Generate per-image nodes workflows if pack_nodes_workflow is checked
+    let nodesWorkflows = null;
+    if (packNodesWorkflow && typeof buildComfyNodesWorkflow === 'function') {
+        try {
+            nodesWorkflows = {};
+            // activeData is the global array of all manifest items in the dashboard
+            const favoritedItems = activeData.filter(item => item.favorited);
+            for (const item of favoritedItems) {
+                const wf = buildComfyNodesWorkflow(item);
+                // Key by the item's file path so backend can match
+                nodesWorkflows[item.file || item.id] = wf;
+            }
+            console.log(`[Export] Generated ${Object.keys(nodesWorkflows).length} per-image node workflows`);
+        } catch (e) {
+            console.warn('[Export] Error generating node workflows:', e);
+        }
+    }
+
     // Show loading state
     if (statusEl) {
         statusEl.innerText = '⏳ Exporting favorites...';
@@ -298,7 +344,12 @@ async function exportFavorites() {
                 pack_metadata: packMetadata,
                 organize_by_prompt: organizeByPrompt,
                 organize_by_lora: organizeByLora,
-                export_prompt_txt: exportPromptTxt
+                export_prompt_txt: exportPromptTxt,
+                copy_manifest: copyManifest,
+                pack_workflow: packWorkflow,
+                pack_nodes_workflow: packNodesWorkflow,
+                workflow_data: workflowData,
+                nodes_workflows: nodesWorkflows
             })
         });
 
@@ -335,6 +386,56 @@ async function exportFavorites() {
             btn.disabled = false;
             btn.style.opacity = '1';
             btn.style.cursor = 'pointer';
+        }
+    }
+}
+
+// Delete all non-favorited items from the session
+async function deleteNonFavorites() {
+    if (!window.confirm("Are you sure you want to delete all non-favorited items? This cannot be undone.")) {
+        return;
+    }
+
+    const statusEl = document.getElementById('delete-status');
+    const sessInput = document.getElementById('session-input');
+    if (!sessInput) {
+        if (statusEl) statusEl.innerText = '❌ Error: Session input not found';
+        return;
+    }
+    const sessionName = sessInput.value;
+
+    if (statusEl) {
+        statusEl.innerText = '⏳ Deleting non-favorited items...';
+        statusEl.style.color = '#ffaa00';
+    }
+
+    try {
+        const response = await fetch('/config_tester/delete_non_favorites', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ session_name: sessionName })
+        });
+
+        const resultText = await response.text();
+
+        if (response.ok) {
+            if (statusEl) {
+                statusEl.innerText = '✅ ' + resultText;
+                statusEl.style.color = '#4caf50';
+            }
+            // Reload the page to refresh the dashboard with updated manifest
+            setTimeout(() => { location.reload(); }, 2000);
+        } else {
+            if (statusEl) {
+                statusEl.innerText = '❌ Error: ' + resultText;
+                statusEl.style.color = '#ff3860';
+            }
+        }
+    } catch (error) {
+        console.error('[Delete] Error:', error);
+        if (statusEl) {
+            statusEl.innerText = '❌ Network error: ' + error.message;
+            statusEl.style.color = '#ff3860';
         }
     }
 }
