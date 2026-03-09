@@ -255,7 +255,9 @@ app.registerExtension({
                         vaeModels: utilities.getAvailableVAEs(),
                         vaeFolders: utilities.getVAEFolders(),
                         samplers: utilities.getAvailableSamplers(),
-                        schedulers: utilities.getAvailableSchedulers()
+                        schedulers: utilities.getAvailableSchedulers(),
+                        upscaleModels: utilities.getAvailableUpscaleModels(),
+                        upscaleModelFolders: utilities.getUpscaleModelFolders()
                     };
 
                     await configManagement.renderUI(

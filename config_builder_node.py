@@ -587,6 +587,11 @@ class UltimateConfigBuilder:
             if full_run_seed_behavior and full_run_seed_behavior != "fixed":
                 config["full_run_seed_behavior"] = full_run_seed_behavior
 
+            # Full run seed (overrides node seed when > 0)
+            full_run_seed = config_array.get("full_run_seed", 0)
+            if full_run_seed and int(full_run_seed) > 0:
+                config["full_run_seed"] = int(full_run_seed)
+
             # Process VAEs
             vaes_raw = config_array.get("vaes", ["None"])
             vae_strings = [str(v) for v in vaes_raw if v and v != "None"]
@@ -1050,6 +1055,12 @@ async def get_model_lists_endpoint(request):
             "hunyuan_image", "hunyuan_video_15"
         ]
 
+        # Upscale model list
+        try:
+            upscale_models = folder_paths.get_filename_list("upscale_models")
+        except (KeyError, Exception):
+            upscale_models = []
+
         # VAE list
         vae_list = folder_paths.get_filename_list("vae")
 
@@ -1067,6 +1078,7 @@ async def get_model_lists_endpoint(request):
             "clip_types": clip_types,
             "dual_clip_types": dual_clip_types,
             "vae": vae_list,
+            "upscale_models": upscale_models,
             "samplers": sampler_names,
             "schedulers": scheduler_names
         })

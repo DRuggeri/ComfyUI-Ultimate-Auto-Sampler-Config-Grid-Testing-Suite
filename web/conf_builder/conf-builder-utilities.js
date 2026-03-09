@@ -16,6 +16,8 @@ let availableTextEncoders = null;
 let textEncoderFolders = null;
 let availableVAEs = null;
 let vaeFolders = null;
+let availableUpscaleModels = [];
+let upscaleModelFolders = ["/"];
 let clipTypes = [];
 let dualClipTypes = [];
 let availableSamplers = [];
@@ -206,10 +208,15 @@ export async function getModelLists() {
         availableVAEs = (data.vae || []).map(normalizePath);
         vaeFolders = extractFolders(availableVAEs);
 
+        // Upscale model list
+        availableUpscaleModels = (data.upscale_models || []).map(normalizePath);
+        upscaleModelFolders = extractFolders(availableUpscaleModels);
+
         console.log(`[ConfigBuilder] Model lists loaded: ${availableModels?.length || 0} checkpoints, ` +
             `${availableDiffusionModels.length} diffusion models, ${availableGGUFModels.length} GGUFs, ` +
             `${availableTextEncoders.length} text encoders, ${availableVAEs.length} VAEs, ` +
-            `${availableSamplers.length} samplers, ${availableSchedulers.length} schedulers`);
+            `${availableSamplers.length} samplers, ${availableSchedulers.length} schedulers, ` +
+            `${availableUpscaleModels.length} upscale models`);
         if (availableDiffusionModels.length === 0) {
             console.log(`[ConfigBuilder] ℹ️ No diffusion models found. Place .safetensors files in ComfyUI/models/unet/ or ComfyUI/models/diffusion_models/`);
         }
@@ -236,6 +243,8 @@ export function getClipTypes() { return clipTypes; }
 export function getDualClipTypes() { return dualClipTypes; }
 export function getAvailableSamplers() { return availableSamplers || []; }
 export function getAvailableSchedulers() { return availableSchedulers || []; }
+export function getAvailableUpscaleModels() { return availableUpscaleModels || []; }
+export function getUpscaleModelFolders() { return upscaleModelFolders || ["/"]; }
 
 export async function getAvailableSessions() {
     // Return cached sessions if already loaded (cleared by clearAllCaches on explicit refresh)
@@ -644,6 +653,11 @@ export function convertStateToConfigs(state) {
             config.full_run_seed_behavior = configArray.full_run_seed_behavior;
         }
 
+        // Add full_run_seed if set (overrides node seed)
+        if (configArray.full_run_seed && configArray.full_run_seed > 0) {
+            config.full_run_seed = configArray.full_run_seed;
+        }
+
         // ==== PROMPT HANDLING ====
         // Priority: per-config > global > omit (node inputs used as fallback)
         if (configArray.use_custom_prompts && configArray.positive_prompt_groups && configArray.positive_prompt_groups.length > 0) {
@@ -704,6 +718,7 @@ export function convertConfigsToConfigArrays(configs) {
             cfg: "7.0",
             seed_behavior: "fixed",
             full_run_seed_behavior: "fixed",
+            full_run_seed: 0,
             models: ["None"],
             text_encoders: [],
             clip_type: "stable_diffusion",
@@ -872,6 +887,7 @@ export function convertConfigsToConfigArrays(configs) {
             cfg: toString(config.cfg || "7.0"),
             seed_behavior: config.seed_behavior || "fixed",
             full_run_seed_behavior: config.full_run_seed_behavior || "fixed",
+            full_run_seed: config.full_run_seed || 0,
             models: models,
             vaes: vaes,
             text_encoders: config.text_encoders || [],
@@ -915,6 +931,7 @@ export function convertConfigsToConfigArrays(configs) {
         cfg: "7.0",
         seed_behavior: "fixed",
         full_run_seed_behavior: "fixed",
+        full_run_seed: 0,
         models: ["None"],
         vaes: ["None"],
         text_encoders: [],
