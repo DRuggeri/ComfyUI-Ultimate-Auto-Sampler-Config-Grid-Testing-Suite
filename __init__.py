@@ -687,7 +687,7 @@ async def delete_non_favorites(request):
         if not os.path.exists(manifest_path):
             return web.Response(status=404, text=f"Session '{session_name}' not found")
 
-        with open(manifest_path, "r") as f:
+        with open(manifest_path, "r", encoding="utf-8") as f:
             manifest = json.load(f)
 
         items = manifest.get("items", [])
