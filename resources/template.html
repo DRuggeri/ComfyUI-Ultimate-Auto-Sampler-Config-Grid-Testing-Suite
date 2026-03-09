@@ -225,7 +225,40 @@
                     </label>
                 </div>
 
+                <div style="margin-top: 8px; display: flex; align-items: center; gap: 6px;">
+                    <input type="checkbox" checked id="copy-manifest-checkbox"
+                        style="width: 14px; height: 14px; cursor: pointer;">
+                    <label for="copy-manifest-checkbox"
+                        style="font-size: 10px; color: #999; cursor: pointer; user-select: none;">
+                        Copy cleaned favorites-only manifest into favorites folder
+                    </label>
+                </div>
+
+                <div style="margin-top: 8px; display: flex; align-items: center; gap: 6px;">
+                    <input type="checkbox" id="pack-workflow-checkbox"
+                        style="width: 14px; height: 14px; cursor: pointer;">
+                    <label for="pack-workflow-checkbox"
+                        style="font-size: 10px; color: #999; cursor: pointer; user-select: none;">
+                        Pack full ComfyUI workflow into image metadata (drag into ComfyUI to load)
+                    </label>
+                </div>
+
+                <div style="margin-top: 8px; display: flex; align-items: center; gap: 6px;">
+                    <input type="checkbox" id="pack-nodes-workflow-checkbox"
+                        style="width: 14px; height: 14px; cursor: pointer;">
+                    <label for="pack-nodes-workflow-checkbox"
+                        style="font-size: 10px; color: #999; cursor: pointer; user-select: none;">
+                        Pack config data as pure nodes workflow into image metadata
+                    </label>
+                </div>
+
                 <div id="export-status" style="margin-top: 8px; font-size: 10px; color: #666; min-height: 16px;"></div>
+                <button class="session-action-btn"
+                    style="background: #cc2222; width: 100%; font-size: 11px; padding: 10px; margin-top: 12px; border: 2px solid #ff4444;"
+                    onclick="deleteNonFavorites()" title="Permanently delete all non-favorited images and update manifest">
+                    🗑️ DELETE ALL NON FAVORITED ITEMS
+                </button>
+                <div id="delete-status" style="margin-top: 4px; font-size: 10px; color: #666; min-height: 16px;"></div>
             </div>
 
             <!-- Section 5: Manifest Analytics -->
