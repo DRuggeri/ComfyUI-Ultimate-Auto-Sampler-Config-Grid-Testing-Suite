@@ -445,7 +445,12 @@ async def export_favorites(request):
         organize_by_prompt = data.get("organize_by_prompt", False)
         organize_by_lora = data.get("organize_by_lora", False)
         export_prompt_txt = data.get("export_prompt_txt", False)
-        
+        copy_manifest = data.get("copy_manifest", True)
+        pack_workflow = data.get("pack_workflow", False)
+        pack_nodes_workflow = data.get("pack_nodes_workflow", False)
+        workflow_data = data.get("workflow_data", None)
+        nodes_workflows = data.get("nodes_workflows", None)
+
         # Sanitize
         if session_name:
             session_name = re.sub(r'[^\w\-]', '', session_name)
@@ -576,7 +581,15 @@ async def export_favorites(request):
             # Copy or pack metadata
             if pack_metadata:
                 try:
-                    pack_metadata_into_image(source_path, dest_path, item, manifest.get("meta", {}))
+                    # Determine which workflow to embed
+                    item_workflow = None
+                    if pack_nodes_workflow and nodes_workflows:
+                        # Per-image nodes workflow takes priority
+                        item_workflow = nodes_workflows.get(item.get("file", ""))
+                    elif pack_workflow and workflow_data:
+                        # Full ComfyUI graph workflow
+                        item_workflow = workflow_data
+                    pack_metadata_into_image(source_path, dest_path, item, manifest.get("meta", {}), workflow_data=item_workflow)
                     exported_count += 1
                 except Exception as e:
                     print(f"[Export] Error packing metadata for {filename}: {e}")
@@ -599,6 +612,21 @@ async def export_favorites(request):
                 except Exception as e:
                     print(f"[Export] Error writing prompt txt for {filename}: {e}")
         
+        # Copy cleaned favorites-only manifest if requested
+        if copy_manifest:
+            try:
+                cleaned_manifest = {
+                    "items": favorited,
+                    "meta": manifest.get("meta", {}),
+                    "session_name": session_name
+                }
+                manifest_dest = os.path.join(export_base, "manifest.json")
+                with open(manifest_dest, "w", encoding="utf-8") as f:
+                    json.dump(cleaned_manifest, f, indent=2, ensure_ascii=False)
+                print(f"[Export] Saved cleaned favorites manifest to {manifest_dest}")
+            except Exception as e:
+                print(f"[Export] Error saving cleaned manifest: {e}")
+
         result_msg = f"Exported {exported_count} favorited images to 'benchmarks/{session_name}/favorites/'"
         if organize_by_prompt and organize_by_lora:
             result_msg += f" (organized into {len(prompt_to_folder)} prompt folders with {len(lora_to_folder)} lora subfolders)"
@@ -610,12 +638,102 @@ async def export_favorites(request):
             result_msg += " (with metadata packed)"
         if export_prompt_txt:
             result_msg += " (with prompt .txt files)"
-        
+        if copy_manifest:
+            result_msg += " (with favorites manifest)"
+        if pack_workflow:
+            result_msg += " (with full workflow)"
+        if pack_nodes_workflow:
+            result_msg += " (with nodes workflows)"
+
         print(f"[ConfigTester] ✅ {result_msg}")
         return web.Response(status=200, text=result_msg)
         
     except Exception as e:
         print(f"[ConfigTester] Error exporting favorites: {e}")
+        import traceback
+        traceback.print_exc()
+        return web.Response(status=500, text=str(e))
+
+# =============================================================================
+# API: DELETE NON-FAVORITED ITEMS
+# =============================================================================
+
+@server.PromptServer.instance.routes.post("/config_tester/delete_non_favorites")
+async def delete_non_favorites(request):
+    """
+    Delete all non-favorited images from a session and update the manifest.
+    """
+    try:
+        data = await request.json()
+        session_name = data.get("session_name")
+
+        # Sanitize
+        if session_name:
+            session_name = re.sub(r'[^\w\-]', '', session_name)
+
+        if not session_name:
+            return web.Response(status=400, text="Missing session_name")
+
+        # Paths
+        base_dir = os.path.join(folder_paths.get_output_directory(), "benchmarks", session_name)
+
+        if not _is_path_within(base_dir, _get_benchmarks_base()):
+            return web.Response(status=403, text="Forbidden: path outside benchmarks directory")
+
+        manifest_path = os.path.join(base_dir, "manifest.json")
+        images_dir = os.path.join(base_dir, "images")
+
+        # Load manifest
+        if not os.path.exists(manifest_path):
+            return web.Response(status=404, text=f"Session '{session_name}' not found")
+
+        with open(manifest_path, "r") as f:
+            manifest = json.load(f)
+
+        items = manifest.get("items", [])
+        favorited = [item for item in items if item.get("favorited", False)]
+        non_favorited = [item for item in items if not item.get("favorited", False)]
+
+        if not non_favorited:
+            return web.Response(status=200, text="No non-favorited items to delete")
+
+        # Delete non-favorited image files
+        deleted_count = 0
+        for item in non_favorited:
+            file_path = item.get("file", "")
+
+            # Parse filename from various formats
+            if file_path.startswith("/view?"):
+                parsed_url = urllib.parse.urlparse(file_path)
+                url_params = urllib.parse.parse_qs(parsed_url.query)
+                filename = url_params.get("filename", [""])[0]
+            elif file_path.startswith("./images/"):
+                filename = file_path[9:]
+            elif "filename=" in file_path:
+                filename = file_path.split("filename=")[-1].split("&")[0]
+            else:
+                filename = os.path.basename(file_path)
+
+            if filename:
+                image_path = os.path.join(images_dir, filename)
+                if os.path.exists(image_path):
+                    try:
+                        os.remove(image_path)
+                        deleted_count += 1
+                    except Exception as e:
+                        print(f"[Delete] Error deleting {filename}: {e}")
+
+        # Update manifest to only contain favorited items
+        manifest["items"] = favorited
+        with open(manifest_path, "w", encoding="utf-8") as f:
+            json.dump(manifest, f, indent=2, ensure_ascii=False)
+
+        result_msg = f"Deleted {deleted_count} non-favorited images. {len(favorited)} favorited items remain."
+        print(f"[ConfigTester] 🗑️ {result_msg}")
+        return web.Response(status=200, text=result_msg)
+
+    except Exception as e:
+        print(f"[ConfigTester] Error deleting non-favorites: {e}")
         import traceback
         traceback.print_exc()
         return web.Response(status=500, text=str(e))
