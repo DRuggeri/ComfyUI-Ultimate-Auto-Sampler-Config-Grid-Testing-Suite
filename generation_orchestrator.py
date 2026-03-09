@@ -1127,7 +1127,15 @@ def run_generation_loop(
                         for combo in combos:
                             up_model_name, up_ratio, up_denoise = combo
 
+                            # Skip combos requiring a model when none is selected
+                            if show_model and not up_model_name:
+                                upscale_combo_idx += 1
+                                continue
+
                             # Build single-value upscaling config for upscale_image()
+                            # For model_only mode, use upscale_ratio for upscale_size so the
+                            # model's native output is preserved (not resized back to 1x)
+                            effective_size = up_ratio if up_ratio > 1.0 else 2.0
                             single_config = {
                                 "mode": mode,
                                 "upscale_ratio": up_ratio,
@@ -1136,7 +1144,7 @@ def run_generation_loop(
                                 "tiled_vae": ucfg.get("tiled_vae", False),
                                 "tile_size": ucfg.get("tile_size", 512),
                                 "upscale_model": up_model_name,
-                                "upscale_size": up_ratio  # Use ratio as target size
+                                "upscale_size": effective_size
                             }
 
                             upscale_result, upscale_duration = upscale_image(
