@@ -401,7 +401,10 @@ async def get_session_html(request):
             session_name = re.sub(r'[^\w\-]', '', session_name)
 
         if not session_name:
-            return web.Response(status=400, text="Missing session_name")
+            # No session name — return landing page with empty manifest
+            empty_manifest = {"items": [], "meta": {"model": "", "positive": "", "negative": ""}, "session_name": ""}
+            html = get_html_template("", empty_manifest, node_id)
+            return web.Response(status=200, text=html)
 
         base_dir = os.path.join(folder_paths.get_output_directory(), "benchmarks", session_name)
 

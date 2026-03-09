@@ -391,16 +391,31 @@ app.registerExtension({
                 // Set default size
                 this.setSize([900, 750]);
 
-                // Auto-load session on node creation so the dashboard
-                // shows content immediately (landing page or session grid)
-                // instead of a blank black box
-                const autoLoadSession = getSessionName();
-                if (autoLoadSession) {
-                    // Small delay to let ComfyUI finish initializing the node
-                    setTimeout(() => {
-                        this.forceLoadSession(autoLoadSession);
-                    }, 500);
-                }
+                // Auto-load: show landing page for new nodes, or saved session
+                // for workflows loaded from disk. onConfigure fires synchronously
+                // before the setTimeout, so we can use a flag to distinguish.
+                node._configured_from_workflow = false;
+                setTimeout(() => {
+                    if (node._configured_from_workflow) {
+                        // Workflow loaded — show the saved session
+                        const savedSession = getSessionName();
+                        if (savedSession) {
+                            this.forceLoadSession(savedSession);
+                        } else {
+                            this.forceLoadSession("");
+                        }
+                    } else {
+                        // Fresh node — show landing page with session cards
+                        this.forceLoadSession("");
+                    }
+                }, 500);
+
+                // onConfigure fires when loading a saved workflow (before setTimeout)
+                const origOnConfigure = this.onConfigure;
+                this.onConfigure = function (config) {
+                    if (origOnConfigure) origOnConfigure.apply(this, arguments);
+                    node._configured_from_workflow = true;
+                };
 
                 // Cleanup on node removal
                 const originalOnRemoved = this.onRemoved;
