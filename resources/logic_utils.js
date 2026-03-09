@@ -93,6 +93,11 @@ async function loadSession() {
 
         console.log(`[Load] 📦 activeData now has ${activeData.length} items`);
 
+        // 4b. Recompute label global values with new data so unique-only works on first load
+        if (typeof computeLabelGlobalValues === 'function' && labelMode && labelMode.enabled) {
+            computeLabelGlobalValues();
+        }
+
         // 5. Reset indices
         refreshIndices();
 

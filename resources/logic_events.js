@@ -65,6 +65,9 @@ window.addEventListener('message', (event) => {
             } else {
                 // Fallback: sync activeData and do full reprocess
                 activeData = fullManifest.items;
+                if (typeof computeLabelGlobalValues === 'function' && labelMode && labelMode.enabled) {
+                    computeLabelGlobalValues();
+                }
                 refreshIndices();
                 updateFiltersForNewData(payload.new_items);
                 updateDataPipeline();
@@ -80,11 +83,14 @@ window.addEventListener('message', (event) => {
             fullManifest = payload.manifest;
             activeData = fullManifest.items || [];
             meta = payload.meta || {};
-            
 
-            
+            // Recompute label global values with new data
+            if (typeof computeLabelGlobalValues === 'function' && labelMode && labelMode.enabled) {
+                computeLabelGlobalValues();
+            }
+
             refreshIndices();
-            
+
             // Full reprocess needed
             updateDataPipeline();
         }

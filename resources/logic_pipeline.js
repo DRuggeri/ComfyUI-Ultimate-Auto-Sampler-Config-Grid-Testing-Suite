@@ -363,8 +363,12 @@ function processNewData(newItems) {
     refreshIndices();
 
     // Recompute label global values when data changes (new items may change what's unique)
+    // Then refresh ALL existing card labels since what's "unique" may have changed
     if (typeof computeLabelGlobalValues === 'function' && labelMode && labelMode.enabled) {
         computeLabelGlobalValues();
+        if (typeof refreshLabelOverlays === 'function') {
+            refreshLabelOverlays();
+        }
     }
 
     // Update filter options
