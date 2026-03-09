@@ -426,7 +426,7 @@ def pack_metadata_into_image(source_path, dest_path, item_data, meta_data, workf
         except Exception as e:
             print(f"[MetadataPacker] Warning: Could not load workflow JSON: {e}")
     
-    if True:
+    if not workflow_data_full:
         workflow_data_full = workflowExample
     # Add workflow to metadata if we have it
     if workflow_data_full:
