@@ -707,7 +707,24 @@ class UltimateConfigBuilder:
         session_settings = {}
         upscaling_data = state.get("upscaling", {})
         if upscaling_data and upscaling_data.get("enabled", False):
-            session_settings["upscaling"] = upscaling_data
+            # Filter out inactive pipelines and inactive steps within pipelines
+            pipelines = upscaling_data.get("pipelines", [])
+            active_pipelines = []
+            for p in pipelines:
+                if p.get("active", True) is False:
+                    continue
+                active_steps = [s for s in p.get("steps", []) if s.get("active", True) is not False]
+                if active_steps:
+                    active_pipelines.append({**p, "steps": active_steps})
+            if active_pipelines:
+                session_settings["upscaling"] = {
+                    "enabled": True,
+                    "save_pre_upscale": upscaling_data.get("save_pre_upscale", False),
+                    "hires_prompt_adjust": upscaling_data.get("hires_prompt_adjust", False),
+                    "hires_prompt_behavior": upscaling_data.get("hires_prompt_behavior", "append_end"),
+                    "hires_prompt_text": upscaling_data.get("hires_prompt_text", ""),
+                    "pipelines": active_pipelines
+                }
         cooldown_data = state.get("cooldown", {})
         if cooldown_data and cooldown_data.get("enabled", False):
             session_settings["cooldown"] = cooldown_data

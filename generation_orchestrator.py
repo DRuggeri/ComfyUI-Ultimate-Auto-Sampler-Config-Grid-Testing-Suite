@@ -595,6 +595,26 @@ def run_generation_loop(
                 expanded, lora_triggerwords_mode
             )
 
+        # Collect adjusted HiRes prompts for pre-encoding (if hires prompt adjustment is enabled)
+        upscale_settings = session_settings.get("upscaling", {}) if session_settings else {}
+        if upscale_settings.get("enabled") and upscale_settings.get("hires_prompt_adjust") and upscale_settings.get("hires_prompt_text", "").strip():
+            hires_behavior = upscale_settings.get("hires_prompt_behavior", "append_end")
+            hires_text = upscale_settings["hires_prompt_text"].strip()
+            hires_adjusted_positives = set()
+            for base_prompt in unique_positives:
+                if hires_behavior == "prepend":
+                    adjusted = hires_text + " " + base_prompt
+                elif hires_behavior == "append_end":
+                    adjusted = base_prompt + " " + hires_text
+                elif hires_behavior == "replace":
+                    adjusted = hires_text
+                else:
+                    adjusted = base_prompt
+                hires_adjusted_positives.add(adjusted)
+            # Add adjusted prompts to unique set so they get batch-encoded
+            unique_positives = unique_positives | hires_adjusted_positives
+            print(f"[GridTester] 🔍 Added {len(hires_adjusted_positives)} HiRes-adjusted prompts for pre-encoding")
+
         clip_skip = first_conf.get("clip_skip", 0)
         if clip_skip != 0:
             print(f"[GridTester] 🔧 Using clip_skip={clip_skip}")
@@ -1093,113 +1113,283 @@ def run_generation_loop(
                     height=h
                 )
 
-                # ==== UPSCALING (array-based with Cartesian expansion) ====
+                # ==== UPSCALING (pipeline-based with sequential steps) ====
                 upscale_produced = False
+                save_pre_upscale = False
                 if session_settings and session_settings.get("upscaling", {}).get("enabled", False) and result_latent is not None:
                     from .image_generation import upscale_image
                     import itertools as upscale_itertools
                     import random as upscale_random
                     from PIL import Image as PILImage
 
-                    upscale_configs = session_settings["upscaling"].get("configs", [])
+                    upscale_settings_rt = session_settings["upscaling"]
+                    upscale_pipelines = upscale_settings_rt.get("pipelines", [])
                     upscale_combo_idx = 0
+                    save_pre_upscale = upscale_settings_rt.get("save_pre_upscale", False)
 
-                    for ucfg_idx, ucfg in enumerate(upscale_configs):
-                        mode = ucfg.get("mode", "hires_only")
-                        show_hires = mode in ("hires_only", "model_then_hires")
-                        show_model = mode in ("model_only", "model_then_hires")
-
-                        # Parse multi-value fields
-                        raw_ratios = str(ucfg.get("upscale_ratios", "1.5"))
-                        ratios = [float(r.strip()) for r in raw_ratios.split(",") if r.strip()] or [1.5]
-                        raw_denoise = str(ucfg.get("hires_denoise", "0.3"))
-                        denoises = [float(d.strip()) for d in raw_denoise.split(",") if d.strip()] or [0.3]
-                        models = ucfg.get("upscale_models", []) or [""]
-
-                        # Build Cartesian product of multi-value fields
-                        if show_hires and show_model:
-                            combos = list(upscale_itertools.product(models, ratios, denoises))
-                        elif show_hires:
-                            combos = list(upscale_itertools.product([""], ratios, denoises))
-                        elif show_model:
-                            combos = list(upscale_itertools.product(models, [1.0], [0.0]))
+                    # Compute HiRes-adjusted conditioning if enabled
+                    hires_positive_cond = final_positive  # Default: same as base
+                    hires_prompt_active = False
+                    hires_prompt_behavior_rt = ""
+                    hires_prompt_text_rt = ""
+                    if upscale_settings_rt.get("hires_prompt_adjust") and upscale_settings_rt.get("hires_prompt_text", "").strip():
+                        hires_prompt_behavior_rt = upscale_settings_rt.get("hires_prompt_behavior", "append_end")
+                        hires_prompt_text_rt = upscale_settings_rt["hires_prompt_text"].strip()
+                        if hires_prompt_behavior_rt == "prepend":
+                            adjusted_prompt = hires_prompt_text_rt + " " + actual_positive_prompt
+                        elif hires_prompt_behavior_rt == "append_end":
+                            adjusted_prompt = actual_positive_prompt + " " + hires_prompt_text_rt
+                        elif hires_prompt_behavior_rt == "replace":
+                            adjusted_prompt = hires_prompt_text_rt
                         else:
-                            combos = []
+                            adjusted_prompt = actual_positive_prompt
+                        # Look up pre-encoded conditioning from cache
+                        hires_cond = conditioning_cache["positive"].get(adjusted_prompt)
+                        if hires_cond is not None:
+                            hires_positive_cond = hires_cond
+                            hires_prompt_active = True
+                            print(f"[GridTester] 🔍 Using HiRes-adjusted prompt ({hires_prompt_behavior_rt}): {adjusted_prompt[:80]}...")
+                        else:
+                            print(f"[GridTester] ⚠️ HiRes-adjusted prompt not found in cache, using original prompt")
 
-                        for combo in combos:
-                            up_model_name, up_ratio, up_denoise = combo
+                    for pipeline_idx, pipeline in enumerate(upscale_pipelines):
+                        # Skip inactive pipelines (safety check — should already be filtered)
+                        if pipeline.get("active", True) is False:
+                            continue
 
-                            # Skip combos requiring a model when none is selected
-                            if show_model and not up_model_name:
-                                upscale_combo_idx += 1
+                        pipeline_name = pipeline.get("name", f"Pipeline {pipeline_idx + 1}")
+                        pipeline_steps = pipeline.get("steps", [])
+                        if not pipeline_steps:
+                            continue
+
+                        # Each pipeline starts from the original base image
+                        pipe_latent = result_latent
+                        pipe_w = w
+                        pipe_h = h
+                        pipeline_history = []  # Accumulate per-step metadata for compound manifest entries
+
+                        # Flatten steps with repeat: a step with repeat=3 runs 3 times sequentially
+                        expanded_steps = []
+                        for step in pipeline_steps:
+                            if step.get("active", True) is False:
                                 continue
+                            repeat = max(1, int(step.get("repeat", 1)))
+                            for _ in range(repeat):
+                                expanded_steps.append(step)
 
-                            # Build single-value upscaling config for upscale_image()
-                            # For model_only mode, use upscale_ratio for upscale_size so the
-                            # model's native output is preserved (not resized back to 1x)
-                            effective_size = up_ratio if up_ratio > 1.0 else 2.0
-                            single_config = {
-                                "mode": mode,
-                                "upscale_ratio": up_ratio,
-                                "hires_denoise": up_denoise,
-                                "hires_steps": ucfg.get("hires_steps", 0),
-                                "tiled_vae": ucfg.get("tiled_vae", False),
-                                "tile_size": ucfg.get("tile_size", 512),
-                                "upscale_model": up_model_name,
-                                "upscale_size": effective_size
-                            }
+                        for step_idx, ucfg in enumerate(expanded_steps):
+                            mode = ucfg.get("mode", "hires_only")
+                            show_hires = mode in ("hires_only", "model_then_hires")
+                            show_model = mode in ("model_only", "model_then_hires")
 
-                            upscale_result, upscale_duration = upscale_image(
-                                result_latent, loaded_vae, patched_model, single_config,
-                                conf, final_positive, final_negative, w, h
-                            )
+                            # Parse multi-value fields
+                            raw_ratios = str(ucfg.get("upscale_ratios", "1.5"))
+                            ratios = [float(r.strip()) for r in raw_ratios.split(",") if r.strip()] or [1.5]
+                            raw_denoise = str(ucfg.get("hires_denoise", "0.3"))
+                            denoises = [float(d.strip()) for d in raw_denoise.split(",") if d.strip()] or [0.3]
+                            models = ucfg.get("upscale_models", []) or [""]
 
-                            upscaled_filename = f"upscaled_{gen_index_offset + total_generated:04d}_{ucfg_idx}_{upscale_combo_idx}.webp"
-
-                            if isinstance(upscale_result, dict) and "samples" in upscale_result:
-                                # HiRes modes return latent — decode and save
-                                upscaled_pil = decode_latent_with_vae(loaded_vae, upscale_result["samples"])
-                                upscaled_pil.save(
-                                    os.path.join(paths["images"], upscaled_filename),
-                                    "WEBP", quality=80
-                                )
-                                up_w, up_h = upscaled_pil.size
-                            elif isinstance(upscale_result, PILImage.Image):
-                                # Model-only returns PIL directly
-                                upscale_result.save(
-                                    os.path.join(paths["images"], upscaled_filename),
-                                    "WEBP", quality=80
-                                )
-                                up_w, up_h = upscale_result.size
+                            # Build Cartesian product of multi-value fields
+                            if show_hires and show_model:
+                                combos = list(upscale_itertools.product(models, ratios, denoises))
+                            elif show_hires:
+                                combos = list(upscale_itertools.product([""], ratios, denoises))
+                            elif show_model:
+                                combos = list(upscale_itertools.product(models, [1.0], [0.0]))
                             else:
+                                combos = []
+
+                            for combo in combos:
+                                up_model_name, up_ratio, up_denoise = combo
+
+                                # Skip combos requiring a model when none is selected
+                                if show_model and not up_model_name:
+                                    upscale_combo_idx += 1
+                                    continue
+
+                                # Build single-value upscaling config for upscale_image()
+                                # For model_only mode, use upscale_ratio for upscale_size so the
+                                # model's native output is preserved (not resized back to 1x)
+                                effective_size = up_ratio if up_ratio > 1.0 else 2.0
+                                single_config = {
+                                    "mode": mode,
+                                    "upscale_ratio": up_ratio,
+                                    "hires_denoise": up_denoise,
+                                    "hires_steps": ucfg.get("hires_steps", 0),
+                                    "tiled_vae": ucfg.get("tiled_vae", False),
+                                    "tile_size": ucfg.get("tile_size", 512),
+                                    "tile_overlap": ucfg.get("tile_overlap", 64),
+                                    "temporal_size": ucfg.get("temporal_size", 512),
+                                    "temporal_overlap": ucfg.get("temporal_overlap", 64),
+                                    "upscale_model": up_model_name,
+                                    "upscale_size": effective_size,
+                                    "resize_method": ucfg.get("resize_method", "bilinear"),
+                                    "hires_tiled_sampling": ucfg.get("hires_tiled_sampling", False),
+                                    "hires_tile_width": ucfg.get("hires_tile_width", 512),
+                                    "hires_tile_height": ucfg.get("hires_tile_height", 512),
+                                    "hires_mask_blur": ucfg.get("hires_mask_blur", 8),
+                                    "hires_tile_padding": ucfg.get("hires_tile_padding", 32),
+                                    "hires_force_uniform_tiles": ucfg.get("hires_force_uniform_tiles", False)
+                                }
+
+                                # Steps within a pipeline chain sequentially (each feeds into the next)
+                                # Use HiRes-adjusted conditioning for modes that involve hires fix
+                                up_positive = hires_positive_cond if (show_hires and hires_prompt_active) else final_positive
+                                upscale_result, upscale_duration = upscale_image(
+                                    pipe_latent, loaded_vae, patched_model, single_config,
+                                    conf, up_positive, final_negative, pipe_w, pipe_h
+                                )
+
+                                # Determine if this is the final output (only the last step's last combo in the pipeline)
+                                is_last_step = step_idx == len(expanded_steps) - 1
+                                is_last_combo = combo == combos[-1]
+                                is_final_output = is_last_step and is_last_combo
+
+                                # Generate timestamp-based ID (same convention as normal images)
+                                upscale_id = int(time.time() * 100000) + upscale_random.randint(0, 1000)
+                                upscaled_filename = f"img_{upscale_id}_upscaled.webp"
+
+                                if isinstance(upscale_result, dict) and "samples" in upscale_result:
+                                    # HiRes modes return latent — decode to get dimensions
+                                    upscaled_pil = decode_latent_with_vae(loaded_vae, upscale_result["samples"])
+                                    up_w, up_h = upscaled_pil.size
+                                    # Only save to disk if this is a final output
+                                    if is_final_output:
+                                        upscaled_pil.save(
+                                            os.path.join(paths["images"], upscaled_filename),
+                                            "WEBP", quality=80
+                                        )
+                                    # Feed this latent to the next step in the pipeline
+                                    pipe_latent = upscale_result
+                                    pipe_w = up_w
+                                    pipe_h = up_h
+                                elif isinstance(upscale_result, PILImage.Image):
+                                    # Model-only returns PIL directly
+                                    up_w, up_h = upscale_result.size
+                                    # Only save to disk if this is a final output
+                                    if is_final_output:
+                                        upscale_result.save(
+                                            os.path.join(paths["images"], upscaled_filename),
+                                            "WEBP", quality=80
+                                        )
+                                    # Encode PIL back to latent for next step in pipeline
+                                    import numpy as np_stack
+                                    import torch as torch_stack
+                                    pil_np = np_stack.array(upscale_result).astype(np_stack.float32) / 255.0
+                                    pil_tensor = torch_stack.from_numpy(pil_np).unsqueeze(0)
+                                    pipe_latent = {"samples": loaded_vae.encode(pil_tensor[:, :, :, :3])}
+                                    pipe_w = up_w
+                                    pipe_h = up_h
+                                else:
+                                    upscale_combo_idx += 1
+                                    continue
+
+                                # Collect this step's upscale info for pipeline history
+                                step_info = {
+                                    "mode": mode,
+                                    "ratio": up_ratio,
+                                    "denoise": up_denoise,
+                                    "model": up_model_name or "",
+                                    "resize_method": ucfg.get("resize_method", "bilinear"),
+                                    "hires_steps": ucfg.get("hires_steps", 0),
+                                    "tiled_vae": ucfg.get("tiled_vae", False),
+                                    "tile_size": ucfg.get("tile_size", 512),
+                                    "tiled_sampling": ucfg.get("hires_tiled_sampling", False),
+                                    "tile_w": ucfg.get("hires_tile_width", 512),
+                                    "tile_h": ucfg.get("hires_tile_height", 512),
+                                }
+                                if mode == "model_only":
+                                    step_info["upscale_size"] = ucfg.get("upscale_size", "2.0")
+                                pipeline_history.append(step_info)
+
+                                if is_final_output:
+                                    upscaled_meta = create_image_metadata(
+                                        conf, up_w, up_h, upscale_duration, current_seed, batch_idx,
+                                        actual_positive_prompt, actual_negative_prompt,
+                                        gen_index=gen_index_offset + total_generated
+                                    )
+                                    upscaled_meta["id"] = upscale_id
+                                    upscaled_meta["upscaled"] = True
+                                    upscaled_meta["upscale_pipeline"] = pipeline_name
+
+                                    # Include HiRes prompt adjustment info in manifest
+                                    if hires_prompt_active:
+                                        upscaled_meta["hires_prompt_behavior"] = hires_prompt_behavior_rt
+                                        upscaled_meta["hires_prompt_text"] = hires_prompt_text_rt
+
+                                    # Multiple steps in pipeline: save arrays of all steps
+                                    if len(pipeline_history) > 1:
+                                        upscaled_meta["upscale_stacked"] = True
+                                        upscaled_meta["upscale_mode"] = [s["mode"] for s in pipeline_history]
+                                        upscaled_meta["upscale_ratio"] = [s["ratio"] for s in pipeline_history]
+                                        upscaled_meta["upscale_denoise"] = [s["denoise"] for s in pipeline_history]
+                                        models = [s["model"] for s in pipeline_history if s["model"]]
+                                        if models:
+                                            upscaled_meta["upscale_model"] = models
+                                        upscaled_meta["upscale_resize_method"] = [s["resize_method"] for s in pipeline_history]
+                                        upscaled_meta["upscale_hires_steps"] = [s["hires_steps"] for s in pipeline_history]
+                                        # Tiling info: only include steps that have it enabled
+                                        tiled_vae_steps = [s["tile_size"] for s in pipeline_history if s["tiled_vae"]]
+                                        if tiled_vae_steps:
+                                            upscaled_meta["upscale_tiled_vae"] = True
+                                            upscaled_meta["upscale_tile_size"] = tiled_vae_steps
+                                        tiled_sampling_steps = [f'{s["tile_w"]}x{s["tile_h"]}' for s in pipeline_history if s["tiled_sampling"]]
+                                        if tiled_sampling_steps:
+                                            upscaled_meta["upscale_tiled_sampling"] = True
+                                            upscaled_meta["upscale_tile_w"] = [s["tile_w"] for s in pipeline_history if s["tiled_sampling"]]
+                                            upscaled_meta["upscale_tile_h"] = [s["tile_h"] for s in pipeline_history if s["tiled_sampling"]]
+                                    else:
+                                        # Single step pipeline
+                                        upscaled_meta["upscale_mode"] = mode
+                                        upscaled_meta["upscale_ratio"] = up_ratio
+                                        upscaled_meta["upscale_denoise"] = up_denoise
+                                        if up_model_name:
+                                            upscaled_meta["upscale_model"] = up_model_name
+                                        upscaled_meta["upscale_resize_method"] = ucfg.get("resize_method", "bilinear")
+                                        upscaled_meta["upscale_hires_steps"] = ucfg.get("hires_steps", 0)
+                                        if ucfg.get("tiled_vae", False):
+                                            upscaled_meta["upscale_tiled_vae"] = True
+                                            upscaled_meta["upscale_tile_size"] = ucfg.get("tile_size", 512)
+                                        if ucfg.get("hires_tiled_sampling", False):
+                                            upscaled_meta["upscale_tiled_sampling"] = True
+                                            upscaled_meta["upscale_tile_w"] = ucfg.get("hires_tile_width", 512)
+                                            upscaled_meta["upscale_tile_h"] = ucfg.get("hires_tile_height", 512)
+                                        if mode == "model_only":
+                                            upscaled_meta["upscale_size"] = ucfg.get("upscale_size", "2.0")
+
+                                    upscaled_meta["file"] = f"/view?filename={upscaled_filename}&type=output&subfolder=benchmarks/{session_name}/images"
+                                    upscaled_meta["rejected"] = False
+                                    # Insert at beginning (same order as flush_batch_with_vae)
+                                    existing_data["items"].insert(0, upscaled_meta)
+                                    upscale_produced = True
+
+                                    # Save manifest immediately so dashboard can pick it up
+                                    save_manifest(paths["manifest"], existing_data)
+
+                                    # Send live update to dashboard (same as flush_batch_with_vae)
+                                    if PromptServer is not None:
+                                        try:
+                                            manifest_meta = existing_data.get("meta", {})
+                                            PromptServer.instance.send_sync("ultimate_grid.update", {
+                                                "node": unique_id,
+                                                "session_name": session_name,
+                                                "new_items": [upscaled_meta],
+                                                "meta": manifest_meta
+                                            })
+                                        except Exception:
+                                            pass
+
+                                    print(f"[GridTester] 🔍 Saved upscaled image: {upscaled_filename} "
+                                          f"(pipeline={pipeline_name}, mode={mode}, ratio={up_ratio}, denoise={up_denoise}"
+                                          f"{', model=' + up_model_name if up_model_name else ''})")
+                                else:
+                                    print(f"[GridTester] 🔍 Pipeline '{pipeline_name}' intermediate step {step_idx + 1}/{len(expanded_steps)} "
+                                          f"(mode={mode}, ratio={up_ratio}, denoise={up_denoise}"
+                                          f"{', model=' + up_model_name if up_model_name else ''})")
+
                                 upscale_combo_idx += 1
-                                continue
 
-                            upscaled_meta = create_image_metadata(
-                                conf, up_w, up_h, upscale_duration, current_seed, batch_idx,
-                                actual_positive_prompt, actual_negative_prompt,
-                                gen_index=gen_index_offset + total_generated
-                            )
-                            # Generate unique ID for dashboard display (same pattern as flush_batch_with_vae)
-                            upscaled_meta["id"] = int(time.time() * 100000) + upscale_random.randint(0, 1000)
-                            upscaled_meta["upscaled"] = True
-                            upscaled_meta["upscale_mode"] = mode
-                            upscaled_meta["upscale_ratio"] = up_ratio
-                            upscaled_meta["upscale_denoise"] = up_denoise
-                            if up_model_name:
-                                upscaled_meta["upscale_model"] = up_model_name
-                            upscaled_meta["file"] = f"/view?filename={upscaled_filename}&type=output&subfolder=benchmarks/{session_name}/images"
-                            upscaled_meta["rejected"] = False
-                            existing_data["items"].append(upscaled_meta)
-                            upscale_produced = True
-
-                            print(f"[GridTester] 🔍 Saved upscaled image: {upscaled_filename} "
-                                  f"(mode={mode}, ratio={up_ratio}, denoise={up_denoise}"
-                                  f"{', model=' + up_model_name if up_model_name else ''})")
-
-                            upscale_combo_idx += 1
-
-                    # Save manifest after all upscale combos
+                    # Save manifest after all pipeline combos
                     if upscale_combo_idx > 0:
                         save_manifest(paths["manifest"], existing_data)
 
@@ -1233,7 +1423,8 @@ def run_generation_loop(
 
                 # Skip saving the base (non-upscaled) image when upscaling produced results
                 # — only the upscaled final version(s) should appear in the output
-                if not upscale_produced:
+                # Unless save_pre_upscale is enabled, in which case save both
+                if not upscale_produced or save_pre_upscale:
                     meta = create_image_metadata(
                         conf, w, h, duration, current_seed, batch_idx,
                         actual_positive_prompt, actual_negative_prompt,

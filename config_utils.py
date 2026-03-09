@@ -613,6 +613,12 @@ def expand_configs(raw_configs, pos_prompts, neg_prompts, denoise_values, seed, 
                 "model_prompt_suffix": model_prompt_suffix.strip()
             })
 
+        # Apply full_run_seed override (per-config seed that overrides node seed)
+        full_run_seed = entry.get("full_run_seed", 0)
+        if full_run_seed and int(full_run_seed) > 0:
+            for c in base_combos:
+                c["seed"] = int(full_run_seed)
+
         # Apply base seed and extra seeds
         for c in base_combos:
             expanded.append(c)

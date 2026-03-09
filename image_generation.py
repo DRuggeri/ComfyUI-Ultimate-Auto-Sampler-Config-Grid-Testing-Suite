@@ -262,6 +262,144 @@ def generate_image(
     return result[0], duration
 
 
+def tiled_hires_sample(latent_input, patched_model, config, positive_conditioning, negative_conditioning,
+                       hires_steps, hires_denoise, tile_width, tile_height, mask_blur, tile_padding,
+                       force_uniform, pixel_width, pixel_height):
+    """
+    Run HiRes fix sampling in tiles to prevent OOM on large images.
+    Splits the latent into overlapping tiles, samples each, then blends them back together.
+
+    Args:
+        latent_input: Dict with "samples" key — the upscaled latent to denoise
+        patched_model: Model for sampling
+        config: Generation config (seed, cfg, sampler, scheduler)
+        positive_conditioning, negative_conditioning: Conditioning tensors
+        hires_steps: Number of sampling steps
+        hires_denoise: Denoise strength
+        tile_width, tile_height: Tile size in pixels (will be converted to latent space /8)
+        mask_blur: Gaussian blur radius for tile seam blending (pixels)
+        tile_padding: Extra context padding around each tile (pixels)
+        force_uniform: If True, force all tiles to be the same size (may crop edges)
+        pixel_width, pixel_height: Full image pixel dimensions (for logging)
+
+    Returns:
+        dict: Result latent dict with "samples" key
+    """
+    import torch
+
+    samples = latent_input["samples"]
+    # Convert pixel dimensions to latent space (8x smaller)
+    # Handle both 4D [B, C, H, W] and 5D [B, C, T, H, W] latent formats (video VAEs add temporal dim)
+    if samples.ndim == 5:
+        lat_h, lat_w = samples.shape[3], samples.shape[4]
+    else:
+        lat_h, lat_w = samples.shape[2], samples.shape[3]
+    tw = tile_width // 8
+    th = tile_height // 8
+    pad = tile_padding // 8
+    blur = max(1, mask_blur // 8)  # Blur in latent space
+
+    # Calculate tile grid
+    def calc_tiles(total, tile_size, padding, uniform):
+        """Calculate tile start positions with overlap = 2 * padding."""
+        if total <= tile_size:
+            return [(0, total)]
+        stride = tile_size - 2 * padding
+        if stride <= 0:
+            stride = tile_size // 2
+        tiles = []
+        pos = 0
+        while pos < total:
+            end = min(pos + tile_size, total)
+            if uniform and end == total and end - pos < tile_size:
+                # Shift last tile back to maintain uniform size
+                pos = max(0, total - tile_size)
+                end = total
+            tiles.append((pos, end))
+            if end == total:
+                break
+            pos += stride
+        return tiles
+
+    x_tiles = calc_tiles(lat_w, tw, pad, force_uniform)
+    y_tiles = calc_tiles(lat_h, th, pad, force_uniform)
+
+    total_tiles = len(x_tiles) * len(y_tiles)
+    print(f"[GridTester] 🔍 Tiled HiRes sampling: {len(x_tiles)}x{len(y_tiles)} = {total_tiles} tiles "
+          f"(tile={tile_width}x{tile_height}px, padding={tile_padding}px, blur={mask_blur}px)")
+
+    # Output accumulator with weighted blending
+    result_samples = torch.zeros_like(samples)
+    is_5d = samples.ndim == 5
+
+    # Weight map shape matches spatial dims only
+    if is_5d:
+        weight_map = torch.zeros(1, 1, 1, lat_h, lat_w, device=samples.device)
+    else:
+        weight_map = torch.zeros(1, 1, lat_h, lat_w, device=samples.device)
+
+    tile_idx = 0
+    for yi, (y_start, y_end) in enumerate(y_tiles):
+        for xi, (x_start, x_end) in enumerate(x_tiles):
+            tile_idx += 1
+            # Extract tile from latent (handle both 4D and 5D)
+            if is_5d:
+                tile_latent = samples[:, :, :, y_start:y_end, x_start:x_end].clone()
+            else:
+                tile_latent = samples[:, :, y_start:y_end, x_start:x_end].clone()
+
+            print(f"[GridTester] 🔍   Tile {tile_idx}/{total_tiles}: latent region [{y_start}:{y_end}, {x_start}:{x_end}]")
+
+            # Run KSampler on this tile
+            tile_result, _ = generate_image(
+                patched_model, config.get("seed", 0), hires_steps, config.get("cfg", 7),
+                config.get("sampler", "euler"), config.get("scheduler", "normal"),
+                positive_conditioning, negative_conditioning,
+                {"samples": tile_latent}, hires_denoise,
+                width=(x_end - x_start) * 8, height=(y_end - y_start) * 8
+            )
+
+            tile_out = tile_result["samples"]
+            tile_h = y_end - y_start
+            tile_w = x_end - x_start
+
+            # Create feathered weight mask for this tile (higher weight in center, fading at edges)
+            mask = torch.ones(tile_h, tile_w, device=samples.device)
+            if blur > 0:
+                # Feather edges: linear ramp over blur pixels
+                for b in range(blur):
+                    factor = (b + 1) / (blur + 1)
+                    # Top edge
+                    if y_start > 0 and b < tile_h:
+                        mask[b, :] *= factor
+                    # Bottom edge
+                    if y_end < lat_h and b < tile_h:
+                        mask[tile_h - 1 - b, :] *= factor
+                    # Left edge
+                    if x_start > 0 and b < tile_w:
+                        mask[:, b] *= factor
+                    # Right edge
+                    if x_end < lat_w and b < tile_w:
+                        mask[:, tile_w - 1 - b] *= factor
+
+            # Accumulate weighted results (broadcast mask to match tensor dims)
+            if is_5d:
+                mask_shaped = mask.unsqueeze(0).unsqueeze(0).unsqueeze(0)  # [1, 1, 1, H, W]
+                result_samples[:, :, :, y_start:y_end, x_start:x_end] += tile_out * mask_shaped
+                weight_map[:, :, :, y_start:y_end, x_start:x_end] += mask_shaped
+            else:
+                mask_shaped = mask.unsqueeze(0).unsqueeze(0)  # [1, 1, H, W]
+                result_samples[:, :, y_start:y_end, x_start:x_end] += tile_out * mask_shaped
+                weight_map[:, :, y_start:y_end, x_start:x_end] += mask_shaped
+
+    # Normalize by weights to blend overlapping regions
+    weight_map = torch.clamp(weight_map, min=1e-6)
+    result_samples = result_samples / weight_map
+
+    print(f"[GridTester] 🔍 Tiled HiRes sampling complete ({total_tiles} tiles)")
+    return {"samples": result_samples}
+
+
 def upscale_image(result_latent, vae, patched_model, upscaling_config, config, positive_conditioning, negative_conditioning, width, height):
     """
     Apply upscaling to a generated latent based on upscaling settings.
@@ -289,8 +427,18 @@ def upscale_image(result_latent, vae, patched_model, upscaling_config, config, p
     hires_steps = int(upscaling_config.get("hires_steps", 0)) or config.get("steps", 20)
     tiled_vae = upscaling_config.get("tiled_vae", False)
     tile_size = int(upscaling_config.get("tile_size", 512))
+    tile_overlap = int(upscaling_config.get("tile_overlap", 64))
+    temporal_size = int(upscaling_config.get("temporal_size", 512))
+    temporal_overlap = int(upscaling_config.get("temporal_overlap", 64))
     upscale_model_name = upscaling_config.get("upscale_model", "")
     upscale_size = float(upscaling_config.get("upscale_size", 2.0))
+    resize_method = upscaling_config.get("resize_method", "bilinear")
+    hires_tiled_sampling = upscaling_config.get("hires_tiled_sampling", False)
+    hires_tile_width = int(upscaling_config.get("hires_tile_width", 512))
+    hires_tile_height = int(upscaling_config.get("hires_tile_height", 512))
+    hires_mask_blur = int(upscaling_config.get("hires_mask_blur", 8))
+    hires_tile_padding = int(upscaling_config.get("hires_tile_padding", 32))
+    hires_force_uniform_tiles = upscaling_config.get("hires_force_uniform_tiles", False)
 
     new_w = int(width * upscale_ratio)
     new_h = int(height * upscale_ratio)
@@ -304,16 +452,25 @@ def upscale_image(result_latent, vae, patched_model, upscaling_config, config, p
         latent_samples = result_latent["samples"]
         # Latent space is 8x smaller than pixel space
         upscaled_latent = comfy.utils.common_upscale(
-            latent_samples, new_w // 8, new_h // 8, "bilinear", "disabled"
+            latent_samples, new_w // 8, new_h // 8, resize_method, "disabled"
         )
 
-        hires_latent, hires_duration = generate_image(
-            patched_model, config.get("seed", 0), hires_steps, config.get("cfg", 7),
-            config.get("sampler", "euler"), config.get("scheduler", "normal"),
-            positive_conditioning, negative_conditioning,
-            {"samples": upscaled_latent}, hires_denoise,
-            width=new_w, height=new_h
-        )
+        if hires_tiled_sampling:
+            hires_latent = tiled_hires_sample(
+                {"samples": upscaled_latent}, patched_model, config,
+                positive_conditioning, negative_conditioning,
+                hires_steps, hires_denoise,
+                hires_tile_width, hires_tile_height, hires_mask_blur, hires_tile_padding,
+                hires_force_uniform_tiles, new_w, new_h
+            )
+        else:
+            hires_latent, hires_duration = generate_image(
+                patched_model, config.get("seed", 0), hires_steps, config.get("cfg", 7),
+                config.get("sampler", "euler"), config.get("scheduler", "normal"),
+                positive_conditioning, negative_conditioning,
+                {"samples": upscaled_latent}, hires_denoise,
+                width=new_w, height=new_h
+            )
 
         duration = round(time.time() - t0, 3)
         print(f"[GridTester] 🔍 HiRes fix complete in {duration}s → {new_w}x{new_h}")
@@ -329,6 +486,13 @@ def upscale_image(result_latent, vae, patched_model, upscaling_config, config, p
             from comfy_extras.nodes_post_processing import ImageScaleToTotalPixels
             vae.first_stage_model.tile_sample_min_size = tile_size
             vae.first_stage_model.tile_latent_min_size = tile_size // 8
+            vae.first_stage_model.tile_overlap_factor = tile_overlap / tile_size if tile_size > 0 else 0.125
+            if hasattr(vae.first_stage_model, 'tile_sample_min_size_temporal'):
+                vae.first_stage_model.tile_sample_min_size_temporal = temporal_size
+            if hasattr(vae.first_stage_model, 'tile_latent_min_size_temporal'):
+                vae.first_stage_model.tile_latent_min_size_temporal = temporal_size // 8
+            if hasattr(vae.first_stage_model, 'tile_overlap_factor_temporal'):
+                vae.first_stage_model.tile_overlap_factor_temporal = temporal_overlap / temporal_size if temporal_size > 0 else 0.125
         pil_image = decode_latent_with_vae(vae, result_latent["samples"])
 
         img_np = np.array(pil_image).astype(np.float32) / 255.0
@@ -347,7 +511,7 @@ def upscale_image(result_latent, vae, patched_model, upscaling_config, config, p
             import comfy.utils
             # Resize from model's native output to user-specified upscale_size
             upscaled_tensor = upscaled_tensor.permute(0, 3, 1, 2)  # NHWC → NCHW
-            upscaled_tensor = comfy.utils.common_upscale(upscaled_tensor, target_w, target_h, "bilinear", "disabled")
+            upscaled_tensor = comfy.utils.common_upscale(upscaled_tensor, target_w, target_h, resize_method, "disabled")
             upscaled_tensor = upscaled_tensor.permute(0, 2, 3, 1)  # NCHW → NHWC
 
         up_np = upscaled_tensor[0].cpu().float().numpy()
@@ -368,6 +532,13 @@ def upscale_image(result_latent, vae, patched_model, upscaling_config, config, p
         if tiled_vae:
             vae.first_stage_model.tile_sample_min_size = tile_size
             vae.first_stage_model.tile_latent_min_size = tile_size // 8
+            vae.first_stage_model.tile_overlap_factor = tile_overlap / tile_size if tile_size > 0 else 0.125
+            if hasattr(vae.first_stage_model, 'tile_sample_min_size_temporal'):
+                vae.first_stage_model.tile_sample_min_size_temporal = temporal_size
+            if hasattr(vae.first_stage_model, 'tile_latent_min_size_temporal'):
+                vae.first_stage_model.tile_latent_min_size_temporal = temporal_size // 8
+            if hasattr(vae.first_stage_model, 'tile_overlap_factor_temporal'):
+                vae.first_stage_model.tile_overlap_factor_temporal = temporal_overlap / temporal_size if temporal_size > 0 else 0.125
         pil_image = decode_latent_with_vae(vae, result_latent["samples"])
 
         img_np = np.array(pil_image).astype(np.float32) / 255.0
@@ -385,7 +556,7 @@ def upscale_image(result_latent, vae, patched_model, upscaling_config, config, p
         if abs(actual_w - target_w) > 4 or abs(actual_h - target_h) > 4:
             import comfy.utils
             upscaled_tensor = upscaled_tensor.permute(0, 3, 1, 2)  # NHWC → NCHW
-            upscaled_tensor = comfy.utils.common_upscale(upscaled_tensor, target_w, target_h, "bilinear", "disabled")
+            upscaled_tensor = comfy.utils.common_upscale(upscaled_tensor, target_w, target_h, resize_method, "disabled")
             upscaled_tensor = upscaled_tensor.permute(0, 2, 3, 1)  # NCHW → NHWC
 
         up_h, up_w = upscaled_tensor.shape[1], upscaled_tensor.shape[2]
@@ -393,13 +564,22 @@ def upscale_image(result_latent, vae, patched_model, upscaling_config, config, p
         # Encode back to latent space for HiRes fix
         encoded_latent = vae.encode(upscaled_tensor[:, :, :, :3])
 
-        hires_latent, hires_duration = generate_image(
-            patched_model, config.get("seed", 0), hires_steps, config.get("cfg", 7),
-            config.get("sampler", "euler"), config.get("scheduler", "normal"),
-            positive_conditioning, negative_conditioning,
-            {"samples": encoded_latent}, hires_denoise,
-            width=up_w, height=up_h
-        )
+        if hires_tiled_sampling:
+            hires_latent = tiled_hires_sample(
+                {"samples": encoded_latent}, patched_model, config,
+                positive_conditioning, negative_conditioning,
+                hires_steps, hires_denoise,
+                hires_tile_width, hires_tile_height, hires_mask_blur, hires_tile_padding,
+                hires_force_uniform_tiles, up_w, up_h
+            )
+        else:
+            hires_latent, hires_duration = generate_image(
+                patched_model, config.get("seed", 0), hires_steps, config.get("cfg", 7),
+                config.get("sampler", "euler"), config.get("scheduler", "normal"),
+                positive_conditioning, negative_conditioning,
+                {"samples": encoded_latent}, hires_denoise,
+                width=up_w, height=up_h
+            )
 
         duration = round(time.time() - t0, 3)
         print(f"[GridTester] 🔍 Model+HiRes upscale complete in {duration}s → {up_w}x{up_h}")

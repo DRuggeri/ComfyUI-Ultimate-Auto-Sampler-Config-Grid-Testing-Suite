@@ -690,12 +690,25 @@ export function convertStateToConfigs(state) {
     // These are attached as a special _session_settings key alongside the configs array
     const sessionSettings = {};
 
-    // Upscaling settings (array-based)
-    if (state.upscaling && state.upscaling.enabled && state.upscaling.configs) {
-        sessionSettings.upscaling = {
-            enabled: true,
-            configs: state.upscaling.configs.map(c => ({ ...c }))
-        };
+    // Upscaling settings (pipeline-based, filter out inactive pipelines and steps)
+    if (state.upscaling && state.upscaling.enabled && state.upscaling.pipelines) {
+        const activePipelines = state.upscaling.pipelines
+            .filter(p => p.active !== false)
+            .map(p => ({
+                ...p,
+                steps: (p.steps || []).filter(s => s.active !== false).map(s => ({ ...s }))
+            }))
+            .filter(p => p.steps.length > 0);
+        if (activePipelines.length > 0) {
+            sessionSettings.upscaling = {
+                enabled: true,
+                save_pre_upscale: state.upscaling.save_pre_upscale || false,
+                hires_prompt_adjust: state.upscaling.hires_prompt_adjust || false,
+                hires_prompt_behavior: state.upscaling.hires_prompt_behavior || "append_end",
+                hires_prompt_text: state.upscaling.hires_prompt_text || "",
+                pipelines: activePipelines
+            };
+        }
     }
 
     // Cooldown settings

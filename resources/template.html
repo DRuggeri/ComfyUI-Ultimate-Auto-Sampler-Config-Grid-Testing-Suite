@@ -167,6 +167,46 @@
                             <input type="checkbox" id="label-field-denoise" onchange="updateLabelFields()" style="width: 12px; height: 12px; cursor: pointer;">
                             <label for="label-field-denoise" style="font-size: 10px; color: #00b4a0; cursor: pointer; user-select: none;">Denoise</label>
                         </div>
+                        <div style="display: flex; align-items: center; gap: 4px;">
+                            <input type="checkbox" id="label-field-upscale" onchange="updateLabelFields()" style="width: 12px; height: 12px; cursor: pointer;">
+                            <label for="label-field-upscale" style="font-size: 10px; color: #e06090; cursor: pointer; user-select: none;">Upscale (all)</label>
+                        </div>
+                        <div style="display: flex; align-items: center; gap: 4px;">
+                            <input type="checkbox" id="label-field-upscaleMode" onchange="updateLabelFields()" style="width: 12px; height: 12px; cursor: pointer;">
+                            <label for="label-field-upscaleMode" style="font-size: 10px; color: #d06080; cursor: pointer; user-select: none;">Up Mode</label>
+                        </div>
+                        <div style="display: flex; align-items: center; gap: 4px;">
+                            <input type="checkbox" id="label-field-upscaleModel" onchange="updateLabelFields()" style="width: 12px; height: 12px; cursor: pointer;">
+                            <label for="label-field-upscaleModel" style="font-size: 10px; color: #d06080; cursor: pointer; user-select: none;">Up Model</label>
+                        </div>
+                        <div style="display: flex; align-items: center; gap: 4px;">
+                            <input type="checkbox" id="label-field-upscaleRatio" onchange="updateLabelFields()" style="width: 12px; height: 12px; cursor: pointer;">
+                            <label for="label-field-upscaleRatio" style="font-size: 10px; color: #d06080; cursor: pointer; user-select: none;">Up Ratio</label>
+                        </div>
+                        <div style="display: flex; align-items: center; gap: 4px;">
+                            <input type="checkbox" id="label-field-upscaleDenoise" onchange="updateLabelFields()" style="width: 12px; height: 12px; cursor: pointer;">
+                            <label for="label-field-upscaleDenoise" style="font-size: 10px; color: #d06080; cursor: pointer; user-select: none;">Up Denoise</label>
+                        </div>
+                        <div style="display: flex; align-items: center; gap: 4px;">
+                            <input type="checkbox" id="label-field-upscaleResizeMethod" onchange="updateLabelFields()" style="width: 12px; height: 12px; cursor: pointer;">
+                            <label for="label-field-upscaleResizeMethod" style="font-size: 10px; color: #d06080; cursor: pointer; user-select: none;">Resize Method</label>
+                        </div>
+                        <div style="display: flex; align-items: center; gap: 4px;">
+                            <input type="checkbox" id="label-field-upscaleHiresSteps" onchange="updateLabelFields()" style="width: 12px; height: 12px; cursor: pointer;">
+                            <label for="label-field-upscaleHiresSteps" style="font-size: 10px; color: #d06080; cursor: pointer; user-select: none;">HiRes Steps</label>
+                        </div>
+                        <div style="display: flex; align-items: center; gap: 4px;">
+                            <input type="checkbox" id="label-field-upscaleTiling" onchange="updateLabelFields()" style="width: 12px; height: 12px; cursor: pointer;">
+                            <label for="label-field-upscaleTiling" style="font-size: 10px; color: #d06080; cursor: pointer; user-select: none;">Tiling Info</label>
+                        </div>
+                        <div style="display: flex; align-items: center; gap: 4px;">
+                            <input type="checkbox" id="label-field-hiresPromptBehavior" onchange="updateLabelFields()" style="width: 12px; height: 12px; cursor: pointer;">
+                            <label for="label-field-hiresPromptBehavior" style="font-size: 10px; color: #d06080; cursor: pointer; user-select: none;">HiRes Prompt</label>
+                        </div>
+                        <div style="display: flex; align-items: center; gap: 4px;">
+                            <input type="checkbox" id="label-field-hiresPromptText" onchange="updateLabelFields()" style="width: 12px; height: 12px; cursor: pointer;">
+                            <label for="label-field-hiresPromptText" style="font-size: 10px; color: #d06080; cursor: pointer; user-select: none;">HiRes Prompt Text</label>
+                        </div>
                     </div>
                     <div style="margin-top: 8px; display: flex; align-items: center; gap: 6px;">
                         <input type="checkbox" id="label-unique-only" checked
@@ -480,10 +520,10 @@
 
 
     <!-- Session landing page (shown when no session is loaded) -->
-    <div id="session-landing" style="display: none; padding: 40px 20px; text-align: center;">
+    <div id="session-landing" style="display: none; padding: 40px 20px; text-align: center; height: 100%; overflow-y: auto; box-sizing: border-box;">
         <h2 style="color: #888; font-size: 18px; margin-bottom: 8px;">Ultimate Grid Dashboard</h2>
         <p style="color: #555; font-size: 12px; margin-bottom: 24px;">Select a session to view</p>
-        <div id="session-cards" style="display: flex; flex-wrap: wrap; gap: 12px; justify-content: center; max-width: 900px; margin: 0 auto;"></div>
+        <div id="session-cards" style="display: flex; flex-wrap: wrap; gap: 12px; justify-content: center; max-width: 900px; margin: 0 auto; padding-bottom: 40px;"></div>
     </div>
 
     <div id="viewport">

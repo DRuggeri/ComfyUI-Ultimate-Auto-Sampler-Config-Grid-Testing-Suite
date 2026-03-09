@@ -4435,39 +4435,134 @@ export function renderConfigPromptsSection(node, div, configArray, arrayIdx) {
 }
 
 // ============================================================================
-// UPSCALING SETTINGS (Session-level, array-based with Cartesian expansion)
+// UPSCALING SETTINGS (Session-level, pipeline-based with sequential steps)
 // ============================================================================
+
+// Helper: create a default upscale step with all fields
+function createDefaultStep() {
+    return {
+        active: true,
+        mode: "hires_only",
+        repeat: 1,
+        upscale_models: [],
+        upscale_ratios: "1.5",
+        upscale_size: "2.0",
+        hires_denoise: "0.3",
+        hires_steps: 0,
+        tiled_vae: false,
+        tile_size: 512,
+        tile_overlap: 64,
+        temporal_size: 512,
+        temporal_overlap: 64,
+        resize_method: "bilinear",
+        hires_tiled_sampling: false,
+        hires_tile_width: 512,
+        hires_tile_height: 512,
+        hires_mask_blur: 8,
+        hires_tile_padding: 32,
+        hires_force_uniform_tiles: false
+    };
+}
+
+// Helper: ensure a step has all required fields (migration/defaults)
+function ensureStepFields(step) {
+    if (step.active === undefined) step.active = true;
+    if (!step.repeat || step.repeat < 1) step.repeat = 1;
+    if (!step.upscale_size) step.upscale_size = "2.0";
+    if (!step.tile_overlap) step.tile_overlap = 64;
+    if (!step.temporal_size) step.temporal_size = 512;
+    if (!step.temporal_overlap) step.temporal_overlap = 64;
+    if (!step.resize_method) step.resize_method = "bilinear";
+    if (step.hires_tiled_sampling === undefined) step.hires_tiled_sampling = false;
+    if (!step.hires_tile_width) step.hires_tile_width = 512;
+    if (!step.hires_tile_height) step.hires_tile_height = 512;
+    if (step.hires_mask_blur === undefined) step.hires_mask_blur = 8;
+    if (!step.hires_tile_padding) step.hires_tile_padding = 32;
+    if (step.hires_force_uniform_tiles === undefined) step.hires_force_uniform_tiles = false;
+}
+
 export function renderUpscalingSection(node, container, modelLists) {
     if (!node.state.upscaling) {
         node.state.upscaling = {
             enabled: false,
-            configs: [{
-                mode: "hires_only",
-                upscale_models: [],
-                upscale_ratios: "1.5",
-                hires_denoise: "0.3",
-                hires_steps: 0,
-                tiled_vae: false,
-                tile_size: 512
+            save_pre_upscale: false,
+            hires_prompt_adjust: false,
+            hires_prompt_behavior: "append_end",
+            hires_prompt_text: "",
+            pipelines: [{
+                active: true,
+                name: "Pipeline 1",
+                steps: [createDefaultStep()]
             }]
         };
     }
-    // Migration: convert old single-config format to array format
-    if (node.state.upscaling.mode && !node.state.upscaling.configs) {
+    // Migration: convert old single-config format (no configs array, has mode directly)
+    if (node.state.upscaling.mode && !node.state.upscaling.configs && !node.state.upscaling.pipelines) {
         const old = node.state.upscaling;
+        const step = createDefaultStep();
+        step.mode = old.mode || "hires_only";
+        step.upscale_models = old.upscale_model ? [old.upscale_model] : [];
+        step.upscale_ratios = String(old.upscale_ratio || "1.5");
+        step.upscale_size = String(old.upscale_size || "2.0");
+        step.hires_denoise = String(old.hires_denoise || "0.3");
+        step.hires_steps = old.hires_steps || 0;
+        step.tiled_vae = old.tiled_vae || false;
+        step.tile_size = old.tile_size || 512;
         node.state.upscaling = {
             enabled: old.enabled || false,
-            configs: [{
-                mode: old.mode || "hires_only",
-                upscale_models: old.upscale_model ? [old.upscale_model] : [],
-                upscale_ratios: String(old.upscale_ratio || "1.5"),
-                hires_denoise: String(old.hires_denoise || "0.3"),
-                hires_steps: old.hires_steps || 0,
-                tiled_vae: old.tiled_vae || false,
-                tile_size: old.tile_size || 512
+            pipelines: [{
+                active: true,
+                name: "Pipeline 1",
+                steps: [step]
             }]
         };
     }
+    // Migration: convert old configs[] + run_mode format to pipelines
+    if (node.state.upscaling.configs && !node.state.upscaling.pipelines) {
+        const old = node.state.upscaling;
+        const configs = old.configs || [];
+        const runMode = old.run_mode || "comparison";
+        let pipelines;
+        if (runMode === "stacking") {
+            // Stacking: all configs become steps in one pipeline
+            pipelines = [{
+                active: true,
+                name: "Pipeline 1",
+                steps: configs.map(c => {
+                    const step = { ...createDefaultStep(), ...c, repeat: 1 };
+                    return step;
+                })
+            }];
+        } else {
+            // Comparison: each config becomes its own pipeline with one step
+            pipelines = configs.map((c, i) => ({
+                active: c.active !== false,
+                name: `Pipeline ${i + 1}`,
+                steps: [{ ...createDefaultStep(), ...c, repeat: 1, active: true }]
+            }));
+        }
+        node.state.upscaling = {
+            enabled: old.enabled || false,
+            pipelines: pipelines
+        };
+        // Clean up old fields from migrated data
+        delete node.state.upscaling.run_mode;
+        delete node.state.upscaling.configs;
+    }
+    // Migration: ensure all steps have required fields
+    if (node.state.upscaling.pipelines) {
+        node.state.upscaling.pipelines.forEach(p => {
+            if (p.active === undefined) p.active = true;
+            if (!p.name) p.name = "Pipeline";
+            if (!p.steps || p.steps.length === 0) p.steps = [createDefaultStep()];
+            p.steps.forEach(ensureStepFields);
+        });
+    }
+    // Migration: add new global upscale settings
+    if (node.state.upscaling.save_pre_upscale === undefined) node.state.upscaling.save_pre_upscale = false;
+    if (node.state.upscaling.hires_prompt_adjust === undefined) node.state.upscaling.hires_prompt_adjust = false;
+    if (!node.state.upscaling.hires_prompt_behavior) node.state.upscaling.hires_prompt_behavior = "append_end";
+    if (node.state.upscaling.hires_prompt_text === undefined) node.state.upscaling.hires_prompt_text = "";
     const ups = node.state.upscaling;
 
     const section = document.createElement("div");
@@ -4492,8 +4587,15 @@ export function renderUpscalingSection(node, container, modelLists) {
     title.textContent = "🔍 Upscaling Settings";
     title.style.cssText = "font-weight: bold; color: #cc99ff; font-size: 14px;";
 
+    // Tooltip (?) icon
+    const tooltip = document.createElement("span");
+    tooltip.textContent = "?";
+    tooltip.style.cssText = "display: inline-flex; align-items: center; justify-content: center; width: 16px; height: 16px; border-radius: 50%; background: #555; color: #fff; font-size: 11px; font-weight: bold; cursor: help; margin-left: 4px; position: relative;";
+    tooltip.title = "Upscale models are stored in ComfyUI/models/upscale_models.\n\nModel + Hires mode will take whatever size output the upscale model gives and resize it to the starting image size × Upscale Ratio setting before running HiRes Fix.\n\nPipelines are independent — each starts from the original base image.\nSteps within a pipeline chain sequentially.\nRepeat on a step runs it N times back-to-back (feedback loop).";
+
     header.appendChild(enableCb);
     header.appendChild(title);
+    header.appendChild(tooltip);
     section.appendChild(header);
 
     // Body
@@ -4501,185 +4603,505 @@ export function renderUpscalingSection(node, container, modelLists) {
     body.style.display = ups.enabled ? "block" : "none";
     body.style.padding = "8px 12px";
 
-    function renderConfigs() {
-        body.innerHTML = "";
+    // Global upscale settings (above pipelines)
+    const globalSettings = document.createElement("div");
+    globalSettings.style.cssText = "margin-bottom: 8px; padding: 6px 8px; background: #252525; border-radius: 4px; border: 1px solid #444;";
 
-        ups.configs.forEach((ucfg, ucfgIdx) => {
-            const card = document.createElement("div");
-            card.style.cssText = "border: 1px solid #444; border-radius: 6px; margin-bottom: 8px; padding: 8px;";
+    // Save Pre-Upscaled Output checkbox
+    const preUpscaleLabel = document.createElement("label");
+    preUpscaleLabel.style.cssText = "display: flex; align-items: center; gap: 6px; font-size: 12px; color: #ccc; cursor: pointer; margin-bottom: 4px;";
+    const preUpscaleCb = document.createElement("input");
+    preUpscaleCb.type = "checkbox";
+    preUpscaleCb.checked = ups.save_pre_upscale || false;
+    preUpscaleCb.onchange = () => { ups.save_pre_upscale = preUpscaleCb.checked; node.saveState(); };
+    preUpscaleLabel.appendChild(preUpscaleCb);
+    preUpscaleLabel.appendChild(document.createTextNode("Also Save & Display Pre-Upscaled Output"));
+    globalSettings.appendChild(preUpscaleLabel);
 
-            // Card header with delete button
-            const cardHeader = document.createElement("div");
-            cardHeader.style.cssText = "display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;";
-            const cardTitle = document.createElement("span");
-            cardTitle.style.cssText = "font-weight: bold; color: #cc99ff; font-size: 13px;";
-            cardTitle.textContent = `Upscale Config ${ucfgIdx + 1}`;
-            cardHeader.appendChild(cardTitle);
+    // Adjust Prompt During HiRes Fix checkbox
+    const hiresPromptLabel = document.createElement("label");
+    hiresPromptLabel.style.cssText = "display: flex; align-items: center; gap: 6px; font-size: 12px; color: #ccc; cursor: pointer;";
+    const hiresPromptCb = document.createElement("input");
+    hiresPromptCb.type = "checkbox";
+    hiresPromptCb.checked = ups.hires_prompt_adjust || false;
+    hiresPromptCb.onchange = () => {
+        ups.hires_prompt_adjust = hiresPromptCb.checked;
+        hiresPromptOptions.style.display = ups.hires_prompt_adjust ? "block" : "none";
+        node.saveState();
+    };
+    hiresPromptLabel.appendChild(hiresPromptCb);
+    hiresPromptLabel.appendChild(document.createTextNode("Adjust Prompt During HiRes Fix"));
+    globalSettings.appendChild(hiresPromptLabel);
 
-            if (ups.configs.length > 1) {
-                const delBtn = document.createElement("button");
-                delBtn.className = "cb-button";
-                delBtn.textContent = "✕";
-                delBtn.style.cssText = "background: #cc3333; padding: 2px 8px; font-size: 12px;";
-                delBtn.onclick = () => {
-                    ups.configs.splice(ucfgIdx, 1);
-                    node.saveState();
-                    renderConfigs();
-                };
-                cardHeader.appendChild(delBtn);
-            }
-            card.appendChild(cardHeader);
+    // HiRes prompt options (shown when checkbox is enabled)
+    const hiresPromptOptions = document.createElement("div");
+    hiresPromptOptions.style.cssText = "margin-top: 6px; padding: 6px 8px; background: #1e1e1e; border-radius: 4px; display: " + (ups.hires_prompt_adjust ? "block" : "none") + ";";
 
-            const grid = document.createElement("div");
-            grid.className = "cb-flex-grid";
+    // Prompt Adjust Behavior dropdown
+    const behaviorSelect = document.createElement("select");
+    behaviorSelect.className = "cb-select";
+    behaviorSelect.style.cssText = "margin-bottom: 6px; width: 100%;";
+    behaviorSelect.innerHTML = `
+        <option value="prepend" ${ups.hires_prompt_behavior === "prepend" ? 'selected' : ''}>Append To Front</option>
+        <option value="append_end" ${ups.hires_prompt_behavior === "append_end" ? 'selected' : ''}>Append To End</option>
+        <option value="replace" ${ups.hires_prompt_behavior === "replace" ? 'selected' : ''}>Replace Prompt</option>
+    `;
+    behaviorSelect.onchange = () => { ups.hires_prompt_behavior = behaviorSelect.value; node.saveState(); };
+    hiresPromptOptions.appendChild(createInputGroup("Prompt Adjust Behavior", behaviorSelect));
 
-            // Mode select
-            const modeSelect = document.createElement("select");
-            modeSelect.className = "cb-select";
-            modeSelect.innerHTML = `
-                <option value="hires_only" ${ucfg.mode === "hires_only" ? 'selected' : ''}>HiRes Fix Only</option>
-                <option value="model_only" ${ucfg.mode === "model_only" ? 'selected' : ''}>Model Upscale Only</option>
-                <option value="model_then_hires" ${ucfg.mode === "model_then_hires" ? 'selected' : ''}>Model Upscale → HiRes Fix</option>
-            `;
-            modeSelect.onchange = () => {
-                ucfg.mode = modeSelect.value;
+    // Prompt text input
+    const promptTextInput = document.createElement("textarea");
+    promptTextInput.className = "cb-input";
+    promptTextInput.style.cssText = "width: 100%; min-height: 60px; resize: vertical; font-size: 12px;";
+    promptTextInput.value = ups.hires_prompt_text || "";
+    promptTextInput.placeholder = "Enter prompt adjustment text...";
+    promptTextInput.onchange = () => { ups.hires_prompt_text = promptTextInput.value; node.saveState(); };
+    hiresPromptOptions.appendChild(createInputGroup("HiRes Prompt Text", promptTextInput));
+
+    globalSettings.appendChild(hiresPromptOptions);
+    body.appendChild(globalSettings);
+
+    // Pipelines container
+    const pipelinesContainer = document.createElement("div");
+    body.appendChild(pipelinesContainer);
+
+    function renderPipelines() {
+        pipelinesContainer.innerHTML = "";
+
+        ups.pipelines.forEach((pipeline, pipeIdx) => {
+            const pipeCard = document.createElement("div");
+            pipeCard.style.cssText = "border: 2px solid #665599; border-radius: 8px; margin-bottom: 10px; background: #1a1a2e;" + (pipeline.active === false ? " opacity: 0.5;" : "");
+
+            // Pipeline header (collapsible)
+            const pipeHeader = document.createElement("div");
+            pipeHeader.style.cssText = "display: flex; justify-content: space-between; align-items: center; padding: 8px 12px; cursor: pointer; background: #252540; border-radius: 6px 6px 0 0;";
+
+            const pipeLeft = document.createElement("div");
+            pipeLeft.style.cssText = "display: flex; align-items: center; gap: 8px;";
+
+            const pipeActiveCb = document.createElement("input");
+            pipeActiveCb.type = "checkbox";
+            pipeActiveCb.checked = pipeline.active !== false;
+            pipeActiveCb.title = pipeline.active !== false ? "Pipeline is ON — included in generation" : "Pipeline is OFF — excluded from generation";
+            pipeActiveCb.onclick = (e) => e.stopPropagation();
+            pipeActiveCb.onchange = () => {
+                pipeline.active = pipeActiveCb.checked;
+                pipeCard.style.opacity = pipeline.active !== false ? "1" : "0.5";
                 node.saveState();
-                renderConfigs();
             };
-            grid.appendChild(createInputGroup("Mode", modeSelect));
+            pipeLeft.appendChild(pipeActiveCb);
 
-            const showHires = ucfg.mode === "hires_only" || ucfg.mode === "model_then_hires";
-            const showModel = ucfg.mode === "model_only" || ucfg.mode === "model_then_hires";
+            const pipeNameInput = document.createElement("input");
+            pipeNameInput.type = "text";
+            pipeNameInput.className = "cb-input";
+            pipeNameInput.value = pipeline.name || `Pipeline ${pipeIdx + 1}`;
+            pipeNameInput.style.cssText = "font-weight: bold; color: #cc99ff; font-size: 13px; background: transparent; border: 1px solid transparent; padding: 2px 6px; width: 180px;";
+            pipeNameInput.onclick = (e) => e.stopPropagation();
+            pipeNameInput.onfocus = () => { pipeNameInput.style.borderColor = "#665599"; };
+            pipeNameInput.onblur = () => { pipeNameInput.style.borderColor = "transparent"; };
+            pipeNameInput.onchange = () => { pipeline.name = pipeNameInput.value; node.saveState(); };
+            pipeLeft.appendChild(pipeNameInput);
 
-            // --- HiRes fields (multi-value: ratios, denoise) ---
-            if (showHires) {
-                const ratiosInput = document.createElement("input");
-                ratiosInput.type = "text";
-                ratiosInput.className = "cb-input";
-                ratiosInput.value = ucfg.upscale_ratios || "1.5";
-                ratiosInput.placeholder = "1.2, 1.5, 2.0";
-                ratiosInput.onchange = () => { ucfg.upscale_ratios = ratiosInput.value; node.saveState(); };
-                grid.appendChild(createInputGroup("Upscale Ratios", ratiosInput));
+            const pipeStepCount = document.createElement("span");
+            pipeStepCount.style.cssText = "font-size: 11px; color: #888;";
+            pipeStepCount.textContent = `(${pipeline.steps.length} step${pipeline.steps.length !== 1 ? "s" : ""})`;
+            pipeLeft.appendChild(pipeStepCount);
 
-                const denoiseInput = document.createElement("input");
-                denoiseInput.type = "text";
-                denoiseInput.className = "cb-input";
-                denoiseInput.value = ucfg.hires_denoise || "0.3";
-                denoiseInput.placeholder = "0.2, 0.3, 0.5";
-                denoiseInput.onchange = () => { ucfg.hires_denoise = denoiseInput.value; node.saveState(); };
-                grid.appendChild(createInputGroup("HiRes Denoise", denoiseInput));
+            pipeHeader.appendChild(pipeLeft);
 
-                const stepsInput = document.createElement("input");
-                stepsInput.type = "number";
-                stepsInput.className = "cb-input";
-                stepsInput.value = ucfg.hires_steps || 0;
-                stepsInput.min = 0;
-                stepsInput.max = 150;
-                stepsInput.step = 1;
-                stepsInput.onchange = () => { ucfg.hires_steps = parseInt(stepsInput.value); node.saveState(); };
-                grid.appendChild(createInputGroup("HiRes Steps (0=same)", stepsInput));
+            const pipeRight = document.createElement("div");
+            pipeRight.style.cssText = "display: flex; align-items: center; gap: 6px;";
 
-                const tiledCb = document.createElement("input");
-                tiledCb.type = "checkbox";
-                tiledCb.checked = ucfg.tiled_vae || false;
-                tiledCb.onchange = () => { ucfg.tiled_vae = tiledCb.checked; node.saveState(); renderConfigs(); };
-                grid.appendChild(createInputGroup("Tiled VAE", tiledCb));
+            if (ups.pipelines.length > 1) {
+                const pipeDelBtn = document.createElement("button");
+                pipeDelBtn.className = "cb-button";
+                pipeDelBtn.textContent = "✕";
+                pipeDelBtn.style.cssText = "background: #cc3333; padding: 2px 8px; font-size: 12px;";
+                pipeDelBtn.onclick = (e) => {
+                    e.stopPropagation();
+                    ups.pipelines.splice(pipeIdx, 1);
+                    node.saveState();
+                    renderPipelines();
+                };
+                pipeRight.appendChild(pipeDelBtn);
+            }
 
-                if (ucfg.tiled_vae) {
-                    const tileSizeInput = document.createElement("input");
-                    tileSizeInput.type = "number";
-                    tileSizeInput.className = "cb-input";
-                    tileSizeInput.value = ucfg.tile_size || 512;
-                    tileSizeInput.min = 128;
-                    tileSizeInput.max = 1024;
-                    tileSizeInput.step = 64;
-                    tileSizeInput.onchange = () => { ucfg.tile_size = parseInt(tileSizeInput.value); node.saveState(); };
-                    grid.appendChild(createInputGroup("Tile Size", tileSizeInput));
+            const collapseIcon = document.createElement("span");
+            collapseIcon.style.cssText = "color: #888; font-size: 14px; user-select: none;";
+            collapseIcon.textContent = "▼";
+            pipeRight.appendChild(collapseIcon);
+
+            pipeHeader.appendChild(pipeRight);
+            pipeCard.appendChild(pipeHeader);
+
+            // Pipeline body (collapsible content)
+            const pipeBody = document.createElement("div");
+            pipeBody.style.cssText = "padding: 8px 12px;";
+
+            // Toggle collapse on header click
+            pipeHeader.onclick = () => {
+                const isCollapsed = pipeBody.style.display === "none";
+                pipeBody.style.display = isCollapsed ? "block" : "none";
+                collapseIcon.textContent = isCollapsed ? "▼" : "▶";
+            };
+
+            // Render steps within this pipeline
+            pipeline.steps.forEach((ucfg, stepIdx) => {
+                const card = document.createElement("div");
+                card.style.cssText = "border: 1px solid #444; border-radius: 6px; margin-bottom: 8px; padding: 8px;" + (ucfg.active === false ? " opacity: 0.5;" : "");
+
+                // Card header with active toggle and delete button
+                const cardHeader = document.createElement("div");
+                cardHeader.style.cssText = "display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;";
+
+                const cardLeft = document.createElement("div");
+                cardLeft.style.cssText = "display: flex; align-items: center; gap: 6px;";
+
+                const activeCb = document.createElement("input");
+                activeCb.type = "checkbox";
+                activeCb.checked = ucfg.active !== false;
+                activeCb.title = ucfg.active !== false ? "Step is ON — included in generation" : "Step is OFF — excluded from generation";
+                activeCb.onchange = () => {
+                    ucfg.active = activeCb.checked;
+                    card.style.opacity = ucfg.active !== false ? "1" : "0.5";
+                    node.saveState();
+                };
+                cardLeft.appendChild(activeCb);
+
+                const cardTitle = document.createElement("span");
+                cardTitle.style.cssText = "font-weight: bold; color: #cc99ff; font-size: 13px;";
+                cardTitle.textContent = `Step ${stepIdx + 1}`;
+                cardLeft.appendChild(cardTitle);
+
+                // Repeat field (inline in header)
+                const repeatLabel = document.createElement("span");
+                repeatLabel.style.cssText = "font-size: 11px; color: #888; margin-left: 8px;";
+                repeatLabel.textContent = "Repeat:";
+                cardLeft.appendChild(repeatLabel);
+
+                const repeatInput = document.createElement("input");
+                repeatInput.type = "number";
+                repeatInput.className = "cb-input";
+                repeatInput.value = ucfg.repeat || 1;
+                repeatInput.min = 1;
+                repeatInput.max = 20;
+                repeatInput.step = 1;
+                repeatInput.style.cssText = "width: 50px; padding: 1px 4px; font-size: 11px;";
+                repeatInput.onchange = () => { ucfg.repeat = Math.max(1, parseInt(repeatInput.value) || 1); node.saveState(); renderPipelines(); };
+                cardLeft.appendChild(repeatInput);
+
+                if (ucfg.repeat > 1) {
+                    const repeatNote = document.createElement("span");
+                    repeatNote.style.cssText = "font-size: 10px; color: #cc99ff;";
+                    repeatNote.textContent = `(×${ucfg.repeat} feedback loop)`;
+                    cardLeft.appendChild(repeatNote);
                 }
-            }
 
-            // --- Model fields (multi-add searchable) ---
-            if (showModel) {
-                // Upscale models list with add/remove
-                const modelsContainer = document.createElement("div");
-                const modelsLabel = document.createElement("div");
-                modelsLabel.style.cssText = "font-size: 12px; color: #aaa; margin-bottom: 4px;";
-                modelsLabel.textContent = `Upscale Models (${(ucfg.upscale_models || []).length})`;
-                modelsContainer.appendChild(modelsLabel);
+                cardHeader.appendChild(cardLeft);
 
-                // Existing model chips
-                (ucfg.upscale_models || []).forEach((modelName, mIdx) => {
-                    const chip = document.createElement("div");
-                    chip.style.cssText = "display: inline-flex; align-items: center; gap: 4px; background: #333; border-radius: 4px; padding: 2px 8px; margin: 2px; font-size: 12px;";
-                    chip.textContent = modelName;
-                    const removeBtn = document.createElement("span");
-                    removeBtn.textContent = "✕";
-                    removeBtn.style.cssText = "cursor: pointer; color: #cc3333; margin-left: 4px;";
-                    removeBtn.onclick = () => {
-                        ucfg.upscale_models.splice(mIdx, 1);
+                if (pipeline.steps.length > 1) {
+                    const delBtn = document.createElement("button");
+                    delBtn.className = "cb-button";
+                    delBtn.textContent = "✕";
+                    delBtn.style.cssText = "background: #cc3333; padding: 2px 8px; font-size: 12px;";
+                    delBtn.onclick = () => {
+                        pipeline.steps.splice(stepIdx, 1);
                         node.saveState();
-                        renderConfigs();
+                        renderPipelines();
                     };
-                    chip.appendChild(removeBtn);
-                    modelsContainer.appendChild(chip);
-                });
+                    cardHeader.appendChild(delBtn);
+                }
+                card.appendChild(cardHeader);
 
-                // Add model searchable select
-                const addSelect = createSearchableSelect(
-                    modelLists?.upscaleModels || [],
-                    "",
-                    (value) => {
-                        if (value && !ucfg.upscale_models.includes(value)) {
-                            ucfg.upscale_models.push(value);
+                const grid = document.createElement("div");
+                grid.className = "cb-flex-grid";
+
+                // Mode select
+                const modeSelect = document.createElement("select");
+                modeSelect.className = "cb-select";
+                modeSelect.innerHTML = `
+                    <option value="hires_only" ${ucfg.mode === "hires_only" ? 'selected' : ''}>HiRes Fix Only</option>
+                    <option value="model_only" ${ucfg.mode === "model_only" ? 'selected' : ''}>Model Upscale Only</option>
+                    <option value="model_then_hires" ${ucfg.mode === "model_then_hires" ? 'selected' : ''}>Model Upscale → HiRes Fix</option>
+                `;
+                modeSelect.onchange = () => {
+                    ucfg.mode = modeSelect.value;
+                    node.saveState();
+                    renderPipelines();
+                };
+                grid.appendChild(createInputGroup("Mode", modeSelect));
+
+                // Resize method select (applies to all modes)
+                const resizeSelect = document.createElement("select");
+                resizeSelect.className = "cb-select";
+                const resizeMethods = ["nearest-exact", "bilinear", "area", "bicubic", "lanczos"];
+                resizeSelect.innerHTML = resizeMethods.map(m =>
+                    `<option value="${m}" ${(ucfg.resize_method || "bilinear") === m ? 'selected' : ''}>${m.charAt(0).toUpperCase() + m.slice(1)}</option>`
+                ).join("");
+                resizeSelect.onchange = () => { ucfg.resize_method = resizeSelect.value; node.saveState(); };
+                grid.appendChild(createInputGroup("Resize Method", resizeSelect));
+
+                const showHires = ucfg.mode === "hires_only" || ucfg.mode === "model_then_hires";
+                const showModel = ucfg.mode === "model_only" || ucfg.mode === "model_then_hires";
+
+                // --- HiRes fields (multi-value: ratios, denoise) ---
+                if (showHires) {
+                    const ratiosInput = document.createElement("input");
+                    ratiosInput.type = "text";
+                    ratiosInput.className = "cb-input";
+                    ratiosInput.value = ucfg.upscale_ratios || "1.5";
+                    ratiosInput.placeholder = "1.2, 1.5, 2.0";
+                    ratiosInput.onchange = () => { ucfg.upscale_ratios = ratiosInput.value; node.saveState(); };
+                    grid.appendChild(createInputGroup("Upscale Ratios", ratiosInput));
+
+                    const denoiseInput = document.createElement("input");
+                    denoiseInput.type = "text";
+                    denoiseInput.className = "cb-input";
+                    denoiseInput.value = ucfg.hires_denoise || "0.3";
+                    denoiseInput.placeholder = "0.2, 0.3, 0.5";
+                    denoiseInput.onchange = () => { ucfg.hires_denoise = denoiseInput.value; node.saveState(); };
+                    grid.appendChild(createInputGroup("HiRes Denoise", denoiseInput));
+
+                    const stepsInput = document.createElement("input");
+                    stepsInput.type = "number";
+                    stepsInput.className = "cb-input";
+                    stepsInput.value = ucfg.hires_steps || 0;
+                    stepsInput.min = 0;
+                    stepsInput.max = 150;
+                    stepsInput.step = 1;
+                    stepsInput.onchange = () => { ucfg.hires_steps = parseInt(stepsInput.value); node.saveState(); };
+                    grid.appendChild(createInputGroup("HiRes Steps (0=same)", stepsInput));
+
+                    // --- HiRes Tiled Sampling (tile the latent for KSampler to prevent OOM on large upscales) ---
+                    const tiledSamplingCb = document.createElement("input");
+                    tiledSamplingCb.type = "checkbox";
+                    tiledSamplingCb.checked = ucfg.hires_tiled_sampling || false;
+                    tiledSamplingCb.onchange = () => { ucfg.hires_tiled_sampling = tiledSamplingCb.checked; node.saveState(); renderPipelines(); };
+                    grid.appendChild(createInputGroup("HiRes Tiled Sampling", tiledSamplingCb));
+
+                    if (ucfg.hires_tiled_sampling) {
+                        const htWidthInput = document.createElement("input");
+                        htWidthInput.type = "number";
+                        htWidthInput.className = "cb-input";
+                        htWidthInput.value = ucfg.hires_tile_width || 512;
+                        htWidthInput.min = 128;
+                        htWidthInput.max = 2048;
+                        htWidthInput.step = 64;
+                        htWidthInput.onchange = () => { ucfg.hires_tile_width = parseInt(htWidthInput.value); node.saveState(); };
+                        grid.appendChild(createInputGroup("Tile Width", htWidthInput));
+
+                        const htHeightInput = document.createElement("input");
+                        htHeightInput.type = "number";
+                        htHeightInput.className = "cb-input";
+                        htHeightInput.value = ucfg.hires_tile_height || 512;
+                        htHeightInput.min = 128;
+                        htHeightInput.max = 2048;
+                        htHeightInput.step = 64;
+                        htHeightInput.onchange = () => { ucfg.hires_tile_height = parseInt(htHeightInput.value); node.saveState(); };
+                        grid.appendChild(createInputGroup("Tile Height", htHeightInput));
+
+                        const htBlurInput = document.createElement("input");
+                        htBlurInput.type = "number";
+                        htBlurInput.className = "cb-input";
+                        htBlurInput.value = ucfg.hires_mask_blur || 8;
+                        htBlurInput.min = 0;
+                        htBlurInput.max = 64;
+                        htBlurInput.step = 1;
+                        htBlurInput.onchange = () => { ucfg.hires_mask_blur = parseInt(htBlurInput.value); node.saveState(); };
+                        grid.appendChild(createInputGroup("Mask Blur", htBlurInput));
+
+                        const htPaddingInput = document.createElement("input");
+                        htPaddingInput.type = "number";
+                        htPaddingInput.className = "cb-input";
+                        htPaddingInput.value = ucfg.hires_tile_padding || 32;
+                        htPaddingInput.min = 0;
+                        htPaddingInput.max = 256;
+                        htPaddingInput.step = 8;
+                        htPaddingInput.onchange = () => { ucfg.hires_tile_padding = parseInt(htPaddingInput.value); node.saveState(); };
+                        grid.appendChild(createInputGroup("Tile Padding", htPaddingInput));
+
+                        const htUniformCb = document.createElement("input");
+                        htUniformCb.type = "checkbox";
+                        htUniformCb.checked = ucfg.hires_force_uniform_tiles || true;
+                        htUniformCb.onchange = () => { ucfg.hires_force_uniform_tiles = htUniformCb.checked; node.saveState(); };
+                        grid.appendChild(createInputGroup("Force Uniform Tiles", htUniformCb));
+                    }
+
+                    // --- Tiled VAE Decode (separate from tiled sampling) ---
+                    const tiledCb = document.createElement("input");
+                    tiledCb.type = "checkbox";
+                    tiledCb.checked = ucfg.tiled_vae || false;
+                    tiledCb.onchange = () => { ucfg.tiled_vae = tiledCb.checked; node.saveState(); renderPipelines(); };
+                    grid.appendChild(createInputGroup("Tiled VAE Decode", tiledCb));
+
+                    if (ucfg.tiled_vae) {
+                        const tileSizeInput = document.createElement("input");
+                        tileSizeInput.type = "number";
+                        tileSizeInput.className = "cb-input";
+                        tileSizeInput.value = ucfg.tile_size || 512;
+                        tileSizeInput.min = 128;
+                        tileSizeInput.max = 1024;
+                        tileSizeInput.step = 64;
+                        tileSizeInput.onchange = () => { ucfg.tile_size = parseInt(tileSizeInput.value); node.saveState(); };
+                        grid.appendChild(createInputGroup("Tile Size", tileSizeInput));
+
+                        const tileOverlapInput = document.createElement("input");
+                        tileOverlapInput.type = "number";
+                        tileOverlapInput.className = "cb-input";
+                        tileOverlapInput.value = ucfg.tile_overlap || 64;
+                        tileOverlapInput.min = 0;
+                        tileOverlapInput.max = 512;
+                        tileOverlapInput.step = 8;
+                        tileOverlapInput.onchange = () => { ucfg.tile_overlap = parseInt(tileOverlapInput.value); node.saveState(); };
+                        grid.appendChild(createInputGroup("Tile Overlap", tileOverlapInput));
+
+                        const temporalSizeInput = document.createElement("input");
+                        temporalSizeInput.type = "number";
+                        temporalSizeInput.className = "cb-input";
+                        temporalSizeInput.value = ucfg.temporal_size || 512;
+                        temporalSizeInput.min = 128;
+                        temporalSizeInput.max = 1024;
+                        temporalSizeInput.step = 64;
+                        temporalSizeInput.onchange = () => { ucfg.temporal_size = parseInt(temporalSizeInput.value); node.saveState(); };
+                        grid.appendChild(createInputGroup("Temporal Size", temporalSizeInput));
+
+                        const temporalOverlapInput = document.createElement("input");
+                        temporalOverlapInput.type = "number";
+                        temporalOverlapInput.className = "cb-input";
+                        temporalOverlapInput.value = ucfg.temporal_overlap || 64;
+                        temporalOverlapInput.min = 0;
+                        temporalOverlapInput.max = 512;
+                        temporalOverlapInput.step = 8;
+                        temporalOverlapInput.onchange = () => { ucfg.temporal_overlap = parseInt(temporalOverlapInput.value); node.saveState(); };
+                        grid.appendChild(createInputGroup("Temporal Overlap", temporalOverlapInput));
+                    }
+                }
+
+                // --- Model fields (multi-add searchable) ---
+                if (showModel) {
+                    // Model upscale multiplier — only for model_only mode
+                    // In model_then_hires, the Upscale Ratios field already controls final size
+                    if (ucfg.mode === "model_only") {
+                        const sizeInput = document.createElement("input");
+                        sizeInput.type = "text";
+                        sizeInput.className = "cb-input";
+                        sizeInput.value = ucfg.upscale_size || "2.0";
+                        sizeInput.placeholder = "2.0";
+                        sizeInput.style.width = "60px";
+                        sizeInput.title = "Resizes the model's output to (original size × this value). Upscale models have a fixed native scale (e.g. 4x). This setting lets you control the final output size — set to 2.0 to get 2x output even from a 4x model.";
+                        sizeInput.onchange = () => { ucfg.upscale_size = sizeInput.value; node.saveState(); };
+
+                        const sizeGroup = createInputGroup("Output Size Multiplier", sizeInput);
+                        // Add tooltip icon after label
+                        const sizeTooltip = document.createElement("span");
+                        sizeTooltip.textContent = "?";
+                        sizeTooltip.style.cssText = "display: inline-flex; align-items: center; justify-content: center; width: 14px; height: 14px; border-radius: 50%; background: #555; color: #fff; font-size: 10px; font-weight: bold; cursor: help; margin-left: 4px; flex-shrink: 0;";
+                        sizeTooltip.title = "Upscale models output at a fixed native scale (e.g. 4x for most ESRGAN models). This setting resizes that output to (original size × multiplier). Example: A 512px image with a 4x model outputs 2048px. Setting this to 2.0 resizes it down to 1024px.";
+                        const sizeLabel = sizeGroup.querySelector("label");
+                        if (sizeLabel) { sizeLabel.style.display = "inline-flex"; sizeLabel.style.alignItems = "center"; sizeLabel.appendChild(sizeTooltip); }
+                        grid.appendChild(sizeGroup);
+                    }
+
+                    // Upscale models list with add/remove
+                    const modelsContainer = document.createElement("div");
+                    const noModels = !ucfg.upscale_models || ucfg.upscale_models.length === 0;
+
+                    // Red outline when no model is selected
+                    if (noModels) {
+                        modelsContainer.style.cssText = "border: 2px solid #ff3333; border-radius: 4px; padding: 4px;";
+                    }
+
+                    const modelsLabel = document.createElement("div");
+                    modelsLabel.style.cssText = "font-size: 12px; color: " + (noModels ? "#ff3333" : "#aaa") + "; margin-bottom: 4px;";
+                    modelsLabel.textContent = `Upscale Models (${(ucfg.upscale_models || []).length})` + (noModels ? " — Select a model!" : "");
+                    modelsContainer.appendChild(modelsLabel);
+
+                    // Existing model chips
+                    (ucfg.upscale_models || []).forEach((modelName, mIdx) => {
+                        const chip = document.createElement("div");
+                        chip.style.cssText = "display: inline-flex; align-items: center; gap: 4px; background: #333; border-radius: 4px; padding: 2px 8px; margin: 2px; font-size: 12px;";
+                        chip.textContent = modelName;
+                        const removeBtn = document.createElement("span");
+                        removeBtn.textContent = "✕";
+                        removeBtn.style.cssText = "cursor: pointer; color: #cc3333; margin-left: 4px;";
+                        removeBtn.onclick = () => {
+                            ucfg.upscale_models.splice(mIdx, 1);
                             node.saveState();
-                            renderConfigs();
-                        }
-                    },
-                    "Search upscale models..."
-                );
-                modelsContainer.appendChild(addSelect);
-                grid.appendChild(modelsContainer);
-            }
+                            renderPipelines();
+                        };
+                        chip.appendChild(removeBtn);
+                        modelsContainer.appendChild(chip);
+                    });
 
-            card.appendChild(grid);
+                    // Add model searchable select
+                    const addSelect = createSearchableSelect(
+                        modelLists?.upscaleModels || [],
+                        "",
+                        (value) => {
+                            if (value && !ucfg.upscale_models.includes(value)) {
+                                ucfg.upscale_models.push(value);
+                                node.saveState();
+                                renderPipelines();
+                            }
+                        },
+                        "Search upscale models..."
+                    );
+                    modelsContainer.appendChild(addSelect);
+                    grid.appendChild(modelsContainer);
+                }
 
-            // Iteration count for this config
-            const countDisplay = document.createElement("div");
-            countDisplay.style.cssText = "color: #00cc00; font-family: monospace; font-size: 11px; margin-top: 4px;";
-            const ratios = (ucfg.upscale_ratios || "1.5").split(",").map(s => s.trim()).filter(s => s).length;
-            const denoises = (ucfg.hires_denoise || "0.3").split(",").map(s => s.trim()).filter(s => s).length;
-            const models = Math.max(1, (ucfg.upscale_models || []).length);
-            let combos = 1;
-            if (showHires) combos *= ratios * denoises;
-            if (showModel) combos *= models;
-            countDisplay.textContent = `⏱️ ${combos} upscale combination(s) per base image`;
-            card.appendChild(countDisplay);
+                card.appendChild(grid);
 
-            body.appendChild(card);
+                // Iteration count for this step
+                const countDisplay = document.createElement("div");
+                countDisplay.style.cssText = "color: #00cc00; font-family: monospace; font-size: 11px; margin-top: 4px;";
+                const ratios = (ucfg.upscale_ratios || "1.5").split(",").map(s => s.trim()).filter(s => s).length;
+                const denoises = (ucfg.hires_denoise || "0.3").split(",").map(s => s.trim()).filter(s => s).length;
+                const models = Math.max(1, (ucfg.upscale_models || []).length);
+                let combos = 1;
+                if (showHires) combos *= ratios * denoises;
+                if (showModel) combos *= models;
+                const repeatCount = ucfg.repeat || 1;
+                countDisplay.textContent = `⏱️ ${combos} upscale combination(s) per base image` + (repeatCount > 1 ? ` × ${repeatCount} repeats` : "");
+                card.appendChild(countDisplay);
+
+                pipeBody.appendChild(card);
+            });
+
+            // Add Step button inside pipeline
+            const addStepBtn = document.createElement("button");
+            addStepBtn.className = "cb-button";
+            addStepBtn.textContent = "➕ Add Step";
+            addStepBtn.style.cssText = "margin-top: 4px; border-left: 4px solid #9966cc;";
+            addStepBtn.onclick = () => {
+                pipeline.steps.push(createDefaultStep());
+                node.saveState();
+                renderPipelines();
+            };
+            pipeBody.appendChild(addStepBtn);
+
+            pipeCard.appendChild(pipeBody);
+            pipelinesContainer.appendChild(pipeCard);
         });
 
-        // Add config button
-        const addBtn = document.createElement("button");
-        addBtn.className = "cb-button";
-        addBtn.textContent = "➕ Add Upscale Config";
-        addBtn.style.cssText = "margin-top: 4px; border-left: 4px solid #cc99ff;";
-        addBtn.onclick = () => {
-            ups.configs.push({
-                mode: "hires_only",
-                upscale_models: [],
-                upscale_ratios: "1.5",
-                hires_denoise: "0.3",
-                hires_steps: 0,
-                tiled_vae: false,
-                tile_size: 512
+        // Add Pipeline button
+        const addPipeBtn = document.createElement("button");
+        addPipeBtn.className = "cb-button";
+        addPipeBtn.textContent = "➕ Add Pipeline";
+        addPipeBtn.style.cssText = "margin-top: 4px; border-left: 4px solid #cc99ff;";
+        addPipeBtn.onclick = () => {
+            ups.pipelines.push({
+                active: true,
+                name: `Pipeline ${ups.pipelines.length + 1}`,
+                steps: [createDefaultStep()]
             });
             node.saveState();
-            renderConfigs();
+            renderPipelines();
         };
-        body.appendChild(addBtn);
+        pipelinesContainer.appendChild(addPipeBtn);
     }
 
-    renderConfigs();
+    renderPipelines();
     section.appendChild(body);
     container.appendChild(section);
 }

@@ -97,7 +97,17 @@ var labelMode = labelMode || {
         cfg: false,
         steps: false,
         seed: false,
-        denoise: false
+        denoise: false,
+        upscale: false,
+        upscaleMode: false,
+        upscaleModel: false,
+        upscaleRatio: false,
+        upscaleDenoise: false,
+        upscaleResizeMethod: false,
+        upscaleHiresSteps: false,
+        upscaleTiling: false,
+        hiresPromptBehavior: false,
+        hiresPromptText: false
     }
 };
 

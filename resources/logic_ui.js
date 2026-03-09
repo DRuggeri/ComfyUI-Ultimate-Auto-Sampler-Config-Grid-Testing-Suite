@@ -16,7 +16,10 @@ function computeLabelGlobalValues() {
         return;
     }
 
-    const fields = ['model', 'lora', 'sampler', 'scheduler', 'cfg', 'steps', 'seed', 'denoise', 'positive'];
+    const fields = ['model', 'lora', 'sampler', 'scheduler', 'cfg', 'steps', 'seed', 'denoise', 'positive',
+                     'upscale', 'upscaleMode', 'upscaleModel', 'upscaleRatio', 'upscaleDenoise',
+                     'upscaleResizeMethod', 'upscaleHiresSteps', 'upscaleTiling',
+                     'hiresPromptBehavior', 'hiresPromptText'];
     const valueSets = {};
     fields.forEach(f => valueSets[f] = new Set());
 
@@ -30,6 +33,28 @@ function computeLabelGlobalValues() {
         valueSets.seed.add(String(item.seed));
         valueSets.denoise.add(String(item.denoise));
         valueSets.positive.add(item.positive || meta.positive || "");
+        // Upscale composite (for the "all" toggle)
+        const upParts = [];
+        if (item.upscale_mode) upParts.push(item.upscale_mode);
+        if (item.upscale_model) upParts.push(item.upscale_model);
+        if (item.upscale_ratio) upParts.push('x' + item.upscale_ratio);
+        if (item.upscale_denoise !== undefined && item.upscale_denoise !== null) upParts.push('dn:' + item.upscale_denoise);
+        valueSets.upscale.add(upParts.length > 0 ? upParts.join(' ') : '');
+        // Individual upscale fields (stringify arrays for set comparison)
+        const toStr = (v) => v === undefined || v === null ? '' : (Array.isArray(v) ? JSON.stringify(v) : String(v));
+        valueSets.upscaleMode.add(toStr(item.upscale_mode));
+        valueSets.upscaleModel.add(toStr(item.upscale_model));
+        valueSets.upscaleRatio.add(toStr(item.upscale_ratio));
+        valueSets.upscaleDenoise.add(toStr(item.upscale_denoise));
+        valueSets.upscaleResizeMethod.add(toStr(item.upscale_resize_method));
+        valueSets.upscaleHiresSteps.add(toStr(item.upscale_hires_steps));
+        // Tiling composite: combine tiled_vae + tiled_sampling info
+        const tileParts = [];
+        if (item.upscale_tiled_vae) tileParts.push('VAE:' + toStr(item.upscale_tile_size));
+        if (item.upscale_tiled_sampling) tileParts.push('Sample:' + toStr(item.upscale_tile_w) + 'x' + toStr(item.upscale_tile_h));
+        valueSets.upscaleTiling.add(tileParts.length > 0 ? tileParts.join(' ') : '');
+        valueSets.hiresPromptBehavior.add(toStr(item.hires_prompt_behavior));
+        valueSets.hiresPromptText.add(toStr(item.hires_prompt_text));
     }
 
     // A value is "global" if only 1 unique value exists for that field
@@ -145,6 +170,127 @@ function buildLabelOverlay(d) {
         }
     }
 
+    // --- Upscale labels (each on its own line via class) ---
+    const anyUpscaleField = labelMode.fields.upscale || labelMode.fields.upscaleMode || labelMode.fields.upscaleModel ||
+        labelMode.fields.upscaleRatio || labelMode.fields.upscaleDenoise || labelMode.fields.upscaleResizeMethod ||
+        labelMode.fields.upscaleHiresSteps || labelMode.fields.upscaleTiling;
+
+    if (anyUpscaleField && d.upscaled) {
+        // Helper: format a value that may be scalar or array (stacking mode) into a display string
+        const fmtVal = (v, prefix, transform) => {
+            if (v === undefined || v === null) return null;
+            const fn = transform || (x => String(x));
+            if (Array.isArray(v)) return prefix + v.map(fn).join(', ');
+            return prefix + fn(v);
+        };
+        const shortModelName = (m) => m ? m.replace(/\\/g, '/').split('/').pop().replace(/\.[^.]+$/, '') : '';
+        const isStacked = d.upscale_stacked;
+
+        // "Upscale (all)" — combined summary tag
+        if (labelMode.fields.upscale) {
+            const parts = [];
+            if (d.upscale_mode) {
+                const modes = Array.isArray(d.upscale_mode) ? d.upscale_mode.map(m => m.replace(/_/g, ' ')).join(', ') : d.upscale_mode.replace(/_/g, ' ');
+                parts.push(modes);
+            }
+            if (d.upscale_model) {
+                const models = Array.isArray(d.upscale_model) ? d.upscale_model.map(shortModelName).join(', ') : shortModelName(d.upscale_model);
+                parts.push(models);
+            }
+            if (d.upscale_ratio) {
+                const ratios = Array.isArray(d.upscale_ratio) ? d.upscale_ratio.map(r => 'x' + r).join(', ') : 'x' + d.upscale_ratio;
+                parts.push(ratios);
+            }
+            const label = parts.length > 0 ? (isStacked ? '⛓ ' : '') + parts.join(' | ') : 'Upscaled';
+            if (!uniqueOnly || !labelGlobalValues || !labelGlobalValues.upscale) {
+                tags.push(`<span class="label-tag label-upscale" title="${label}">${label}</span>`);
+            }
+        }
+        // Individual upscale fields — each on its own line
+        if (labelMode.fields.upscaleMode && d.upscale_mode) {
+            if (!uniqueOnly || !labelGlobalValues || !labelGlobalValues.upscaleMode) {
+                const val = fmtVal(d.upscale_mode, 'Mode: ', m => m.replace(/_/g, ' '));
+                tags.push(`<span class="label-tag label-upscale">${val}</span>`);
+            }
+        }
+        if (labelMode.fields.upscaleModel && d.upscale_model) {
+            if (!uniqueOnly || !labelGlobalValues || !labelGlobalValues.upscaleModel) {
+                const raw = d.upscale_model;
+                const val = fmtVal(raw, 'Model: ', shortModelName);
+                const full = Array.isArray(raw) ? raw.join(', ') : raw;
+                tags.push(`<span class="label-tag label-upscale" title="${full}">${val}</span>`);
+            }
+        }
+        if (labelMode.fields.upscaleRatio && d.upscale_ratio !== undefined) {
+            if (!uniqueOnly || !labelGlobalValues || !labelGlobalValues.upscaleRatio) {
+                const val = fmtVal(d.upscale_ratio, 'Ratio: ', r => 'x' + r);
+                tags.push(`<span class="label-tag label-upscale">${val}</span>`);
+            }
+        }
+        if (labelMode.fields.upscaleDenoise && d.upscale_denoise !== undefined) {
+            if (!uniqueOnly || !labelGlobalValues || !labelGlobalValues.upscaleDenoise) {
+                const val = fmtVal(d.upscale_denoise, 'Denoise: ');
+                tags.push(`<span class="label-tag label-upscale">${val}</span>`);
+            }
+        }
+        if (labelMode.fields.upscaleResizeMethod && d.upscale_resize_method) {
+            if (!uniqueOnly || !labelGlobalValues || !labelGlobalValues.upscaleResizeMethod) {
+                const val = fmtVal(d.upscale_resize_method, 'Resize: ');
+                tags.push(`<span class="label-tag label-upscale">${val}</span>`);
+            }
+        }
+        if (labelMode.fields.upscaleHiresSteps && d.upscale_hires_steps) {
+            if (!uniqueOnly || !labelGlobalValues || !labelGlobalValues.upscaleHiresSteps) {
+                const val = fmtVal(d.upscale_hires_steps, 'HiRes Steps: ');
+                tags.push(`<span class="label-tag label-upscale">${val}</span>`);
+            }
+        }
+        if (labelMode.fields.upscaleTiling) {
+            const tileParts = [];
+            if (d.upscale_tiled_vae) {
+                const ts = d.upscale_tile_size;
+                tileParts.push('VAE Tile: ' + (Array.isArray(ts) ? ts.join(', ') : (ts || 512)));
+            }
+            if (d.upscale_tiled_sampling) {
+                const tw = d.upscale_tile_w;
+                const th = d.upscale_tile_h;
+                if (Array.isArray(tw)) {
+                    tileParts.push('Sample Tile: ' + tw.map((w, i) => w + 'x' + (th[i] || w)).join(', '));
+                } else {
+                    tileParts.push('Sample Tile: ' + (tw || 512) + 'x' + (th || 512));
+                }
+            }
+            if (tileParts.length > 0) {
+                if (!uniqueOnly || !labelGlobalValues || !labelGlobalValues.upscaleTiling) {
+                    for (const tp of tileParts) {
+                        tags.push(`<span class="label-tag label-upscale">${tp}</span>`);
+                    }
+                }
+            }
+        }
+        if (labelMode.fields.hiresPromptBehavior && d.hires_prompt_behavior) {
+            if (!uniqueOnly || !labelGlobalValues || !labelGlobalValues.hiresPromptBehavior) {
+                const val = fmtVal(d.hires_prompt_behavior, 'HiRes Prompt: ', b => b.replace(/_/g, ' '));
+                tags.push(`<span class="label-tag label-hiresPrompt">${val}</span>`);
+            }
+        }
+        if (labelMode.fields.hiresPromptText && d.hires_prompt_text) {
+            if (!uniqueOnly || !labelGlobalValues || !labelGlobalValues.hiresPromptText) {
+                const text = d.hires_prompt_text;
+                const short = text.length > 30 ? text.substring(0, 28) + '...' : text;
+                tags.push(`<span class="label-tag label-hiresPrompt" title="${text}">${short}</span>`);
+            }
+        }
+    } else if (anyUpscaleField && !d.upscaled) {
+        // Show "No Upscale" only when there's a mix of upscaled and non-upscaled images
+        if (!uniqueOnly || !labelGlobalValues || !labelGlobalValues.upscale) {
+            const hasAnyUpscaled = activeData && activeData.some(i => i.upscaled);
+            if (hasAnyUpscaled) {
+                tags.push(`<span class="label-tag label-upscale" style="opacity:0.5;">No Upscale</span>`);
+            }
+        }
+    }
+
     if (tags.length === 0) return '';
     return `<div class="label-overlay">${tags.join('')}</div>`;
 }
@@ -168,7 +314,9 @@ function toggleLabelMode(enabled) {
  * Update label field selections from checkboxes
  */
 function updateLabelFields() {
-    const fields = ['model', 'lora', 'prompt', 'sampler', 'scheduler', 'cfg', 'steps', 'seed', 'denoise'];
+    const fields = ['model', 'lora', 'prompt', 'sampler', 'scheduler', 'cfg', 'steps', 'seed', 'denoise', 'upscale',
+                     'upscaleMode', 'upscaleModel', 'upscaleRatio', 'upscaleDenoise', 'upscaleResizeMethod', 'upscaleHiresSteps', 'upscaleTiling',
+                     'hiresPromptBehavior', 'hiresPromptText'];
     fields.forEach(f => {
         const cb = document.getElementById(`label-field-${f}`);
         if (cb) labelMode.fields[f] = cb.checked;
@@ -214,7 +362,9 @@ function loadLabelPreferences() {
     const fieldsContainer = document.getElementById('label-fields-container');
     if (fieldsContainer) fieldsContainer.style.display = labelMode.enabled ? 'block' : 'none';
 
-    const fields = ['model', 'lora', 'prompt', 'sampler', 'scheduler', 'cfg', 'steps', 'seed', 'denoise'];
+    const fields = ['model', 'lora', 'prompt', 'sampler', 'scheduler', 'cfg', 'steps', 'seed', 'denoise', 'upscale',
+                     'upscaleMode', 'upscaleModel', 'upscaleRatio', 'upscaleDenoise', 'upscaleResizeMethod', 'upscaleHiresSteps', 'upscaleTiling',
+                     'hiresPromptBehavior', 'hiresPromptText'];
     fields.forEach(f => {
         const cb = document.getElementById(`label-field-${f}`);
         if (cb) cb.checked = labelMode.fields[f] || false;

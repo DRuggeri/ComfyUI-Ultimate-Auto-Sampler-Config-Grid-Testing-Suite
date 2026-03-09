@@ -128,14 +128,35 @@ app.registerExtension({
                     }],
                     upscaling: {
                         enabled: false,
-                        configs: [{
-                            mode: "hires_only",
-                            upscale_models: [],
-                            upscale_ratios: "1.5",
-                            hires_denoise: "0.3",
-                            hires_steps: 0,
-                            tiled_vae: false,
-                            tile_size: 512
+                        save_pre_upscale: false,
+                        hires_prompt_adjust: false,
+                        hires_prompt_behavior: "append_end",
+                        hires_prompt_text: "",
+                        pipelines: [{
+                            active: true,
+                            name: "Pipeline 1",
+                            steps: [{
+                                active: true,
+                                mode: "hires_only",
+                                repeat: 1,
+                                upscale_models: [],
+                                upscale_ratios: "1.5",
+                                upscale_size: "2.0",
+                                hires_denoise: "0.3",
+                                hires_steps: 0,
+                                tiled_vae: false,
+                                tile_size: 512,
+                                tile_overlap: 64,
+                                temporal_size: 512,
+                                temporal_overlap: 64,
+                                resize_method: "bilinear",
+                                hires_tiled_sampling: false,
+                                hires_tile_width: 512,
+                                hires_tile_height: 512,
+                                hires_mask_blur: 8,
+                                hires_tile_padding: 32,
+                                hires_force_uniform_tiles: false
+                            }]
                         }]
                     },
                     cooldown: {
