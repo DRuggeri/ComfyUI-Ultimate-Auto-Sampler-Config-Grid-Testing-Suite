@@ -128,14 +128,15 @@ app.registerExtension({
                     }],
                     upscaling: {
                         enabled: false,
-                        mode: "hires_only",
-                        upscale_ratio: 1.5,
-                        hires_denoise: 0.5,
-                        hires_steps: 0,
-                        tiled_vae: false,
-                        tile_size: 512,
-                        upscale_model: "",
-                        upscale_size: 2.0
+                        configs: [{
+                            mode: "hires_only",
+                            upscale_models: [],
+                            upscale_ratios: "1.5",
+                            hires_denoise: "0.3",
+                            hires_steps: 0,
+                            tiled_vae: false,
+                            tile_size: 512
+                        }]
                     },
                     cooldown: {
                         enabled: false,

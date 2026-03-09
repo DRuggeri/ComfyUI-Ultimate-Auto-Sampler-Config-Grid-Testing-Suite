@@ -690,9 +690,12 @@ export function convertStateToConfigs(state) {
     // These are attached as a special _session_settings key alongside the configs array
     const sessionSettings = {};
 
-    // Upscaling settings
-    if (state.upscaling && state.upscaling.enabled) {
-        sessionSettings.upscaling = { ...state.upscaling };
+    // Upscaling settings (array-based)
+    if (state.upscaling && state.upscaling.enabled && state.upscaling.configs) {
+        sessionSettings.upscaling = {
+            enabled: true,
+            configs: state.upscaling.configs.map(c => ({ ...c }))
+        };
     }
 
     // Cooldown settings
