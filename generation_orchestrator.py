@@ -27,7 +27,7 @@ from .model_loader import (
 from .lora_utils import expand_lora_folder
 from .image_generation import (
     generate_image, flush_batch_with_vae, flush_batch_with_remote_vae,
-    create_image_metadata, calculate_eta, print_generation_progress
+    create_image_metadata, decode_latent_with_vae, calculate_eta, print_generation_progress
 )
 from .config_utils import sanitize_session_name
 from .html_generator import get_html_template
@@ -1093,40 +1093,101 @@ def run_generation_loop(
                     height=h
                 )
 
-                # ==== UPSCALING (if enabled in session settings) ====
+                # ==== UPSCALING (array-based with Cartesian expansion) ====
                 if session_settings and session_settings.get("upscaling", {}).get("enabled", False) and result_latent is not None:
                     from .image_generation import upscale_image
-                    upscaling_config = session_settings["upscaling"]
-                    upscale_result, upscale_duration = upscale_image(
-                        result_latent, loaded_vae, patched_model, upscaling_config,
-                        conf, final_positive, final_negative, w, h
-                    )
-                    if isinstance(upscale_result, dict) and "samples" in upscale_result:
-                        # HiRes modes return a latent dict — replace result_latent
-                        result_latent = upscale_result
-                        duration += upscale_duration
-                    else:
-                        # Model-only mode returns PIL.Image — save upscaled image directly
-                        from PIL import Image as PILImage
-                        if isinstance(upscale_result, PILImage.Image):
-                            duration += upscale_duration
-                            upscaled_filename = f"upscaled_{gen_index_offset + total_generated:04d}.webp"
-                            upscale_result.save(
-                                os.path.join(paths["images"], upscaled_filename),
-                                "WEBP", quality=80
+                    import itertools as upscale_itertools
+                    from PIL import Image as PILImage
+
+                    upscale_configs = session_settings["upscaling"].get("configs", [])
+                    upscale_combo_idx = 0
+
+                    for ucfg_idx, ucfg in enumerate(upscale_configs):
+                        mode = ucfg.get("mode", "hires_only")
+                        show_hires = mode in ("hires_only", "model_then_hires")
+                        show_model = mode in ("model_only", "model_then_hires")
+
+                        # Parse multi-value fields
+                        raw_ratios = str(ucfg.get("upscale_ratios", "1.5"))
+                        ratios = [float(r.strip()) for r in raw_ratios.split(",") if r.strip()] or [1.5]
+                        raw_denoise = str(ucfg.get("hires_denoise", "0.3"))
+                        denoises = [float(d.strip()) for d in raw_denoise.split(",") if d.strip()] or [0.3]
+                        models = ucfg.get("upscale_models", []) or [""]
+
+                        # Build Cartesian product of multi-value fields
+                        if show_hires and show_model:
+                            combos = list(upscale_itertools.product(models, ratios, denoises))
+                        elif show_hires:
+                            combos = list(upscale_itertools.product([""], ratios, denoises))
+                        elif show_model:
+                            combos = list(upscale_itertools.product(models, [1.0], [0.0]))
+                        else:
+                            combos = []
+
+                        for combo in combos:
+                            up_model_name, up_ratio, up_denoise = combo
+
+                            # Build single-value upscaling config for upscale_image()
+                            single_config = {
+                                "mode": mode,
+                                "upscale_ratio": up_ratio,
+                                "hires_denoise": up_denoise,
+                                "hires_steps": ucfg.get("hires_steps", 0),
+                                "tiled_vae": ucfg.get("tiled_vae", False),
+                                "tile_size": ucfg.get("tile_size", 512),
+                                "upscale_model": up_model_name,
+                                "upscale_size": up_ratio  # Use ratio as target size
+                            }
+
+                            upscale_result, upscale_duration = upscale_image(
+                                result_latent, loaded_vae, patched_model, single_config,
+                                conf, final_positive, final_negative, w, h
                             )
+
+                            upscaled_filename = f"upscaled_{gen_index_offset + total_generated:04d}_{ucfg_idx}_{upscale_combo_idx}.webp"
+
+                            if isinstance(upscale_result, dict) and "samples" in upscale_result:
+                                # HiRes modes return latent — decode and save
+                                upscaled_pil = decode_latent_with_vae(loaded_vae, upscale_result["samples"])
+                                upscaled_pil.save(
+                                    os.path.join(paths["images"], upscaled_filename),
+                                    "WEBP", quality=80
+                                )
+                                up_w, up_h = upscaled_pil.size
+                            elif isinstance(upscale_result, PILImage.Image):
+                                # Model-only returns PIL directly
+                                upscale_result.save(
+                                    os.path.join(paths["images"], upscaled_filename),
+                                    "WEBP", quality=80
+                                )
+                                up_w, up_h = upscale_result.size
+                            else:
+                                upscale_combo_idx += 1
+                                continue
+
                             upscaled_meta = create_image_metadata(
-                                conf, upscale_result.size[0], upscale_result.size[1],
-                                duration, current_seed, batch_idx,
+                                conf, up_w, up_h, upscale_duration, current_seed, batch_idx,
                                 actual_positive_prompt, actual_negative_prompt,
                                 gen_index=gen_index_offset + total_generated
                             )
                             upscaled_meta["upscaled"] = True
-                            upscaled_meta["upscale_mode"] = upscaling_config.get("mode", "model_only")
+                            upscaled_meta["upscale_mode"] = mode
+                            upscaled_meta["upscale_ratio"] = up_ratio
+                            upscaled_meta["upscale_denoise"] = up_denoise
+                            if up_model_name:
+                                upscaled_meta["upscale_model"] = up_model_name
                             upscaled_meta["file"] = f"filename={upscaled_filename}"
                             existing_data["items"].append(upscaled_meta)
-                            save_manifest(paths["manifest"], existing_data)
-                            print(f"[GridTester] 🔍 Saved upscaled image: {upscaled_filename}")
+
+                            print(f"[GridTester] 🔍 Saved upscaled image: {upscaled_filename} "
+                                  f"(mode={mode}, ratio={up_ratio}, denoise={up_denoise}"
+                                  f"{', model=' + up_model_name if up_model_name else ''})")
+
+                            upscale_combo_idx += 1
+
+                    # Save manifest after all upscale combos
+                    if upscale_combo_idx > 0:
+                        save_manifest(paths["manifest"], existing_data)
 
                 job_durations.append(duration)
                 eta_info = calculate_eta(job_durations, current_job, total_jobs)
