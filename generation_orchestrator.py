@@ -1094,9 +1094,11 @@ def run_generation_loop(
                 )
 
                 # ==== UPSCALING (array-based with Cartesian expansion) ====
+                upscale_produced = False
                 if session_settings and session_settings.get("upscaling", {}).get("enabled", False) and result_latent is not None:
                     from .image_generation import upscale_image
                     import itertools as upscale_itertools
+                    import random as upscale_random
                     from PIL import Image as PILImage
 
                     upscale_configs = session_settings["upscaling"].get("configs", [])
@@ -1178,14 +1180,18 @@ def run_generation_loop(
                                 actual_positive_prompt, actual_negative_prompt,
                                 gen_index=gen_index_offset + total_generated
                             )
+                            # Generate unique ID for dashboard display (same pattern as flush_batch_with_vae)
+                            upscaled_meta["id"] = int(time.time() * 100000) + upscale_random.randint(0, 1000)
                             upscaled_meta["upscaled"] = True
                             upscaled_meta["upscale_mode"] = mode
                             upscaled_meta["upscale_ratio"] = up_ratio
                             upscaled_meta["upscale_denoise"] = up_denoise
                             if up_model_name:
                                 upscaled_meta["upscale_model"] = up_model_name
-                            upscaled_meta["file"] = f"filename={upscaled_filename}"
+                            upscaled_meta["file"] = f"/view?filename={upscaled_filename}&type=output&subfolder=benchmarks/{session_name}/images"
+                            upscaled_meta["rejected"] = False
                             existing_data["items"].append(upscaled_meta)
+                            upscale_produced = True
 
                             print(f"[GridTester] 🔍 Saved upscaled image: {upscaled_filename} "
                                   f"(mode={mode}, ratio={up_ratio}, denoise={up_denoise}"
@@ -1225,16 +1231,19 @@ def run_generation_loop(
                         except Exception:
                             pass
 
-                meta = create_image_metadata(
-                    conf, w, h, duration, current_seed, batch_idx,
-                    actual_positive_prompt, actual_negative_prompt,
-                    gen_index=gen_index_offset + total_generated
-                )
-                if pos_hash or neg_hash:
-                    meta["conditioning_pos_hash"] = pos_hash
-                    meta["conditioning_neg_hash"] = neg_hash
-                
-                pending_batch.append((result_latent["samples"].clone(), meta))
+                # Skip saving the base (non-upscaled) image when upscaling produced results
+                # — only the upscaled final version(s) should appear in the output
+                if not upscale_produced:
+                    meta = create_image_metadata(
+                        conf, w, h, duration, current_seed, batch_idx,
+                        actual_positive_prompt, actual_negative_prompt,
+                        gen_index=gen_index_offset + total_generated
+                    )
+                    if pos_hash or neg_hash:
+                        meta["conditioning_pos_hash"] = pos_hash
+                        meta["conditioning_neg_hash"] = neg_hash
+
+                    pending_batch.append((result_latent["samples"].clone(), meta))
                 total_generated += 1
 
                 # ==== GPU COOLDOWN (if enabled in session settings) ====
