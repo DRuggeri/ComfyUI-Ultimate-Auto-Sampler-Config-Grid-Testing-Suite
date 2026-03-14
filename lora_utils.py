@@ -1,7 +1,6 @@
 import json
 import hashlib
-import urllib.request
-import urllib.error
+from .network_utils import civitai_fetch_by_hash
 import folder_paths
 import os
 
@@ -58,19 +57,7 @@ def calculate_sha256(file_path):
 
 def get_model_version_info(hash_value):
     """Fetch model version info from Civitai API using hash"""
-    api_url = f"https://civitai.com/api/v1/model-versions/by-hash/{hash_value}"
-    try:
-        req = urllib.request.Request(api_url, headers={"User-Agent": "ComfyUI-ConfigBuilder"})
-        with urllib.request.urlopen(req, timeout=10) as response:
-            if response.status == 200:
-                return json.loads(response.read().decode("utf-8"))
-            else:
-                return None
-    except urllib.error.HTTPError:
-        return None
-    except Exception as e:
-        print(f"[Lora-Auto-Trigger] {e}")
-        return None
+    return civitai_fetch_by_hash(hash_value)
 
 
 def load_and_save_tags(lora_name, force_fetch, auto_fetch=True):
