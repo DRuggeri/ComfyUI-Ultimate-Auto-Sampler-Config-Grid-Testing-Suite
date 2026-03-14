@@ -10,7 +10,14 @@ import time
 from safetensors.torch import _tobytes
 import numpy as np
 from PIL import Image
-from diffusers.image_processor import VaeImageProcessor
+try:
+    from diffusers.image_processor import VaeImageProcessor
+except ImportError as e:
+    VaeImageProcessor = None
+    print(f"[GridTester] ⚠️ Could not import diffusers: {e}")
+    print("[GridTester] ⚠️ Remote VAE features will be unavailable.")
+    print("[GridTester] ⚠️ To fix, run: pip install --upgrade diffusers>=0.25.0")
+    print("[GridTester] ⚠️ If another custom node requires an older version, you may need to resolve the conflict manually.")
 
 
 
@@ -231,6 +238,8 @@ class RemoteVAEDecodeWorker:
                 
                 # Use VaeImageProcessor to properly postprocess the VAE output
                 # This handles denormalization from [-1, 1] to [0, 1] and format conversion
+                if VaeImageProcessor is None:
+                    raise ImportError("diffusers is not installed or outdated. Fix: pip install --upgrade diffusers")
                 image_processor = VaeImageProcessor(vae_scale_factor=8)
                 image_processor.config.do_resize = False
                 
