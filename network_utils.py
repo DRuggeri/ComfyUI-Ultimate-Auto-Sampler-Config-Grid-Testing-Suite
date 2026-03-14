@@ -16,9 +16,6 @@ import urllib.request
 import urllib.error
 import urllib.parse
 
-import torch
-from safetensors.torch import _tobytes
-
 
 # =============================================================================
 # 1. CIVITAI API — Model/LoRA metadata lookup
@@ -91,6 +88,11 @@ def huggingface_vae_decode(endpoint_url, tensor, height, width):
         ValueError: If endpoint_url is not in the allowlist
         RuntimeError: If the remote endpoint returns non-200
     """
+    # Lazy imports — only needed for HF VAE, avoids breaking CivitAI/Distribution
+    # if torch or safetensors are not installed
+    import torch
+    from safetensors.torch import _tobytes
+
     # Validate endpoint against allowlist
     if endpoint_url not in HUGGINGFACE_VAE_ENDPOINTS.values():
         raise ValueError(

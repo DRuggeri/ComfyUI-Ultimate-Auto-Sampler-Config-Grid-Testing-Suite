@@ -548,7 +548,7 @@ def notify_workers_to_start(worker_urls, master_url, session_name, sync_models_t
     Notify remote worker ComfyUI instances to start processing.
     Sends POST /distribution/start_worker to each worker URL.
 
-    Uses urllib.request (no 'requests' library for ComfyUI Registry compliance).
+    Uses network_utils.py gateway for all outbound requests.
 
     Args:
         worker_urls: List of worker base URLs

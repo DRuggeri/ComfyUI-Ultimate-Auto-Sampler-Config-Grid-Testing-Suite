@@ -656,7 +656,7 @@ class WorkerThread(threading.Thread):
     def _submit_result(self, job_id, image_bytes, meta, max_retries=3):
         """
         Upload image + metadata to master via multipart POST.
-        Uses urllib (no 'requests' library for ComfyUI Registry compliance).
+        Uses network_utils.py gateway for all outbound requests.
         Retries on transient network errors (connection reset, timeout).
         """
         # JSON-safe meta (ensure no non-serializable types from config round-trip)
