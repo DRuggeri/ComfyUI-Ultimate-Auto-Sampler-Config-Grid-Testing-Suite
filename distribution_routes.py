@@ -12,6 +12,7 @@ import threading
 
 import server
 from aiohttp import web
+from .network_utils import distribution_get, distribution_post_json
 
 
 # =============================================================================
@@ -391,9 +392,6 @@ async def test_worker_connection(request):
         200 + JSON with worker status on success
         200 + JSON with error info on failure (so the UI always gets a parseable response)
     """
-    import urllib.request
-    import urllib.error
-
     try:
         data = await request.json()
         worker_url = data.get("worker_url", "").strip().rstrip("/")
@@ -401,29 +399,23 @@ async def test_worker_connection(request):
         if not worker_url:
             return web.json_response({"reachable": False, "error": "Empty URL"})
 
-        req = urllib.request.Request(
+        status, resp_data = distribution_get(
             f"{worker_url}/distribution/worker_status",
-            method="GET"
+            timeout=5
         )
-
-        with urllib.request.urlopen(req, timeout=5) as resp:
-            result = json.loads(resp.read().decode("utf-8"))
-            return web.json_response({
-                "reachable": True,
-                "status": result.get("status", "unknown"),
-                "worker_id": result.get("worker_id", ""),
-                "jobs_processed": result.get("jobs_processed", 0)
-            })
-
-    except urllib.error.HTTPError as e:
+        result = json.loads(resp_data.decode("utf-8"))
         return web.json_response({
-            "reachable": False,
-            "error": f"HTTP {e.code}"
+            "reachable": True,
+            "status": result.get("status", "unknown"),
+            "worker_id": result.get("worker_id", ""),
+            "jobs_processed": result.get("jobs_processed", 0)
         })
+
     except Exception as e:
+        error_msg = f"HTTP {e.code}" if hasattr(e, 'code') else str(e)
         return web.json_response({
             "reachable": False,
-            "error": str(e)
+            "error": error_msg
         })
 
 
@@ -567,9 +559,6 @@ def notify_workers_to_start(worker_urls, master_url, session_name, sync_models_t
     Returns:
         List of (url, success, message) tuples
     """
-    import urllib.request
-    import urllib.error
-
     results = []
 
     for url in worker_urls:
@@ -578,36 +567,30 @@ def notify_workers_to_start(worker_urls, master_url, session_name, sync_models_t
             continue
 
         try:
-            data = json.dumps({
-                "master_url": master_url,
-                "session_name": session_name,
-                "sync_models_to_workers": sync_models_to_workers
-            }).encode("utf-8")
-
-            req = urllib.request.Request(
+            status, resp_data = distribution_post_json(
                 f"{url}/distribution/start_worker",
-                data=data,
-                headers={"Content-Type": "application/json"},
-                method="POST"
+                {
+                    "master_url": master_url,
+                    "session_name": session_name,
+                    "sync_models_to_workers": sync_models_to_workers
+                },
+                timeout=10
             )
-
-            with urllib.request.urlopen(req, timeout=10) as resp:
-                result = json.loads(resp.read().decode("utf-8"))
-                worker_id = result.get("worker_id", "unknown")
-                print(f"[Distribution] ✅ Worker started at {url} (id: {worker_id})")
-                results.append((url, True, f"Started (id: {worker_id})"))
-
-        except urllib.error.HTTPError as e:
-            if e.code == 409:
-                print(f"[Distribution] ℹ️ Worker at {url} already running")
-                results.append((url, True, "Already running"))
-            else:
-                print(f"[Distribution] ❌ Failed to start worker at {url}: HTTP {e.code}")
-                results.append((url, False, f"HTTP {e.code}"))
+            result = json.loads(resp_data.decode("utf-8"))
+            worker_id = result.get("worker_id", "unknown")
+            print(f"[Distribution] ✅ Worker started at {url} (id: {worker_id})")
+            results.append((url, True, f"Started (id: {worker_id})"))
 
         except Exception as e:
-            print(f"[Distribution] ❌ Failed to contact worker at {url}: {e}")
-            results.append((url, False, str(e)))
+            if hasattr(e, 'code') and e.code == 409:
+                print(f"[Distribution] ℹ️ Worker at {url} already running")
+                results.append((url, True, "Already running"))
+            elif hasattr(e, 'code'):
+                print(f"[Distribution] ❌ Failed to start worker at {url}: HTTP {e.code}")
+                results.append((url, False, f"HTTP {e.code}"))
+            else:
+                print(f"[Distribution] ❌ Failed to contact worker at {url}: {e}")
+                results.append((url, False, str(e)))
 
     return results
 
@@ -619,22 +602,17 @@ def stop_all_workers(worker_urls):
     Args:
         worker_urls: List of worker base URLs
     """
-    import urllib.request
-    import urllib.error
-
     for url in worker_urls:
         url = url.strip().rstrip("/")
         if not url:
             continue
 
         try:
-            req = urllib.request.Request(
+            distribution_post_json(
                 f"{url}/distribution/stop_worker",
-                data=b"{}",
-                headers={"Content-Type": "application/json"},
-                method="POST"
+                {},
+                timeout=5
             )
-            urllib.request.urlopen(req, timeout=5)
             print(f"[Distribution] 🛑 Stopped worker at {url}")
         except Exception:
             pass
