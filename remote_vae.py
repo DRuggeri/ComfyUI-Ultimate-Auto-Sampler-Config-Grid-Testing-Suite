@@ -1,15 +1,12 @@
 import torch
-import urllib.request
-import urllib.parse
-import urllib.error
 import hashlib
 import queue
 import os
 import threading
 import time
-from safetensors.torch import _tobytes
 import numpy as np
 from PIL import Image
+from .network_utils import huggingface_vae_decode, HUGGINGFACE_VAE_ENDPOINTS as HF_ENDPOINTS
 try:
     from diffusers.image_processor import VaeImageProcessor
 except ImportError as e:
@@ -21,13 +18,7 @@ except ImportError as e:
 
 
 
-# HF Remote VAE endpoints
-HF_ENDPOINTS = {
-    "SD": "https://q1bj3bpq6kzilnsu.us-east-1.aws.endpoints.huggingface.cloud/",
-    "SDXL": "https://x2dmsqunjd6k9prw.us-east-1.aws.endpoints.huggingface.cloud/",
-    "Flux": "https://whhx50ex1aryqvw6.us-east-1.aws.endpoints.huggingface.cloud/",
-    "HunyuanVideo": "https://o7ywnmrahorts457.us-east-1.aws.endpoints.huggingface.cloud/"
-}
+# HF_ENDPOINTS imported from network_utils (single source of truth for allowlisted URLs)
 
 
 def detect_model_type(model, latent_channels):
@@ -106,57 +97,17 @@ def detect_model_type(model, latent_channels):
 
 def remote_decode_hf(endpoint, tensor, height, width):
     """
-    Send latent to HuggingFace Remote VAE endpoint for decoding
-    Uses urllib.request instead of requests library.
+    Send latent to HuggingFace Remote VAE endpoint for decoding.
+    Uses centralized network gateway (network_utils.py).
     """
     try:
         import json as _json
 
-        # Ensure tensor is on CPU and contiguous
-        tensor = tensor.cpu().contiguous()
+        # Gateway handles: tensor prep, query string, urllib call, allowlist validation
+        output_tensor, resp_headers = huggingface_vae_decode(endpoint, tensor, height, width)
 
-        # Build query parameters - urllib needs repeated params built manually
-        # shape=[1,2,3] becomes ?shape=1&shape=2&shape=3
-        shape_values = [int(dim) for dim in tensor.shape]
-        query_parts = [
-            ("do_scaling", "False"),
-            ("output_type", "pt"),
-            ("partial_postprocess", "False"),
-            ("dtype", str(tensor.dtype).split(".")[-1]),
-            ("height", str(int(height))),
-            ("width", str(int(width))),
-        ]
-        # Add repeated shape params
-        for s in shape_values:
-            query_parts.append(("shape", str(s)))
-
-        query_string = urllib.parse.urlencode(query_parts)
-        full_url = f"{endpoint}?{query_string}"
-
-        # Convert tensor to bytes
-        tensor_data = _tobytes(tensor, "tensor")
-
-        # Build request
-        req = urllib.request.Request(
-            full_url,
-            data=tensor_data,
-            headers={
-                "Content-Type": "tensor/binary",
-                "Accept": "tensor/binary",
-            },
-            method="POST",
-        )
-
-        with urllib.request.urlopen(req, timeout=60) as response:
-            if response.status != 200:
-                error_text = response.read().decode("utf-8", errors="replace")
-                raise RuntimeError(f"Remote VAE decode failed: {error_text}")
-
-            output_tensor = response.read()
-            response_headers = response.headers
-
-        # The response should have shape and dtype in headers
-        shape_header = response_headers.get("shape", "")
+        # Parse response — tensor shape and dtype from headers
+        shape_header = resp_headers.get("shape", "")
 
         if shape_header:
             try:
@@ -166,7 +117,7 @@ def remote_decode_hf(endpoint, tensor, height, width):
         else:
             raise RuntimeError("No shape header in response")
 
-        dtype_str = response_headers.get("dtype", "float32")
+        dtype_str = resp_headers.get("dtype", "float32")
         dtype_map = {
             "float32": torch.float32,
             "float16": torch.float16,
