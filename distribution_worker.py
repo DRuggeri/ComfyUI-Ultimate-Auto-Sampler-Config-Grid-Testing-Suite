@@ -11,9 +11,13 @@ import json
 import io
 import os
 import random
-import urllib.request
-import urllib.error
-import urllib.parse
+from urllib.parse import quote as url_quote
+from .network_utils import (
+    distribution_get,
+    distribution_post_json,
+    distribution_post_multipart,
+    distribution_stream_download,
+)
 
 import torch
 
@@ -99,48 +103,33 @@ class WorkerThread(threading.Thread):
         # Create subdirectories
         os.makedirs(os.path.dirname(target_path), exist_ok=True)
 
-        # Download from master
-        url = f"{self.master_url}/distribution/download_model"
-        payload = json.dumps({
-            "worker_id": self.worker_id,
-            "category": category,
-            "filename": filename
-        }).encode("utf-8")
-
-        req = urllib.request.Request(
-            url, data=payload,
-            headers={"Content-Type": "application/json"},
-            method="POST"
-        )
-
+        # Download from master via network gateway
         try:
             print(f"[Worker {self.worker_id}] ⬇️ Downloading {category}/{filename}...")
-            with urllib.request.urlopen(req, timeout=3600) as resp:
-                file_size = int(resp.headers.get("Content-Length", 0))
-                if file_size > 0:
-                    size_str = f"{file_size / (1024**3):.2f} GB" if file_size > 1024**3 else f"{file_size / (1024**2):.0f} MB"
-                    print(f"[Worker {self.worker_id}] ⬇️ Size: {size_str}")
+            last_progress = 0
 
-                # Stream to temp file, then rename (atomic-ish)
-                temp_path = target_path + ".downloading"
-                downloaded = 0
-                last_progress = 0
-                with open(temp_path, "wb") as f:
-                    while True:
-                        chunk = resp.read(8 * 1024 * 1024)  # 8 MB chunks
-                        if not chunk:
-                            break
-                        f.write(chunk)
-                        downloaded += len(chunk)
-                        if file_size > 0:
-                            progress = int(downloaded / file_size * 100)
-                            if progress >= last_progress + 10:
-                                print(f"[Worker {self.worker_id}] ⬇️ {category}/{filename}: {progress}%")
-                                last_progress = progress
+            def on_progress(downloaded, total_size):
+                nonlocal last_progress
+                if total_size > 0:
+                    pct = int(downloaded * 100 / total_size)
+                    if pct >= last_progress + 10:
+                        last_progress = pct
+                        size_str = f"{total_size / (1024**3):.2f} GB" if total_size > 1024**3 else f"{total_size / (1024**2):.0f} MB"
+                        print(f"[Worker {self.worker_id}] ⬇️ {category}/{filename}: {pct}% of {size_str}")
 
-                os.replace(temp_path, target_path)
-                print(f"[Worker {self.worker_id}] ✅ Downloaded {category}/{filename}")
-                return target_path
+            distribution_stream_download(
+                url=f"{self.master_url}/distribution/download_model",
+                data_dict={
+                    "worker_id": self.worker_id,
+                    "category": category,
+                    "filename": filename
+                },
+                target_path=target_path,
+                timeout=3600,
+                progress_callback=on_progress
+            )
+            print(f"[Worker {self.worker_id}] ✅ Downloaded {category}/{filename}")
+            return target_path
 
         except Exception as e:
             print(f"[Worker {self.worker_id}] ❌ Failed to download {category}/{filename}: {e}")
@@ -364,25 +353,18 @@ class WorkerThread(threading.Thread):
         retry_delay = 3  # seconds between retries
 
         for attempt in range(1, max_retries + 1):
-            data = json.dumps({
-                "worker_id": self.worker_id,
-                "worker_url": ""
-            }).encode("utf-8")
-
-            req = urllib.request.Request(
-                f"{self.master_url}/distribution/register_worker",
-                data=data,
-                headers={"Content-Type": "application/json"},
-                method="POST"
-            )
             try:
-                with urllib.request.urlopen(req, timeout=10) as resp:
-                    result = json.loads(resp.read().decode("utf-8"))
-                    print(f"[Worker {self.worker_id}] 🤝 Registered with master "
-                          f"(session: {result.get('session_name', 'unknown')})")
-                    return  # Success
-            except urllib.error.HTTPError as e:
-                if e.code == 503 and attempt < max_retries:
+                status, resp_data = distribution_post_json(
+                    f"{self.master_url}/distribution/register_worker",
+                    {"worker_id": self.worker_id, "worker_url": ""},
+                    timeout=10
+                )
+                result = json.loads(resp_data.decode("utf-8"))
+                print(f"[Worker {self.worker_id}] 🤝 Registered with master "
+                      f"(session: {result.get('session_name', 'unknown')})")
+                return  # Success
+            except Exception as e:
+                if hasattr(e, 'code') and e.code == 503 and attempt < max_retries:
                     print(f"[Worker {self.worker_id}] ⏳ Master not ready yet "
                           f"(attempt {attempt}/{max_retries}), retrying in {retry_delay}s...")
                     self._stop_event.wait(retry_delay)
@@ -391,46 +373,42 @@ class WorkerThread(threading.Thread):
                     continue
                 print(f"[Worker {self.worker_id}] ⚠️ Registration failed: {e}")
                 return
-            except Exception as e:
-                print(f"[Worker {self.worker_id}] ⚠️ Registration failed: {e}")
-                return
 
     def _claim_job(self):
         """Claim next job from master. Returns job dict or None."""
         url = (f"{self.master_url}/distribution/claim_job"
-               f"?worker_id={urllib.parse.quote(self.worker_id)}")
+               f"?worker_id={url_quote(self.worker_id)}")
 
         if self.consecutive_empty == 0 and self.jobs_processed == 0:
             print(f"[Worker {self.worker_id}] 🔍 Claiming from: {url}")
 
-        req = urllib.request.Request(url, method="GET")
         try:
-            with urllib.request.urlopen(req, timeout=10) as resp:
-                if resp.status == 204:
-                    return None
-                return json.loads(resp.read().decode("utf-8"))
-        except urllib.error.HTTPError as e:
-            if e.code == 204:
+            status, resp_data = distribution_get(url, timeout=10)
+            if status == 204:
                 return None
-            if e.code == 503:
-                # Distribution not active yet — master may still be starting up
-                # (e.g. pre-encoding prompts). Don't immediately stop; let the
-                # normal empty-poll counter handle eventual timeout.
-                if self.jobs_processed == 0 and self.consecutive_empty < 5:
-                    print(f"[Worker {self.worker_id}] ⏳ Master not active yet, "
-                          f"waiting... ({self.consecutive_empty + 1}/5)")
-                elif self.jobs_processed > 0:
-                    # Already processed jobs — master has finished and deactivated.
-                    # Stop immediately to avoid wasting time.
-                    print(f"[Worker {self.worker_id}] ℹ️ Distribution ended on master")
-                    self.consecutive_empty = self.max_empty_polls
-                else:
-                    print(f"[Worker {self.worker_id}] ℹ️ Distribution not active on master")
-                    self.consecutive_empty = self.max_empty_polls
-                return None
-            print(f"[Worker {self.worker_id}] ⚠️ Claim failed: HTTP {e.code}")
-            return None
+            return json.loads(resp_data.decode("utf-8"))
         except Exception as e:
+            if hasattr(e, 'code'):
+                if e.code == 204:
+                    return None
+                if e.code == 503:
+                    # Distribution not active yet — master may still be starting up
+                    # (e.g. pre-encoding prompts). Don't immediately stop; let the
+                    # normal empty-poll counter handle eventual timeout.
+                    if self.jobs_processed == 0 and self.consecutive_empty < 5:
+                        print(f"[Worker {self.worker_id}] ⏳ Master not active yet, "
+                              f"waiting... ({self.consecutive_empty + 1}/5)")
+                    elif self.jobs_processed > 0:
+                        # Already processed jobs — master has finished and deactivated.
+                        # Stop immediately to avoid wasting time.
+                        print(f"[Worker {self.worker_id}] ℹ️ Distribution ended on master")
+                        self.consecutive_empty = self.max_empty_polls
+                    else:
+                        print(f"[Worker {self.worker_id}] ℹ️ Distribution not active on master")
+                        self.consecutive_empty = self.max_empty_polls
+                    return None
+                print(f"[Worker {self.worker_id}] ⚠️ Claim failed: HTTP {e.code}")
+                return None
             print(f"[Worker {self.worker_id}] ⚠️ Claim failed: {e}")
             return None
 
@@ -715,35 +693,23 @@ class WorkerThread(threading.Thread):
         last_error = None
         for attempt in range(max_retries):
             try:
-                req = urllib.request.Request(
+                status, _ = distribution_post_multipart(
                     f"{self.master_url}/distribution/submit_result",
-                    data=body,
-                    headers={
-                        "Content-Type": f"multipart/form-data; boundary={boundary}",
-                    },
-                    method="POST"
+                    f"multipart/form-data; boundary={boundary}",
+                    body,
+                    timeout=60
                 )
-
-                with urllib.request.urlopen(req, timeout=60) as resp:
-                    if resp.status != 200:
-                        raise RuntimeError(f"Submit failed: HTTP {resp.status}")
+                if status != 200:
+                    raise RuntimeError(f"Submit failed: HTTP {status}")
                 return  # Success
 
-            except urllib.error.HTTPError as e:
+            except Exception as e:
                 # 503 = master deactivated (all jobs done). Don't retry — it won't help.
                 # Raise a special exception so the main loop can stop gracefully.
-                if e.code == 503:
+                if hasattr(e, 'code') and e.code == 503:
                     raise _MasterFinishedError(
                         f"Master distribution is no longer active (HTTP 503)"
                     )
-                last_error = e
-                if attempt < max_retries - 1:
-                    wait = 2 ** attempt  # Exponential backoff: 1s, 2s, 4s
-                    print(f"[Worker {self.worker_id}] ⚠️ Submit retry {attempt + 1}/{max_retries} "
-                          f"for job {job_id}: {e} (waiting {wait}s)")
-                    time.sleep(wait)
-
-            except (urllib.error.URLError, ConnectionError, OSError) as e:
                 last_error = e
                 if attempt < max_retries - 1:
                     wait = 2 ** attempt  # Exponential backoff: 1s, 2s, 4s
@@ -755,15 +721,12 @@ class WorkerThread(threading.Thread):
 
     def _send_heartbeat(self):
         """Send heartbeat to master."""
-        data = json.dumps({"worker_id": self.worker_id}).encode("utf-8")
-        req = urllib.request.Request(
-            f"{self.master_url}/distribution/heartbeat",
-            data=data,
-            headers={"Content-Type": "application/json"},
-            method="POST"
-        )
         try:
-            urllib.request.urlopen(req, timeout=5)
+            distribution_post_json(
+                f"{self.master_url}/distribution/heartbeat",
+                {"worker_id": self.worker_id},
+                timeout=5
+            )
         except Exception:
             pass
 
@@ -780,19 +743,16 @@ class WorkerThread(threading.Thread):
 
     def _report_failure(self, job_id, error):
         """Report job failure to master."""
-        data = json.dumps({
-            "job_id": job_id,
-            "error": error,
-            "worker_id": self.worker_id
-        }).encode("utf-8")
-        req = urllib.request.Request(
-            f"{self.master_url}/distribution/fail_job",
-            data=data,
-            headers={"Content-Type": "application/json"},
-            method="POST"
-        )
         try:
-            urllib.request.urlopen(req, timeout=10)
+            distribution_post_json(
+                f"{self.master_url}/distribution/fail_job",
+                {
+                    "job_id": job_id,
+                    "error": error,
+                    "worker_id": self.worker_id
+                },
+                timeout=10
+            )
         except Exception:
             pass
 
