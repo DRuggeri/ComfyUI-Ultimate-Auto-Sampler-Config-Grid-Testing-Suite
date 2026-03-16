@@ -716,6 +716,10 @@ class UltimateConfigBuilder:
         cooldown_data = state.get("cooldown", {})
         if cooldown_data and cooldown_data.get("enabled", False):
             session_settings["cooldown"] = cooldown_data
+        # Start At Job # (skip to a specific job number)
+        start_at_job = state.get("start_at_job", 0)
+        if start_at_job and int(start_at_job) > 0:
+            session_settings["start_at_job"] = int(start_at_job)
         if session_settings:
             output_obj["_session_settings"] = session_settings
 

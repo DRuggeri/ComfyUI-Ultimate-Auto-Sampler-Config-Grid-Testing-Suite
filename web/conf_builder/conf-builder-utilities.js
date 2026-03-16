@@ -717,6 +717,11 @@ export function convertStateToConfigs(state) {
         sessionSettings.cooldown = { ...state.cooldown };
     }
 
+    // Start At Job # (skip to a specific job number)
+    if (state.start_at_job && parseInt(state.start_at_job) > 0) {
+        sessionSettings.start_at_job = parseInt(state.start_at_job);
+    }
+
     // Attach session settings to the configs output if any are enabled
     if (Object.keys(sessionSettings).length > 0) {
         configs._session_settings = sessionSettings;

@@ -5218,6 +5218,59 @@ export function renderCooldownSection(node, container) {
 
 // --- MAIN RENDER UI FUNCTION ---
 
+// ============================================================================
+// RUN SETTINGS (Start At Job #, etc.)
+// ============================================================================
+export function renderRunSettingsSection(node, container) {
+    if (node.state.start_at_job === undefined) node.state.start_at_job = 0;
+
+    const section = document.createElement("div");
+    section.className = "cb-section full-width";
+    section.id = "cb-sec-runsettings";
+
+    const header = document.createElement("div");
+    header.className = "cb-section-header";
+    header.textContent = "▸ Run Settings";
+    header.style.cursor = "pointer";
+
+    const content = document.createElement("div");
+    content.className = "cb-section-content";
+    content.style.display = "none";
+
+    header.onclick = () => {
+        const isOpen = content.style.display !== "none";
+        content.style.display = isOpen ? "none" : "block";
+        header.textContent = (isOpen ? "▸" : "▾") + " Run Settings";
+    };
+
+    // Start At Job # input
+    const jobDiv = document.createElement("div");
+    jobDiv.style.cssText = "margin-bottom: 8px; display: flex; align-items: center; gap: 8px;";
+    const jobLabel = document.createElement("label");
+    jobLabel.textContent = "Start At Job #:";
+    jobLabel.style.cssText = "font-size: 12px; color: #ccc; white-space: nowrap;";
+    const jobInput = document.createElement("input");
+    jobInput.type = "number";
+    jobInput.min = "0";
+    jobInput.value = node.state.start_at_job || 0;
+    jobInput.style.cssText = "width: 70px; background: #1a1a1a; color: #ccc; border: 1px solid #444; border-radius: 4px; padding: 4px 6px; font-size: 12px;";
+    jobInput.onchange = () => {
+        node.state.start_at_job = parseInt(jobInput.value) || 0;
+        node.setDirtyCanvas(true);
+    };
+    const jobDesc = document.createElement("div");
+    jobDesc.style.cssText = "font-size: 9px; color: #666;";
+    jobDesc.textContent = "Skip to this job number (0 = start from beginning). Useful for resuming at a specific point.";
+    jobDiv.appendChild(jobLabel);
+    jobDiv.appendChild(jobInput);
+    content.appendChild(jobDiv);
+    content.appendChild(jobDesc);
+
+    section.appendChild(header);
+    section.appendChild(content);
+    container.appendChild(section);
+}
+
 export function renderPreviewSection(container) {
     const section = document.createElement("div");
     section.className = "cb-section full-width";
@@ -5413,6 +5466,7 @@ export async function renderUI(node, availableLoras, modelLists, loraFolders, av
     // Session-level settings (applies to all configs)
     renderUpscalingSection(node, mainContent, modelLists);
     renderCooldownSection(node, mainContent);
+    renderRunSettingsSection(node, mainContent);
 
     // JSON Preview Section
     renderPreviewSection(mainContent);

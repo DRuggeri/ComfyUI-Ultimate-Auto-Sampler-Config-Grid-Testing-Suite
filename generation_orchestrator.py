@@ -775,6 +775,9 @@ def run_generation_loop(
     total_generated = 0
     gen_index_offset = len(existing_data.get("items", []))  # Sequential index for deterministic sort ordering
     skipped_count = 0
+    start_at_job = int(session_settings.get("start_at_job", 0)) if session_settings else 0
+    if start_at_job > 0:
+        print(f"[GridTester] ⏭️ Start At Job #{start_at_job} — skipping earlier jobs")
     job_durations = []
     deferred_upscale_queue = []
     eta_start_time = time.time()
@@ -1041,6 +1044,11 @@ def run_generation_loop(
             )
             actual_negative_prompt = conf["negative"]
             
+            # ==== START AT JOB # (skip earlier jobs) ====
+            if start_at_job > 0 and current_job < start_at_job:
+                skipped_count += 1
+                continue
+
             # ==== CHECK EXISTING MATCH ====
             match_index = check_if_job_completed(
                 existing_data["items"],
