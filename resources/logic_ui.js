@@ -111,11 +111,15 @@ function buildLabelOverlay(d) {
         if (loraStr !== "None") {
             const parts = loraStr.split(" + ");
             for (const part of parts) {
-                const name = part.split(":")[0];
+                const components = part.split(":");
+                const name = components[0];
                 const shortName = name.replace(/\\/g, '/').split('/').pop().replace(/\.[^.]+$/, '');
                 // Skip loras that are on every card when unique-only is on
                 if (uniqueOnly && labelGlobalValues && labelGlobalValues._loraGlobalNames && labelGlobalValues._loraGlobalNames.has(name)) continue;
-                tags.push(`<span class="label-tag label-lora" title="${part}">${shortName}</span>`);
+                // Show model_str:clip_str like in config_json (e.g. "loraName:1.0:0.8")
+                const strength = components.length >= 3 ? `:${components[1]}:${components[2]}` :
+                                 components.length === 2 ? `:${components[1]}` : '';
+                tags.push(`<span class="label-tag label-lora" title="${part}">${shortName}${strength}</span>`);
             }
         }
     }
@@ -332,6 +336,18 @@ function updateLabelFields() {
 }
 
 /**
+ * Update label font size from slider
+ */
+function updateLabelSize(size) {
+    labelMode.labelSize = parseInt(size);
+    const display = document.getElementById('label-size-value');
+    if (display) display.textContent = size + 'px';
+    // Apply size to all existing label tags via CSS custom property
+    document.documentElement.style.setProperty('--label-font-size', size + 'px');
+    saveLabelPreferences();
+}
+
+/**
  * Save label preferences to localStorage
  */
 function saveLabelPreferences() {
@@ -349,6 +365,7 @@ function loadLabelPreferences() {
         if (saved) {
             const parsed = JSON.parse(saved);
             labelMode.enabled = parsed.enabled || false;
+            if (parsed.labelSize) labelMode.labelSize = parsed.labelSize;
             if (parsed.fields) {
                 Object.assign(labelMode.fields, parsed.fields);
             }
@@ -358,6 +375,13 @@ function loadLabelPreferences() {
     // Sync UI checkboxes
     const toggle = document.getElementById('label-mode-toggle');
     if (toggle) toggle.checked = labelMode.enabled;
+
+    // Sync label size slider
+    const sizeSlider = document.getElementById('label-size-slider');
+    if (sizeSlider) sizeSlider.value = labelMode.labelSize;
+    const sizeDisplay = document.getElementById('label-size-value');
+    if (sizeDisplay) sizeDisplay.textContent = labelMode.labelSize + 'px';
+    document.documentElement.style.setProperty('--label-font-size', labelMode.labelSize + 'px');
 
     const fieldsContainer = document.getElementById('label-fields-container');
     if (fieldsContainer) fieldsContainer.style.display = labelMode.enabled ? 'block' : 'none';
