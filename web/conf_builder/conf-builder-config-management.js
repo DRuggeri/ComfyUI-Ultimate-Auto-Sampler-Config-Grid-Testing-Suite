@@ -4609,6 +4609,81 @@ export function renderUpscalingSection(node, container, modelLists) {
     const globalSettings = document.createElement("div");
     globalSettings.style.cssText = "margin-bottom: 8px; padding: 6px 8px; background: #252525; border-radius: 4px; border: 1px solid #444;";
 
+    // Upscale Presets (load/save pipeline configurations)
+    const presetRow = document.createElement("div");
+    presetRow.style.cssText = "display: flex; gap: 4px; align-items: center; margin-bottom: 8px;";
+    const presetLabel = document.createElement("span");
+    presetLabel.textContent = "Preset:";
+    presetLabel.style.cssText = "font-size: 11px; color: #999; white-space: nowrap;";
+    const presetSelect = document.createElement("select");
+    presetSelect.style.cssText = "flex: 1; background: #1a1a1a; color: #ccc; border: 1px solid #444; border-radius: 4px; padding: 3px 6px; font-size: 11px;";
+    const presetDefaultOpt = document.createElement("option");
+    presetDefaultOpt.value = ""; presetDefaultOpt.textContent = "-- Presets --";
+    presetSelect.appendChild(presetDefaultOpt);
+
+    // Fetch presets async
+    fetch("/configbuilder/upscale_presets").then(r => r.json()).then(data => {
+        (data.presets || []).forEach((p, i) => {
+            const opt = document.createElement("option");
+            opt.value = i; opt.textContent = p.name;
+            presetSelect.appendChild(opt);
+        });
+        presetSelect._presets = data.presets || [];
+    }).catch(() => {});
+
+    const presetLoadBtn = document.createElement("button");
+    presetLoadBtn.textContent = "Load";
+    presetLoadBtn.className = "cb-btn";
+    presetLoadBtn.style.cssText = "font-size: 10px; padding: 2px 6px;";
+    presetLoadBtn.onclick = () => {
+        const idx = parseInt(presetSelect.value);
+        if (isNaN(idx) || !presetSelect._presets) return;
+        const preset = presetSelect._presets[idx];
+        if (!preset) return;
+        // Apply preset to current upscaling state
+        ups.pipelines = JSON.parse(JSON.stringify(preset.pipelines));
+        if (preset.hires_prompt_adjust !== undefined) ups.hires_prompt_adjust = preset.hires_prompt_adjust;
+        if (preset.hires_prompt_behavior) ups.hires_prompt_behavior = preset.hires_prompt_behavior;
+        if (preset.hires_prompt_text !== undefined) ups.hires_prompt_text = preset.hires_prompt_text;
+        node.setDirtyCanvas(true);
+        // Re-render to reflect the loaded config
+        renderUpscalingSection(node, container, modelLists);
+    };
+
+    const presetSaveBtn = document.createElement("button");
+    presetSaveBtn.textContent = "Save";
+    presetSaveBtn.className = "cb-btn";
+    presetSaveBtn.style.cssText = "font-size: 10px; padding: 2px 6px;";
+    presetSaveBtn.onclick = () => {
+        const name = prompt("Preset name:");
+        if (!name) return;
+        const presets = presetSelect._presets || [];
+        presets.push({
+            name: name,
+            pipelines: JSON.parse(JSON.stringify(ups.pipelines)),
+            hires_prompt_adjust: ups.hires_prompt_adjust || false,
+            hires_prompt_behavior: ups.hires_prompt_behavior || "append_end",
+            hires_prompt_text: ups.hires_prompt_text || "",
+        });
+        fetch("/configbuilder/upscale_presets", {
+            method: "POST",
+            headers: {"Content-Type": "application/json"},
+            body: JSON.stringify({presets: presets})
+        }).then(() => {
+            presetSelect._presets = presets;
+            const opt = document.createElement("option");
+            opt.value = presets.length - 1; opt.textContent = name;
+            presetSelect.appendChild(opt);
+            presetSelect.value = presets.length - 1;
+        });
+    };
+
+    presetRow.appendChild(presetLabel);
+    presetRow.appendChild(presetSelect);
+    presetRow.appendChild(presetLoadBtn);
+    presetRow.appendChild(presetSaveBtn);
+    globalSettings.appendChild(presetRow);
+
     // Save Pre-Upscaled Output checkbox
     const preUpscaleLabel = document.createElement("label");
     preUpscaleLabel.style.cssText = "display: flex; align-items: center; gap: 6px; font-size: 12px; color: #ccc; cursor: pointer; margin-bottom: 4px;";
