@@ -154,6 +154,15 @@ async function loadSession() {
 }
 
 // Load session from picker dropdown or session card
+function filterSessionPicker(query) {
+    const rows = document.querySelectorAll('.session-picker-row');
+    const q = query.toLowerCase().trim();
+    rows.forEach(row => {
+        const name = (row.dataset.name || '').toLowerCase();
+        row.style.display = (!q || name.includes(q)) ? '' : 'none';
+    });
+}
+
 function loadSessionFromPicker(sessionName) {
     if (!sessionName) return;
     const sessInput = document.getElementById('session-input');
@@ -169,18 +178,30 @@ async function fetchAndShowSessions() {
         const sessions = await resp.json();
         if (!sessions || sessions.length === 0) return;
 
-        // Populate the session picker dropdown in cog menu
-        const picker = document.getElementById('session-picker');
-        if (picker) {
-            // Keep the default option
-            picker.innerHTML = '<option value="">-- Select a session --</option>';
+        // Populate the session picker list in cog menu (already sorted by most recent from backend)
+        const pickerList = document.getElementById('session-picker-list');
+        if (pickerList) {
+            pickerList.textContent = ''; // Clear existing entries
+            window._sessionPickerData = sessions; // Store for search filtering
             sessions.forEach(s => {
-                const opt = document.createElement('option');
-                opt.value = s.name;
+                const row = document.createElement('div');
+                row.className = 'session-picker-row';
+                row.dataset.name = s.name;
+                row.style.cssText = 'padding: 5px 8px; cursor: pointer; font-size: 11px; color: #ccc; border-bottom: 1px solid #222;';
+                row.onmouseenter = () => { row.style.background = '#333'; };
+                row.onmouseleave = () => { row.style.background = 'none'; };
+                row.onclick = () => loadSessionFromPicker(s.name);
                 const date = new Date(s.mtime * 1000);
                 const dateStr = date.toLocaleDateString() + ' ' + date.toLocaleTimeString([], {hour: '2-digit', minute: '2-digit'});
-                opt.textContent = `${s.name} (${s.item_count} images, ${dateStr})`;
-                picker.appendChild(opt);
+                const nameSpan = document.createElement('span');
+                nameSpan.style.color = '#fff';
+                nameSpan.textContent = s.name;
+                const metaSpan = document.createElement('span');
+                metaSpan.style.cssText = 'color:#666; font-size:10px;';
+                metaSpan.textContent = ` (${s.item_count} imgs, ${dateStr})`;
+                row.appendChild(nameSpan);
+                row.appendChild(metaSpan);
+                pickerList.appendChild(row);
             });
         }
 

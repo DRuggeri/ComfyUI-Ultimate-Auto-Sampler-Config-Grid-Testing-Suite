@@ -92,10 +92,11 @@
                     <button class="session-action-btn save-btn" onclick="saveState()">SAVE</button>
                 </div>
                 <div style="margin-top: 8px;">
-                    <span class="meta-label" style="font-size: 10px;">Load Session:</span>
-                    <select id="session-picker" style="width: 100%; margin-top: 4px; background: #1a1a1a; color: #ccc; border: 1px solid #444; border-radius: 4px; padding: 4px 6px; font-size: 11px; cursor: pointer;" onchange="loadSessionFromPicker(this.value)">
-                        <option value="">-- Select a session --</option>
-                    </select>
+                    <span class="meta-label" style="font-size: 10px;">Load Session: <span style="color:#666;">(sorted by most recent)</span></span>
+                    <input type="text" id="session-search" placeholder="Search sessions..."
+                        style="width: 100%; margin-top: 4px; background: #1a1a1a; color: #ccc; border: 1px solid #444; border-radius: 4px; padding: 4px 6px; font-size: 11px; box-sizing: border-box;"
+                        oninput="filterSessionPicker(this.value)">
+                    <div id="session-picker-list" style="max-height: 180px; overflow-y: auto; margin-top: 4px; border: 1px solid #333; border-radius: 4px; background: #1a1a1a;"></div>
                 </div>
             </div>
 
