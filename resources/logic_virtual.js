@@ -469,19 +469,35 @@ function autoFitZoom() {
         return;
     }
 
+    // Account for topbar and bottom bar when calculating available space
+    const header = document.getElementById('header');
+    const jsonBar = document.querySelector('.json-container');
+    const headerH = header ? header.offsetHeight : 0;
+    const jsonBarH = jsonBar ? jsonBar.offsetHeight : 0;
+
     const totalWidth = columnsCount * itemWidth;
     const viewportWidth = viewport.clientWidth;
+    const viewportHeight = viewport.clientHeight;
+    const availableHeight = viewportHeight - headerH - jsonBarH;
 
-    const targetScale = (viewportWidth / totalWidth) * 0.95;
+    // Calculate total grid height
+    const rowCount = Math.ceil(processedData.length / columnsCount);
+    const totalHeight = rowCount * itemHeight;
+
+    // Fit to whichever dimension is more constrained
+    const scaleByWidth = (viewportWidth / totalWidth) * 0.95;
+    const scaleByHeight = availableHeight > 0 ? (availableHeight / totalHeight) * 0.95 : scaleByWidth;
+    const targetScale = Math.min(scaleByWidth, scaleByHeight);
     currentScale = Math.max(MIN_SCALE, Math.min(MAX_SCALE, targetScale));
 
     const scaledWidth = totalWidth * currentScale;
+    const scaledHeight = totalHeight * currentScale;
     panOffsetX = (viewportWidth - scaledWidth) / 2;
-    panOffsetY = 20;
+    panOffsetY = headerH + Math.max(0, (availableHeight - scaledHeight) / 2);
 
     updateTransform();
 
-    console.log(`[Grid] 🎯 Auto-fit first row: ${columnsCount} columns, scale: ${currentScale.toFixed(2)}`);
+    console.log(`[Grid] 🎯 Auto-fit: ${columnsCount}x${rowCount}, scale: ${currentScale.toFixed(2)}`);
 }
 
 function goToImage(imageNumber) {
