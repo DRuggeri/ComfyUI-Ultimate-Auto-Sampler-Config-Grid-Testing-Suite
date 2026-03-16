@@ -37,6 +37,9 @@ os.makedirs(CONFIGS_DIR, exist_ok=True)
 # --- CUSTOM RESOLUTIONS FILE ---
 CUSTOM_RESOLUTIONS_FILE = os.path.join(folder_paths.get_output_directory(), "benchmarks", "USCG-custom-resolutions.json")
 
+# --- UPSCALE PRESETS FILE ---
+UPSCALE_PRESETS_FILE = os.path.join(folder_paths.get_output_directory(), "benchmarks", "USCG-upscale-presets.json")
+
 
 # =============================================================================
 # API: CONFIG MANAGEMENT
@@ -102,6 +105,29 @@ async def save_custom_resolutions(request):
         return web.Response(status=200, text="Saved")
     except Exception as e:
         print(f"[ConfigBuilder] Error saving custom resolutions: {e}")
+        return web.Response(status=500, text=str(e))
+
+@server.PromptServer.instance.routes.get("/configbuilder/upscale_presets")
+async def get_upscale_presets(request):
+    try:
+        if os.path.exists(UPSCALE_PRESETS_FILE):
+            with open(UPSCALE_PRESETS_FILE, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            return web.json_response(data)
+        return web.json_response({"presets": []})
+    except Exception as e:
+        return web.json_response({"presets": []})
+
+@server.PromptServer.instance.routes.post("/configbuilder/upscale_presets")
+async def save_upscale_presets(request):
+    try:
+        data = await request.json()
+        os.makedirs(os.path.dirname(UPSCALE_PRESETS_FILE), exist_ok=True)
+        with open(UPSCALE_PRESETS_FILE, "w", encoding="utf-8") as f:
+            json.dump(data, f, indent=2)
+        return web.Response(status=200, text="Saved")
+    except Exception as e:
+        print(f"[ConfigBuilder] Error saving upscale presets: {e}")
         return web.Response(status=500, text=str(e))
 
 @server.PromptServer.instance.routes.post("/configbuilder/load_config")
