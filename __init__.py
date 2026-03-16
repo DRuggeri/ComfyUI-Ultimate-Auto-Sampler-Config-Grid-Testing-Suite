@@ -898,6 +898,61 @@ async def scan_directory_route(request):
         return web.json_response({"error": str(e)}, status=500)
 
 
+# =============================================================================
+# API: DASHBOARD UPSCALE
+# =============================================================================
+
+@server.PromptServer.instance.routes.post("/config_tester/upscale_images")
+async def upscale_images(request):
+    """Start an async upscale job from the dashboard."""
+    try:
+        data = await request.json()
+        session_name = data.get("session_name", "")
+        image_ids = data.get("image_ids", [])
+        upscale_config = data.get("upscale_config", {})
+        all_favorited = data.get("all_favorited", False)
+
+        if not session_name:
+            return web.json_response({"error": "Missing session_name"}, status=400)
+        if not upscale_config or not upscale_config.get("pipelines"):
+            return web.json_response({"error": "Missing upscale_config with pipelines"}, status=400)
+
+        from .upscale_runner import start_upscale_job
+        job_id, error = start_upscale_job(session_name, image_ids, upscale_config, all_favorited=all_favorited)
+
+        if error:
+            return web.json_response({"error": error}, status=400)
+
+        from .upscale_runner import get_upscale_status
+        status = get_upscale_status(job_id)
+        return web.json_response({"job_id": job_id, "total_images": status["total"]})
+
+    except Exception as e:
+        print(f"[ConfigTester] Error starting upscale job: {e}")
+        return web.json_response({"error": str(e)}, status=500)
+
+@server.PromptServer.instance.routes.get("/config_tester/upscale_status")
+async def upscale_status(request):
+    """Check status of an async upscale job."""
+    job_id = request.query.get("job_id", "")
+    if not job_id:
+        return web.json_response({"error": "Missing job_id"}, status=400)
+    from .upscale_runner import get_upscale_status
+    return web.json_response(get_upscale_status(job_id))
+
+@server.PromptServer.instance.routes.post("/config_tester/cancel_upscale")
+async def cancel_upscale(request):
+    """Cancel a running upscale job."""
+    try:
+        data = await request.json()
+        job_id = data.get("job_id", "")
+        from .upscale_runner import cancel_upscale_job
+        cancelled = cancel_upscale_job(job_id)
+        return web.json_response({"cancelled": cancelled})
+    except Exception as e:
+        return web.json_response({"error": str(e)}, status=500)
+
+
 def _create_image_links(source_dir, link_dir, items):
     """
     Create symlinks (or copies on Windows) from source images into
