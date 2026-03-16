@@ -564,30 +564,30 @@ class UltimateConfigBuilder:
                 "model": model_strings if len(model_strings) > 1 else model_strings[0] if model_strings else "None"
             }
             
-            # Add seed_behavior if set to randomize
+            # Always include all fields with defaults to prevent manifest data loss
+            # when fields are toggled off in the UI and the session is reloaded
             seed_behavior = config_array.get("seed_behavior", "fixed")
-            if seed_behavior == "randomize":
-                config["seed_behavior"] = "randomize"
+            config["seed_behavior"] = seed_behavior
 
             # Full run seed behavior (applied before/after entire grid test session)
             full_run_seed_behavior = config_array.get("full_run_seed_behavior", "fixed")
-            if full_run_seed_behavior and full_run_seed_behavior != "fixed":
-                config["full_run_seed_behavior"] = full_run_seed_behavior
+            config["full_run_seed_behavior"] = full_run_seed_behavior
 
             # Full run seed (overrides node seed when > 0)
             full_run_seed = config_array.get("full_run_seed", 0)
-            if full_run_seed and int(full_run_seed) > 0:
-                config["full_run_seed"] = int(full_run_seed)
+            config["full_run_seed"] = int(full_run_seed) if full_run_seed else 0
 
-            # Process VAEs
+            # Process VAEs — always include (default "None" if unset)
             vaes_raw = config_array.get("vaes", ["None"])
             vae_strings = [str(v) for v in vaes_raw if v and v != "None"]
             if vae_strings:
                 config["vae"] = vae_strings if len(vae_strings) > 1 else vae_strings[0]
+            else:
+                config["vae"] = "None"
 
-            # Add model_type and related fields for non-checkpoint models
+            # Always include model_type and related fields
+            config["model_type"] = model_type
             if model_type != "checkpoint":
-                config["model_type"] = model_type
                 text_encoders = config_array.get("text_encoders", [])
                 if text_encoders:
                     config["text_encoders"] = [te for te in text_encoders if te and te != "None"]
@@ -599,13 +599,11 @@ class UltimateConfigBuilder:
                     if gguf_options:
                         config["gguf_options"] = gguf_options
 
-            # Add omit triggers if present
-            if omit_triggers:
-                config["lora_omit_triggers"] = omit_triggers
+            # Always include omit triggers (empty list if none)
+            config["lora_omit_triggers"] = omit_triggers if omit_triggers else []
 
-            # Add trigger append settings if present
-            if lora_triggerwords_append_settings and any(v != "none" for v in lora_triggerwords_append_settings.values()):
-                config["lora_triggerwords_append_settings"] = lora_triggerwords_append_settings
+            # Always include trigger append settings (empty dict if none)
+            config["lora_triggerwords_append_settings"] = lora_triggerwords_append_settings if lora_triggerwords_append_settings else {}
 
             # Per-config resolutions (override sampler's resolutions_json)
             raw_resolutions = config_array.get("resolutions", [])
@@ -627,31 +625,33 @@ class UltimateConfigBuilder:
                 filtered = [a for a in attention_modes if a and a != "default"]
                 if filtered:
                     config["attention_mode"] = filtered if len(filtered) > 1 else filtered[0]
-            elif isinstance(attention_modes, str) and attention_modes != "default":
+                else:
+                    config["attention_mode"] = "default"
+            elif isinstance(attention_modes, str):
                 config["attention_mode"] = attention_modes
+            else:
+                config["attention_mode"] = "default"
 
             # Model prompt prefix/suffix (quality tags prepended/appended to prompts)
             model_prompt_prefix = config_array.get("model_prompt_prefix", "")
-            if model_prompt_prefix and model_prompt_prefix.strip():
-                config["model_prompt_prefix"] = model_prompt_prefix.strip()
+            config["model_prompt_prefix"] = model_prompt_prefix.strip() if model_prompt_prefix else ""
             model_prompt_suffix = config_array.get("model_prompt_suffix", "")
-            if model_prompt_suffix and model_prompt_suffix.strip():
-                config["model_prompt_suffix"] = model_prompt_suffix.strip()
+            config["model_prompt_suffix"] = model_prompt_suffix.strip() if model_prompt_suffix else ""
 
-            # Add extra model & sampling options if enabled
+            # Always include model sampling options with defaults
+            config["model_sampling_override"] = model_sampling_override if model_sampling_override else "none"
             if model_sampling_override and model_sampling_override != "none":
-                config["model_sampling_override"] = model_sampling_override
                 if model_sampling_override == "flux":
                     config["model_sampling_flux_max_shift"] = model_sampling_flux_max_shift
                     config["model_sampling_flux_base_shift"] = model_sampling_flux_base_shift
                 else:
                     config["model_sampling_shift"] = model_sampling_shift
+            config["use_advanced_sampling"] = use_advanced_sampling or False
             if use_advanced_sampling:
-                config["use_advanced_sampling"] = True
                 config["advanced_guider"] = advanced_guider
                 config["advanced_scheduler"] = advanced_scheduler
+            config["use_flux_guidance"] = use_flux_guidance or False
             if use_flux_guidance:
-                config["use_flux_guidance"] = True
                 config["flux_guidance_value"] = flux_guidance_value
 
             # ==== PROMPT HANDLING ====
