@@ -874,8 +874,10 @@ def run_generation_loop(
                 # Because of short-circuit, if model_switched is True, conditioning_cache['positive'] isn't checked initially
                 # But inside the loop, we access it.
                 if model_switched or not conditioning_cache["positive"]:
-                    model_unique_positives = set()
-                    model_unique_negatives = set()
+                    model_unique_positives = []
+                    model_unique_negatives = []
+                    _seen_positives = set()
+                    _seen_negatives = set()
 
                     for future_idx in range(conf_idx, len(expanded)):
                         future_conf = expanded[future_idx]
@@ -899,8 +901,13 @@ def run_generation_loop(
                                         break
                                 if all_done:
                                     continue
-                            model_unique_positives.add(future_positive)
-                            model_unique_negatives.add(future_conf["negative"])
+                            if future_positive not in _seen_positives:
+                                _seen_positives.add(future_positive)
+                                model_unique_positives.append(future_positive)
+                            future_neg = future_conf["negative"]
+                            if future_neg not in _seen_negatives:
+                                _seen_negatives.add(future_neg)
+                                model_unique_negatives.append(future_neg)
 
                     if model_unique_positives:
                         print(f"[GridTester] 🧠 Batch encoding {len(model_unique_positives)} prompts for {target_model_name}")
@@ -1116,6 +1123,7 @@ def run_generation_loop(
                 # ==== UPSCALING (pipeline-based with sequential steps) ====
                 upscale_produced = False
                 save_pre_upscale = False
+                total_upscale_duration = 0  # Track cumulative upscale time for duration metric
                 if session_settings and session_settings.get("upscaling", {}).get("enabled", False) and result_latent is not None:
                     from .image_generation import upscale_image
                     import itertools as upscale_itertools
@@ -1239,6 +1247,7 @@ def run_generation_loop(
                                     pipe_latent, loaded_vae, patched_model, single_config,
                                     conf, up_positive, final_negative, pipe_w, pipe_h
                                 )
+                                total_upscale_duration += upscale_duration
 
                                 # Determine if this is the final output (only the last step's last combo in the pipeline)
                                 is_last_step = step_idx == len(expanded_steps) - 1
@@ -1304,7 +1313,7 @@ def run_generation_loop(
 
                                 if is_final_output:
                                     upscaled_meta = create_image_metadata(
-                                        conf, up_w, up_h, upscale_duration, current_seed, batch_idx,
+                                        conf, up_w, up_h, duration + total_upscale_duration, current_seed, batch_idx,
                                         actual_positive_prompt, actual_negative_prompt,
                                         gen_index=gen_index_offset + total_generated
                                     )
@@ -1393,10 +1402,12 @@ def run_generation_loop(
                     if upscale_combo_idx > 0:
                         save_manifest(paths["manifest"], existing_data)
 
-                job_durations.append(duration)
+                # Include upscale time in total duration for ETA accuracy
+                total_duration = duration + total_upscale_duration
+                job_durations.append(total_duration)
                 eta_info = calculate_eta(job_durations, current_job, total_jobs)
                 if eta_info:
-                    print_generation_progress(current_job, total_jobs, conf, w, h, duration, eta_info)
+                    print_generation_progress(current_job, total_jobs, conf, w, h, total_duration, eta_info)
                     # Send progress to dashboard frontend
                     if PromptServer is not None:
                         try:
@@ -1416,7 +1427,7 @@ def run_generation_loop(
                                 "eta_str": eta_str,
                                 "finish_time": eta_info['finish_formatted'],
                                 "avg_duration": round(eta_info['avg_duration'], 1),
-                                "last_duration": round(duration, 1)
+                                "last_duration": round(total_duration, 1)
                             })
                         except Exception:
                             pass
@@ -1426,7 +1437,7 @@ def run_generation_loop(
                 # Unless save_pre_upscale is enabled, in which case save both
                 if not upscale_produced or save_pre_upscale:
                     meta = create_image_metadata(
-                        conf, w, h, duration, current_seed, batch_idx,
+                        conf, w, h, total_duration, current_seed, batch_idx,
                         actual_positive_prompt, actual_negative_prompt,
                         gen_index=gen_index_offset + total_generated
                     )
