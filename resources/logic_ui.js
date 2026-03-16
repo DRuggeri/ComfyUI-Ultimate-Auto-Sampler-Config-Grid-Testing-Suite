@@ -1256,6 +1256,7 @@ function createCard(d) {
             <button class="reject-btn" onclick="rejectItem(this)">✕</button>
             <button class="favorite-btn ${favClass}" onclick="toggleFavorite(this)">${favIcon}</button>
             <button class="revise-btn" onclick="openM(${d.id})">REVISE</button>
+            <button class="upscale-btn" onclick="openUpscaleModal(${d.id})" title="Upscale this image">⬆</button>
             <div class="time-tag">${d.duration}s</div>
             <div class="index-tag">#${totalIndex}</div>
             ${buildLabelOverlay(d)}

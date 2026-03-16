@@ -627,9 +627,32 @@ body {
     z-index: 10;
 }
 
-.reject-btn { 
-    position: absolute; 
-    top: 8px; 
+.upscale-btn {
+    position: absolute;
+    top: 78px;
+    right: 8px;
+    background: rgba(100, 50, 200, 0.85);
+    color: #fff;
+    border: 2px solid #a070e0;
+    width: 28px;
+    height: 28px;
+    border-radius: 4px;
+    font-size: 14px;
+    cursor: pointer;
+    opacity: 0;
+    transition: opacity 0.2s;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 10;
+}
+.upscale-btn:hover {
+    background: rgba(130, 70, 230, 0.95);
+}
+
+.reject-btn {
+    position: absolute;
+    top: 8px;
     left: 8px; 
     background: var(--danger); 
     color: #fff; 
@@ -648,13 +671,15 @@ body {
     z-index: 10;
 }
 
-.card:hover .revise-btn, 
+.card:hover .revise-btn,
 .card:hover .reject-btn,
 .card:hover .favorite-btn,
+.card:hover .upscale-btn,
 .card:active .revise-btn,
 .card:active .reject-btn,
-.card:active .favorite-btn { 
-    opacity: 1; 
+.card:active .favorite-btn,
+.card:active .upscale-btn {
+    opacity: 1;
 }
 
 @media (hover: none) and (pointer: coarse) {
