@@ -707,6 +707,7 @@ class UltimateConfigBuilder:
                 session_settings["upscaling"] = {
                     "enabled": True,
                     "save_pre_upscale": upscaling_data.get("save_pre_upscale", False),
+                    "run_upscales_at_end": upscaling_data.get("run_upscales_at_end", False),
                     "hires_prompt_adjust": upscaling_data.get("hires_prompt_adjust", False),
                     "hires_prompt_behavior": upscaling_data.get("hires_prompt_behavior", "append_end"),
                     "hires_prompt_text": upscaling_data.get("hires_prompt_text", ""),

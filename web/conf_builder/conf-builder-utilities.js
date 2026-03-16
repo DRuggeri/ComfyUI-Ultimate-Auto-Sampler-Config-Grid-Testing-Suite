@@ -703,6 +703,7 @@ export function convertStateToConfigs(state) {
             sessionSettings.upscaling = {
                 enabled: true,
                 save_pre_upscale: state.upscaling.save_pre_upscale || false,
+                run_upscales_at_end: state.upscaling.run_upscales_at_end || false,
                 hires_prompt_adjust: state.upscaling.hires_prompt_adjust || false,
                 hires_prompt_behavior: state.upscaling.hires_prompt_behavior || "append_end",
                 hires_prompt_text: state.upscaling.hires_prompt_text || "",
