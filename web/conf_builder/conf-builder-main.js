@@ -129,6 +129,7 @@ app.registerExtension({
                     upscaling: {
                         enabled: false,
                         save_pre_upscale: false,
+                        run_upscales_at_end: false,
                         hires_prompt_adjust: false,
                         hires_prompt_behavior: "append_end",
                         hires_prompt_text: "",

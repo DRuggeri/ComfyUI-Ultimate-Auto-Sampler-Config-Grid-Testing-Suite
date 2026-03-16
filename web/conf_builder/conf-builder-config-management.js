@@ -4486,6 +4486,7 @@ export function renderUpscalingSection(node, container, modelLists) {
         node.state.upscaling = {
             enabled: false,
             save_pre_upscale: false,
+            run_upscales_at_end: false,
             hires_prompt_adjust: false,
             hires_prompt_behavior: "append_end",
             hires_prompt_text: "",
@@ -4560,6 +4561,7 @@ export function renderUpscalingSection(node, container, modelLists) {
     }
     // Migration: add new global upscale settings
     if (node.state.upscaling.save_pre_upscale === undefined) node.state.upscaling.save_pre_upscale = false;
+    if (node.state.upscaling.run_upscales_at_end === undefined) node.state.upscaling.run_upscales_at_end = false;
     if (node.state.upscaling.hires_prompt_adjust === undefined) node.state.upscaling.hires_prompt_adjust = false;
     if (!node.state.upscaling.hires_prompt_behavior) node.state.upscaling.hires_prompt_behavior = "append_end";
     if (node.state.upscaling.hires_prompt_text === undefined) node.state.upscaling.hires_prompt_text = "";
@@ -4617,6 +4619,32 @@ export function renderUpscalingSection(node, container, modelLists) {
     preUpscaleLabel.appendChild(preUpscaleCb);
     preUpscaleLabel.appendChild(document.createTextNode("Also Save & Display Pre-Upscaled Output"));
     globalSettings.appendChild(preUpscaleLabel);
+
+    // Run Upscales At End Of Session checkbox
+    const endUpscaleDiv = document.createElement("div");
+    endUpscaleDiv.style.cssText = "margin-bottom: 4px;";
+    const endUpscaleLabel = document.createElement("label");
+    endUpscaleLabel.style.cssText = "display: flex; align-items: center; gap: 6px; font-size: 12px; color: #ccc; cursor: pointer;";
+    const endUpscaleCb = document.createElement("input");
+    endUpscaleCb.type = "checkbox";
+    endUpscaleCb.checked = ups.run_upscales_at_end || false;
+    endUpscaleCb.onchange = () => {
+        ups.run_upscales_at_end = endUpscaleCb.checked;
+        endUpscaleWarn.style.display = endUpscaleCb.checked ? "block" : "none";
+        node.saveState();
+    };
+    endUpscaleLabel.appendChild(endUpscaleCb);
+    endUpscaleLabel.appendChild(document.createTextNode("Run Upscales At End Of Session Instead Of After Each Gen"));
+    endUpscaleDiv.appendChild(endUpscaleLabel);
+    const endUpscaleDesc = document.createElement("div");
+    endUpscaleDesc.style.cssText = "font-size: 9px; color: #666; margin: 2px 0 4px 24px;";
+    endUpscaleDesc.textContent = "May help speed on VRAM-constrained devices. Groups upscales by model to minimize swaps.";
+    endUpscaleDiv.appendChild(endUpscaleDesc);
+    const endUpscaleWarn = document.createElement("div");
+    endUpscaleWarn.style.cssText = "font-size: 9px; color: #f80; margin: 2px 0 4px 24px; display: " + (endUpscaleCb.checked ? "block" : "none") + ";";
+    endUpscaleWarn.textContent = "WARNING: If \"Also Save & Display Pre-Upscaled Output\" is NOT checked, images won't show up in the Dashboard until the entire run is complete.";
+    endUpscaleDiv.appendChild(endUpscaleWarn);
+    globalSettings.appendChild(endUpscaleDiv);
 
     // Adjust Prompt During HiRes Fix checkbox
     const hiresPromptLabel = document.createElement("label");
