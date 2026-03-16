@@ -218,7 +218,10 @@ function incrementalFilter(newItems) {
         filters.positive.size > 0 ||
         filters.negative.size > 0 ||
         filters.size.size > 0 ||
-        filters.seed.size > 0;
+        filters.seed.size > 0 ||
+        filters.steps.size > 0 ||
+        filters.cfg.size > 0 ||
+        filters.upscaleMethod.size > 0;
 
     return newItems.filter(d => {
         // Apply top-level filters (Favorites/Non-Favorited/Rejected visibility)
@@ -248,6 +251,19 @@ function incrementalFilter(newItems) {
                 if (!filters.size.has(sizeStr)) return false;
             }
             if (filters.seed.size > 0 && !filters.seed.has(d.seed)) return false;
+            if (filters.steps.size > 0 && !filters.steps.has(String(d.steps))) return false;
+            if (filters.cfg.size > 0 && !filters.cfg.has(String(d.cfg))) return false;
+            if (filters.upscaleMethod.size > 0) {
+                let upVal;
+                if (!d.upscaled) { upVal = 'No Upscale'; }
+                else {
+                    const mode = d.upscale_mode || '';
+                    const model = d.upscale_model;
+                    const shortModel = model ? String(model).replace(/\\/g, '/').split('/').pop().replace(/\.[^.]+$/, '') : '';
+                    upVal = shortModel ? `${mode} + ${shortModel}` : mode || 'Upscaled';
+                }
+                if (!filters.upscaleMethod.has(upVal)) return false;
+            }
         }
 
         // Apply search filters
@@ -292,7 +308,10 @@ function executePipeline() {
         filters.positive.size > 0 ||
         filters.negative.size > 0 ||
         filters.size.size > 0 ||
-        filters.seed.size > 0;
+        filters.seed.size > 0 ||
+        filters.steps.size > 0 ||
+        filters.cfg.size > 0 ||
+        filters.upscaleMethod.size > 0;
 
     const hasSearchFilters = typeof matchesSearchFilters === 'function' && searchFilters.length > 0;
 
@@ -321,6 +340,19 @@ function executePipeline() {
             }
             if (filters.size.size > 0 && !filters.size.has(`${d.width}x${d.height}`)) return false;
             if (filters.seed.size > 0 && !filters.seed.has(d.seed)) return false;
+            if (filters.steps.size > 0 && !filters.steps.has(String(d.steps))) return false;
+            if (filters.cfg.size > 0 && !filters.cfg.has(String(d.cfg))) return false;
+            if (filters.upscaleMethod.size > 0) {
+                let upVal;
+                if (!d.upscaled) { upVal = 'No Upscale'; }
+                else {
+                    const mode = d.upscale_mode || '';
+                    const model = d.upscale_model;
+                    const shortModel = model ? String(model).replace(/\\/g, '/').split('/').pop().replace(/\.[^.]+$/, '') : '';
+                    upVal = shortModel ? `${mode} + ${shortModel}` : mode || 'Upscaled';
+                }
+                if (!filters.upscaleMethod.has(upVal)) return false;
+            }
         }
 
         if (hasSearchFilters && !matchesSearchFilters(d)) return false;

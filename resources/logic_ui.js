@@ -558,14 +558,14 @@ function initFilters() {
     if (!activeData || activeData.length === 0) return;
 
     // Ensure all filter Sets exist (add new ones if missing)
-    const filterKeys = ['model', 'sampler', 'scheduler', 'denoise', 'lora', 'positive', 'negative', 'size', 'seed'];
+    const filterKeys = ['model', 'sampler', 'scheduler', 'denoise', 'lora', 'positive', 'negative', 'size', 'seed', 'steps', 'cfg', 'upscaleMethod'];
     filterKeys.forEach(key => {
         if (!filters.hasOwnProperty(key) || !(filters[key] instanceof Set)) {
             filters[key] = new Set();
         }
     });
 
-    ['model', 'sampler', 'scheduler', 'denoise', 'lora', 'positive', 'negative', 'size', 'seed'].forEach(key => {
+    filterKeys.forEach(key => {
         const unique = [...new Set(activeData.map(d => {
             if (key === 'model') return d.model || meta.model || "Default";
             if (key === 'positive') {
@@ -577,6 +577,15 @@ function initFilters() {
                 return st ? (d.negative || meta.negative || "") : (d.config_negative || d.negative || meta.negative || "");
             }
             if (key === 'size') return `${d.width}x${d.height}`;
+            if (key === 'steps') return String(d.steps);
+            if (key === 'cfg') return String(d.cfg);
+            if (key === 'upscaleMethod') {
+                if (!d.upscaled) return 'No Upscale';
+                const mode = d.upscale_mode || '';
+                const model = d.upscale_model;
+                const shortModel = model ? String(model).replace(/\\/g, '/').split('/').pop().replace(/\.[^.]+$/, '') : '';
+                return shortModel ? `${mode} + ${shortModel}` : mode || 'Upscaled';
+            }
             return d[key];
         }))].sort();
 

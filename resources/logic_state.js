@@ -28,7 +28,10 @@ var filters = filters || {
     positive: new Set(),
     negative: new Set(),
     size: new Set(),
-    seed: new Set()
+    seed: new Set(),
+    steps: new Set(),
+    cfg: new Set(),
+    upscaleMethod: new Set()
 };
 
 // Top-level filter toggles (true = show, false = hide)
