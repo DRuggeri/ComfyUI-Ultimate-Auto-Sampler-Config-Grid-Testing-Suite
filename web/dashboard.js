@@ -59,9 +59,10 @@ app.registerExtension({
                         }
                     }
 
-                    // CASE 2: Session matches but not loaded → auto-load
+                    // CASE 2: Session matches but not loaded yet → auto-load ONLY if no session is loaded
+                    // Don't force-load if the user is manually browsing a different session in another tab
                     else if (currentSessionName === session_name &&
-                        dashboardNode.loaded_session !== session_name) {
+                        !dashboardNode.loaded_session) {
 
                         console.log(`[UltimateGrid] 🔄 Auto-loading session: ${session_name}`);
 
