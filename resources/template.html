@@ -130,6 +130,13 @@
                     </label>
                 </div>
                 <div id="label-fields-container" style="display: none;">
+                    <div style="display: flex; align-items: center; gap: 6px; margin-bottom: 8px;">
+                        <label for="label-size-slider" style="font-size: 10px; color: #999; white-space: nowrap;">Size:</label>
+                        <input type="range" id="label-size-slider" min="6" max="16" value="9" step="1"
+                            style="flex: 1; height: 14px; cursor: pointer;"
+                            oninput="updateLabelSize(this.value)">
+                        <span id="label-size-value" style="font-size: 10px; color: #999; min-width: 20px;">9px</span>
+                    </div>
                     <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 4px;">
                         <div style="display: flex; align-items: center; gap: 4px;">
                             <input type="checkbox" id="label-field-model" onchange="updateLabelFields()" style="width: 12px; height: 12px; cursor: pointer;">

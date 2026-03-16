@@ -87,6 +87,7 @@ let updateDebounceTimer = null;
 // Which fields to show as overlays on cards (persisted to localStorage)
 var labelMode = labelMode || {
     enabled: false,
+    labelSize: 9,
     fields: {
         model: false,
         lora: false,
