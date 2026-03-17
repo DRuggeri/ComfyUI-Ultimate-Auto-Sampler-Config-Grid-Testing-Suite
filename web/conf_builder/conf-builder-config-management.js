@@ -1583,6 +1583,14 @@ export function createLoraElement(node, loraStr, arrayIdx, loraIdx, availableLor
     );
     contentDiv.appendChild(nameSearchable);
 
+    // Check if this LoRA has weight arrays stored
+    if (!node.state.config_arrays[arrayIdx].lora_weight_arrays) {
+        node.state.config_arrays[arrayIdx].lora_weight_arrays = {};
+    }
+    const weightArrays = node.state.config_arrays[arrayIdx].lora_weight_arrays;
+    const hasModelArray = weightArrays[parsed.name + "_model"] && weightArrays[parsed.name + "_model"].length > 1;
+    const hasClipArray = weightArrays[parsed.name + "_clip"] && weightArrays[parsed.name + "_clip"].length > 1;
+
     const modelSlider = createSlider("Model Strength", currentModelStr, 0, 2, 0.05, (val) => {
         currentModelStr = val;
         const currentName = isCombined ? cleanName + "*" : parsed.name;
@@ -1604,6 +1612,53 @@ export function createLoraElement(node, loraStr, arrayIdx, loraIdx, availableLor
         }
     });
     contentDiv.appendChild(modelSlider);
+
+    // Weight Array "+" button and editor for Model Strength
+    const modelArrayDiv = document.createElement("div");
+    modelArrayDiv.style.cssText = "margin: -4px 0 6px 0; display: flex; align-items: center; gap: 4px;";
+    const modelArrayBtn = document.createElement("button");
+    modelArrayBtn.textContent = hasModelArray ? "✕ Array" : "+ Compare Strengths";
+    modelArrayBtn.className = "cb-btn";
+    modelArrayBtn.style.cssText = "font-size: 9px; padding: 1px 6px; color: " + (hasModelArray ? "#f80" : "#0af") + ";";
+
+    const modelArrayInput = document.createElement("input");
+    modelArrayInput.type = "text";
+    modelArrayInput.placeholder = "e.g. 0.5, 0.8, 1.0";
+    modelArrayInput.style.cssText = "flex: 1; background: #1a1a1a; color: #ccc; border: 1px solid #444; border-radius: 4px; padding: 2px 6px; font-size: 10px; display: " + (hasModelArray ? "block" : "none") + ";";
+    modelArrayInput.value = hasModelArray ? weightArrays[parsed.name + "_model"].join(", ") : "";
+
+    modelArrayBtn.onclick = () => {
+        if (hasModelArray || modelArrayInput.style.display !== "none") {
+            // Remove array
+            delete weightArrays[parsed.name + "_model"];
+            if (isStrengthLocked) delete weightArrays[parsed.name + "_clip"];
+            node.saveState();
+            updatePreview(node);
+            debouncedRenderUI(node);
+        } else {
+            // Show array input
+            modelArrayInput.style.display = "block";
+            modelArrayInput.value = currentModelStr.toFixed(2);
+            modelArrayInput.focus();
+        }
+    };
+
+    modelArrayInput.onchange = () => {
+        const vals = modelArrayInput.value.split(",").map(v => parseFloat(v.trim())).filter(v => !isNaN(v));
+        if (vals.length > 1) {
+            weightArrays[parsed.name + "_model"] = vals;
+            if (isStrengthLocked) weightArrays[parsed.name + "_clip"] = vals;
+        } else {
+            delete weightArrays[parsed.name + "_model"];
+            if (isStrengthLocked) delete weightArrays[parsed.name + "_clip"];
+        }
+        node.saveState();
+        updatePreview(node);
+    };
+
+    modelArrayDiv.appendChild(modelArrayBtn);
+    modelArrayDiv.appendChild(modelArrayInput);
+    contentDiv.appendChild(modelArrayDiv);
 
     // CLIP Slider - conditionally visible based on lock state
     let clipSliderContainer = null;

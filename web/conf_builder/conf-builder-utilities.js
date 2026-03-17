@@ -513,6 +513,23 @@ export function convertStateToConfigs(state) {
             return !configArray.lora_bypass_states?.[parsed.name];
         });
 
+        // Apply weight arrays (bracket notation) for LoRAs with multiple strengths
+        const wa = configArray.lora_weight_arrays || {};
+        loras = loras.map(l => {
+            const parsed = parseLoraString(l);
+            const modelArr = wa[parsed.name + "_model"];
+            const clipArr = wa[parsed.name + "_clip"];
+            if (modelArr && modelArr.length > 1) {
+                const modelPart = "[" + modelArr.join(", ") + "]";
+                const clipPart = (clipArr && clipArr.length > 1) ? "[" + clipArr.join(", ") + "]" : parsed.clip_str.toFixed(2);
+                return parsed.name + ":" + modelPart + ":" + clipPart;
+            }
+            if (clipArr && clipArr.length > 1) {
+                return parsed.name + ":" + parsed.model_str.toFixed(2) + ":[" + clipArr.join(", ") + "]";
+            }
+            return l;
+        });
+
         // Convert loras array to proper format
         let loraValue;
         if (loras.length === 0) {
