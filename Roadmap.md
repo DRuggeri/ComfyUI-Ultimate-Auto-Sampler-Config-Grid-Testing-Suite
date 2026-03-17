@@ -47,37 +47,50 @@ ProjectStructure.md has notes to assist AI in developing this project
 ## Please update ProjectStructure.md to be better structured and fixed up for having all relevant AI Notes in it that will help and assist AI to develop this project further. Add your findings, file system notes, important considerations and more to it and make sure its up to date and full of helpful info.
 
 
+
 #  **ComfyUI Ultimate Sampler Grid – Development Roadmap** 
 
 
-## Bug: If we omit entries from the Builder UI's config_json output the manifest.json files lose that data and entries that are toggled off will be lost when loading the session from the manifest file. We should
+## ~~Feature label mode labels in dashboard when showing lora labels should also show the model str and clip strength like how they're written in the config_json, as lora:1.0:1.0 etc~~ DONE
 
-## Feature idea, Config Section Presets, Saveable, Nameable & Loadable or Importable/Mergeable presets for each section, Prompts, Models, Text Encoders, Vaes, Loras, Trigger Omit, Upscalers. Would make mixing and matching and setting up new configs easier & more customizable.
+## ~~Feature: Checkbox for "Run Upscales At End Of Session Instead Of After Each Gen"~~ DONE — deferred upscale queue with step-major model batching, resume support, and dashboard progress
+
+## ~~Bug: The duration/time taken to generate metric doesn't work properly if upscale is used~~ DONE — duration now includes all upscale time
+
+## ~~Feature: Slider in the Dashboard, in the settings cog modal, at the top of Label Model section between the description and the enable button, that increases/decreases the size of the labels.~~ DONE
+
+## ~~Add Steps, CFG & Upscale Model/Method to Dashboard Filters list~~ DONE
+
+## ~~Bug: If we omit entries from the Builder UI's config_json output the manifest.json files lose that data and entries that are toggled off will be lost when loading the session from the manifest file.~~ DONE — all fields now always included with defaults
+
+## Feature idea, Config Section Presets, Saveable, Nameable & Loadable or Importable/Mergeable presets for each section, Prompts, Models, Text Encoders, Vaes, Loras, Trigger Omit, Upscalers. Would make mixing and matching and setting up new configs easier & more customizable. (Upscale presets DONE — other sections still TODO)
 
 
-## The Dashboard Session Load Option in the cog settings topbar modal needs sort by most recent and session search feature like how the Builder UI Session Load has.
+## ~~The Dashboard Session Load Option in the cog settings topbar modal needs sort by most recent and session search feature like how the Builder UI Session Load has.~~ DONE
 
 ## Feature: Add builder UI option to pack pure nodes like REVISE copy as comfy nodes into every image always.
 
 ## Issue: Distributed Worker bug with save models to worker, not working
 
-## Small bug, centering zoom doesn't perfectly fit the images into the canvas, I think it doesnt account for the topbar and bottom smartjson bar sizes.
+## ~~Small bug, centering zoom doesn't perfectly fit the images into the canvas, I think it doesnt account for the topbar and bottom smartjson bar sizes.~~ DONE
 
-## Vae settings in the Builder UI passed to sampler gen orchestrator through the config_json need to override the hf_remote setting in the sampler node input selection. All settings should be override from the Builder UI config_json, it should take first priority over any setting in the sampler node as we are phasing out the sampler node settings completely eventually. (Fix needs testing)
+## Vae settings in the Builder UI passed to sampler gen orchestrator through the config_json need to override the hf_remote setting in the sampler node input selection. All settings should be override from the Builder UI config_json, it should take first priority over any setting in the sampler node as we are phasing out the sampler node settings completely eventually. (Already implemented — needs testing)
 
-## Issue: If running a job in one tab and reviewing images from a past session with the Dashboard in another tab, the Dashboard receives updates across all tabs and force-loads the Dashboard to the currently running session. (Fix needs testing)
+## ~~Issue: If running a job in one tab and reviewing images from a past session with the Dashboard in another tab, the Dashboard receives updates across all tabs and force-loads the Dashboard to the currently running session.~~ DONE — auto-load only when no session loaded yet
 
-## The batch encoding step lost its ability to stop everything during its run loop. If the user clicks cancel job in ComfyUI it needs to stop the entire loop, not just one encoding, like how the generation loop works. Its incredibly inconventient to have to wait for it to finish on large runs if you need to cancel early. (Fix needs testing)
+## The batch encoding step lost its ability to stop everything during its run loop. (Already implemented — interrupt check before each encoding. Needs testing)
 
 ## Feature: Drag and drop re-organzie loras, models, text encoders, vaes. This would make changing their run order and lora_tag append order much easier to control. (needs more testing/fixing)
 
-## Jobs don't generate prompts in the order they're written in the array, it's mildly inconvenient. Lets fix that and make it run in order from top to bottom of the array.
+## ~~Jobs don't generate prompts in the order they're written in the array, it's mildly inconvenient. Lets fix that and make it run in order from top to bottom of the array.~~ DONE
 
-## Custom Job Resume / Skipping - Start At Job # Option
+## ~~Custom Job Resume / Skipping - Start At Job # Option~~ DONE — Run Settings section in Builder UI
 
-## Batch Encoding could use with implementing the smart, look ahead, caching system we built for lora swapping. 
+## Batch Encoding could use with implementing the smart, look ahead, caching system we built for lora swapping.
 
 ## bug fix, the Builder UI is very slow to update when first starting, adding models, adding loras, a few other things, we need to check it and optimize it to load and respond faster. (Needs more improvement)
+
+## NEW: Dashboard Upscale Feature — Upscale single images or all favorites directly from the dashboard with preset management. Phase 1 DONE. Phase 2 (inline pipeline editing, cancel) TODO.
 
 
 
@@ -88,7 +101,7 @@ Builder UI could have a + button right next to model strength text input (on its
 
 
 
-## Bug Fix: Batch Encoding Runs Before Job Skip/Continue/Resume check and will encode everything again even if it's already been completed. Also Continue/Resume needs optional inputs to be tracked. We need to track connected node changes from each of the optional inputs, we could also use this step to save the workflow to the benchmark/session folder and compare the last run workflow to the current to track node changes and determine changes and also integrate currenly missing from optional inputs such as model, loras, prompts, etc. (Needs testing)
+## Bug Fix: Batch Encoding Runs Before Job Skip/Continue/Resume check. (Already implemented — prompts are now filtered to only encode for jobs that need work. Optional input tracking still TODO. Needs testing)
 
 
 #### **7. CivitAI Download Integration** (low priority)
@@ -101,14 +114,14 @@ A button in the builder UI to pack short sha256 into config with an explanation 
 
 #### **11. Model-Specific Prompts** (Needs improvement)
 
-#### **13. Real-Time ETA** (Needs improvement, doesnt consider distribtion times, and upscale jobs kind of throw off ETA, seconds/job counter and dashboard image/manifest saved "duration" metric )
+#### **13. Real-Time ETA** (Improved — now uses rolling 10-job window for more responsive estimates. Distribution times still TODO)
 
 #### **14. Cache Trigger Word Placement** (low priority)
 * **Problem:** `trigger_words.py` logic runs every loop iteration.
 * **Target Files:** `trigger_words.py`
 
 
-#### **20. Hotkeys Reference List** (Needs updating)
+#### ~~**20. Hotkeys Reference List**~~ DONE — updated with R, Shift+0-9, Ctrl+S, Escape, Double-click
 
 
 #### **22. Import Configs (Merge)** (low priority)
