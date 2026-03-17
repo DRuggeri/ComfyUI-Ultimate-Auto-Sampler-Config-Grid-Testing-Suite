@@ -5551,6 +5551,91 @@ export async function renderUI(node, availableLoras, modelLists, loraFolders, av
     };
     headerBar.appendChild(addConfigBtn);
 
+    // Config Array Presets (save/load entire config arrays)
+    const configPresetSelect = document.createElement("select");
+    configPresetSelect.style.cssText = "background: #1a1a1a; color: #ccc; border: 1px solid #444; border-radius: 4px; padding: 3px 6px; font-size: 10px; max-width: 140px;";
+    const configPresetDefault = document.createElement("option");
+    configPresetDefault.value = ""; configPresetDefault.textContent = "-- Config Presets --";
+    configPresetSelect.appendChild(configPresetDefault);
+
+    fetch("/configbuilder/config_section_presets").then(r => r.json()).then(data => {
+        (data.presets || []).forEach((p, i) => {
+            const opt = document.createElement("option");
+            opt.value = i; opt.textContent = p.name;
+            configPresetSelect.appendChild(opt);
+        });
+        configPresetSelect._presets = data.presets || [];
+    }).catch(() => { configPresetSelect._presets = []; });
+
+    const configPresetLoadBtn = document.createElement("button");
+    configPresetLoadBtn.className = "cb-btn";
+    configPresetLoadBtn.textContent = "Load";
+    configPresetLoadBtn.style.cssText = "font-size: 10px; padding: 2px 6px;";
+    configPresetLoadBtn.onclick = () => {
+        const idx = parseInt(configPresetSelect.value);
+        if (isNaN(idx) || !configPresetSelect._presets) return;
+        const preset = configPresetSelect._presets[idx];
+        if (!preset || !preset.config_arrays) return;
+        node.state.config_arrays = JSON.parse(JSON.stringify(preset.config_arrays));
+        if (preset.global_positive_groups) node.state.global_positive_groups = JSON.parse(JSON.stringify(preset.global_positive_groups));
+        if (preset.global_negative !== undefined) node.state.global_negative = preset.global_negative;
+        node.saveState();
+        node.renderUI();
+    };
+
+    const configPresetSaveBtn = document.createElement("button");
+    configPresetSaveBtn.className = "cb-btn";
+    configPresetSaveBtn.textContent = "Save";
+    configPresetSaveBtn.style.cssText = "font-size: 10px; padding: 2px 6px;";
+    configPresetSaveBtn.onclick = () => {
+        const name = prompt("Config preset name:");
+        if (!name) return;
+        const presets = configPresetSelect._presets || [];
+        presets.push({
+            name: name,
+            config_arrays: JSON.parse(JSON.stringify(node.state.config_arrays)),
+            global_positive_groups: JSON.parse(JSON.stringify(node.state.global_positive_groups || [])),
+            global_negative: node.state.global_negative || "",
+        });
+        fetch("/configbuilder/config_section_presets", {
+            method: "POST",
+            headers: {"Content-Type": "application/json"},
+            body: JSON.stringify({presets: presets})
+        }).then(() => {
+            configPresetSelect._presets = presets;
+            const opt = document.createElement("option");
+            opt.value = presets.length - 1; opt.textContent = name;
+            configPresetSelect.appendChild(opt);
+            configPresetSelect.value = presets.length - 1;
+        });
+    };
+
+    const configPresetDelBtn = document.createElement("button");
+    configPresetDelBtn.className = "cb-btn";
+    configPresetDelBtn.textContent = "\uD83D\uDDD1"; // 🗑
+    configPresetDelBtn.style.cssText = "font-size: 10px; padding: 2px 4px; background: var(--danger); color: #fff;";
+    configPresetDelBtn.onclick = () => {
+        const idx = parseInt(configPresetSelect.value);
+        if (isNaN(idx) || !configPresetSelect._presets || idx < 0 || idx >= configPresetSelect._presets.length) return;
+        if (!confirm('Delete preset "' + configPresetSelect._presets[idx].name + '"?')) return;
+        configPresetSelect._presets.splice(idx, 1);
+        fetch("/configbuilder/config_section_presets", {
+            method: "POST",
+            headers: {"Content-Type": "application/json"},
+            body: JSON.stringify({presets: configPresetSelect._presets})
+        });
+        configPresetSelect.value = "";
+        // Remove the option
+        for (let i = configPresetSelect.options.length - 1; i >= 0; i--) {
+            if (configPresetSelect.options[i].value == idx) configPresetSelect.remove(i);
+        }
+    };
+
+    headerBar.appendChild(configPresetSelect);
+    headerBar.appendChild(configPresetLoadBtn);
+    headerBar.appendChild(configPresetSaveBtn);
+    headerBar.appendChild(configPresetDelBtn);
+
     configSection.appendChild(headerBar);
 
     // Quick-jump navigation bar (only show when there are 2+ configs)

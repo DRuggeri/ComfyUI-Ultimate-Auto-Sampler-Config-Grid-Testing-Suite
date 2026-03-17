@@ -40,6 +40,9 @@ CUSTOM_RESOLUTIONS_FILE = os.path.join(folder_paths.get_output_directory(), "ben
 # --- UPSCALE PRESETS FILE ---
 UPSCALE_PRESETS_FILE = os.path.join(folder_paths.get_output_directory(), "benchmarks", "USCG-upscale-presets.json")
 
+# --- CONFIG SECTION PRESETS FILE ---
+CONFIG_SECTION_PRESETS_FILE = os.path.join(folder_paths.get_output_directory(), "benchmarks", "USCG-config-section-presets.json")
+
 
 # =============================================================================
 # API: CONFIG MANAGEMENT
@@ -128,6 +131,29 @@ async def save_upscale_presets(request):
         return web.Response(status=200, text="Saved")
     except Exception as e:
         print(f"[ConfigBuilder] Error saving upscale presets: {e}")
+        return web.Response(status=500, text=str(e))
+
+@server.PromptServer.instance.routes.get("/configbuilder/config_section_presets")
+async def get_config_section_presets(request):
+    try:
+        if os.path.exists(CONFIG_SECTION_PRESETS_FILE):
+            with open(CONFIG_SECTION_PRESETS_FILE, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            return web.json_response(data)
+        return web.json_response({"presets": []})
+    except Exception as e:
+        return web.json_response({"presets": []})
+
+@server.PromptServer.instance.routes.post("/configbuilder/config_section_presets")
+async def save_config_section_presets(request):
+    try:
+        data = await request.json()
+        os.makedirs(os.path.dirname(CONFIG_SECTION_PRESETS_FILE), exist_ok=True)
+        with open(CONFIG_SECTION_PRESETS_FILE, "w", encoding="utf-8") as f:
+            json.dump(data, f, indent=2)
+        return web.Response(status=200, text="Saved")
+    except Exception as e:
+        print(f"[ConfigBuilder] Error saving config section presets: {e}")
         return web.Response(status=500, text=str(e))
 
 @server.PromptServer.instance.routes.post("/configbuilder/load_config")
