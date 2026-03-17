@@ -731,8 +731,11 @@ def calculate_eta(job_durations, current_job, total_jobs):
     """
     if not job_durations:
         return None
-    
-    avg_duration = sum(job_durations) / len(job_durations)
+
+    # Use rolling window of last 10 jobs for more responsive ETA
+    # This adapts faster when upscaling patterns change (e.g., some configs have upscale, some don't)
+    recent_window = job_durations[-10:] if len(job_durations) > 10 else job_durations
+    avg_duration = sum(recent_window) / len(recent_window)
     remaining_jobs = total_jobs - current_job
     estimated_seconds = avg_duration * remaining_jobs
     
