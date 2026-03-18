@@ -151,7 +151,13 @@ def _run_upscale_thread(job, target_items, upscale_config, meta, manifest_data, 
                 job["status"] = "cancelled"
                 return
 
+            # Extract filename from manifest item — may be in "filename" or parsed from "file" URL
             filename = item.get("filename", "")
+            if not filename and item.get("file"):
+                import re
+                fname_match = re.search(r'filename=([^&]+)', item["file"])
+                if fname_match:
+                    filename = fname_match.group(1)
             job["current_image"] = filename
             image_path = os.path.join(images_dir, filename)
 
