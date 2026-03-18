@@ -560,13 +560,20 @@ class DistributionManager:
                     seen.add(key)
                     upcoming.append({"category": cat, "filename": model_name})
 
-            # LoRA
+            # LoRA — combo string: "name:str:str + name2:str:str", may include folders
             lora = config.get("lora_expanded", config.get("lora", "None"))
             if lora and lora != "None":
-                key = f"loras:{lora}"
-                if key not in seen:
-                    seen.add(key)
-                    upcoming.append({"category": "loras", "filename": lora})
+                for lora_part in lora.split(" + "):
+                    lora_filename = lora_part.strip().split(":")[0].strip()
+                    if not lora_filename or lora_filename == "None":
+                        continue
+                    # Skip folder references — workers expand those locally
+                    if lora_filename.endswith("/") or lora_filename.endswith("/*") or ("[" in lora_filename and "]" in lora_filename):
+                        continue
+                    key = f"loras:{lora_filename}"
+                    if key not in seen:
+                        seen.add(key)
+                        upcoming.append({"category": "loras", "filename": lora_filename})
 
             # VAE (skip remote URLs and "Default")
             vae = config.get("vae", "Default")

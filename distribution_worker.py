@@ -146,6 +146,7 @@ class WorkerThread(threading.Thread):
         Returns:
             List of {category, filename} dicts
         """
+        import folder_paths
         models = []
 
         # Main model/checkpoint
@@ -162,10 +163,38 @@ class WorkerThread(threading.Thread):
                 category = "checkpoints"
             models.append({"category": category, "filename": model_name})
 
-        # LoRA
+        # LoRA — combo string format: "name:model_str:clip_str + name2:model_str:clip_str"
+        # Parts can also be folder references like "FolderName/:0.90:0.90" which expand
+        # to all LoRA files in that folder, or random syntax "Folder/[3,0.5]"
         lora = config.get("lora_expanded", config.get("lora", "None"))
         if lora and lora != "None":
-            models.append({"category": "loras", "filename": lora})
+            for lora_part in lora.split(" + "):
+                lora_part = lora_part.strip()
+                if not lora_part:
+                    continue
+                # Extract just the filename (before first ":")
+                lora_filename = lora_part.split(":")[0].strip()
+                if not lora_filename or lora_filename == "None":
+                    continue
+
+                # Check if it's a folder reference (ends with / or /*)
+                clean_name = lora_filename.rstrip("/*").rstrip("/")
+                is_folder = lora_filename.endswith("/") or lora_filename.endswith("/*")
+                # Also check for random selection syntax: folder/[count,strength]
+                has_bracket = "[" in lora_filename and "]" in lora_filename
+                if has_bracket:
+                    clean_name = lora_filename.split("[")[0].rstrip("/")
+                    is_folder = True
+
+                if is_folder:
+                    # Expand folder to individual LoRA files
+                    folder_prefix = clean_name.replace("\\", "/") + "/"
+                    all_loras = folder_paths.get_filename_list("loras")
+                    for lora_file in all_loras:
+                        if lora_file.replace("\\", "/").startswith(folder_prefix):
+                            models.append({"category": "loras", "filename": lora_file})
+                else:
+                    models.append({"category": "loras", "filename": lora_filename})
 
         # VAE (skip remote URLs and "Default")
         vae = config.get("vae", "Default")
