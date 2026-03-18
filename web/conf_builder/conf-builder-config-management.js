@@ -4718,13 +4718,20 @@ export function renderUpscalingSection(node, container, modelLists) {
         const name = prompt("Preset name:");
         if (!name) return;
         const presets = presetSelect._presets || [];
-        presets.push({
+        const newPreset = {
             name: name,
             pipelines: JSON.parse(JSON.stringify(ups.pipelines)),
             hires_prompt_adjust: ups.hires_prompt_adjust || false,
             hires_prompt_behavior: ups.hires_prompt_behavior || "append_end",
             hires_prompt_text: ups.hires_prompt_text || "",
-        });
+        };
+        // Replace existing preset with same name, or add new
+        const existingIdx = presets.findIndex(p => p.name === name);
+        if (existingIdx >= 0) {
+            presets[existingIdx] = newPreset;
+        } else {
+            presets.push(newPreset);
+        }
         console.log("[ConfigBuilder] Saving upscale preset:", name, "total:", presets.length);
         fetch("/configbuilder/upscale_presets", {
             method: "POST",
@@ -4733,10 +4740,8 @@ export function renderUpscalingSection(node, container, modelLists) {
         }).then(r => {
             console.log("[ConfigBuilder] Preset save response:", r.status);
             presetSelect._presets = presets;
-            const opt = document.createElement("option");
-            opt.value = presets.length - 1; opt.textContent = name;
-            presetSelect.appendChild(opt);
-            presetSelect.value = presets.length - 1;
+            // Re-render to reflect updated presets without duplicates
+            renderUpscalingSection(node, container, modelLists);
         }).catch(e => { console.error("[ConfigBuilder] Preset save failed:", e); });
     };
 
@@ -5087,7 +5092,7 @@ export function renderUpscalingSection(node, container, modelLists) {
 
                         const htUniformCb = document.createElement("input");
                         htUniformCb.type = "checkbox";
-                        htUniformCb.checked = ucfg.hires_force_uniform_tiles || true;
+                        htUniformCb.checked = ucfg.hires_force_uniform_tiles !== false;
                         htUniformCb.onchange = () => { ucfg.hires_force_uniform_tiles = htUniformCb.checked; node.saveState(); };
                         grid.appendChild(createInputGroup("Force Uniform Tiles", htUniformCb));
                     }

@@ -14,14 +14,53 @@ var upscaleModalState = {
     availableModels: [],  // Upscale model list from server
 };
 
-// Default upscale step config
+// Default upscale step config — ALL fields matching the Builder UI's createDefaultStep()
 function _defaultUpscaleStep() {
     return {
-        active: true, mode: "hires_only", repeat: 1,
-        upscale_models: [], upscale_ratios: "1.5", upscale_size: "2.0",
-        hires_denoise: "0.3", hires_steps: 0, tiled_vae: false, tile_size: 512,
+        active: true,
+        mode: "hires_only",
+        repeat: 1,
+        upscale_models: [],
+        upscale_ratios: "1.5",
+        upscale_size: "2.0",
+        hires_denoise: "0.3",
+        hires_steps: 0,
+        tiled_vae: false,
+        tile_size: 512,
+        tile_overlap: 64,
+        temporal_size: 512,
+        temporal_overlap: 64,
         resize_method: "bilinear",
+        hires_tiled_sampling: false,
+        hires_tile_width: 512,
+        hires_tile_height: 512,
+        hires_mask_blur: 8,
+        hires_tile_padding: 32,
+        hires_force_uniform_tiles: false
     };
+}
+
+// Ensure a step has all required fields (migration/defaults) — mirrors Builder's ensureStepFields()
+function _ensureUpscaleStepFields(step) {
+    if (step.active === undefined) step.active = true;
+    if (!step.repeat || step.repeat < 1) step.repeat = 1;
+    if (!step.upscale_models) step.upscale_models = [];
+    if (!step.upscale_ratios) step.upscale_ratios = "1.5";
+    if (!step.upscale_size) step.upscale_size = "2.0";
+    if (!step.hires_denoise) step.hires_denoise = "0.3";
+    if (step.hires_steps === undefined) step.hires_steps = 0;
+    if (step.tiled_vae === undefined) step.tiled_vae = false;
+    if (!step.tile_size) step.tile_size = 512;
+    if (!step.tile_overlap) step.tile_overlap = 64;
+    if (!step.temporal_size) step.temporal_size = 512;
+    if (!step.temporal_overlap) step.temporal_overlap = 64;
+    if (!step.resize_method) step.resize_method = "bilinear";
+    if (step.hires_tiled_sampling === undefined) step.hires_tiled_sampling = false;
+    if (!step.hires_tile_width) step.hires_tile_width = 512;
+    if (!step.hires_tile_height) step.hires_tile_height = 512;
+    if (step.hires_mask_blur === undefined) step.hires_mask_blur = 8;
+    if (!step.hires_tile_padding) step.hires_tile_padding = 32;
+    if (step.hires_force_uniform_tiles === undefined) step.hires_force_uniform_tiles = false;
 }
 
 // Default config
@@ -87,7 +126,7 @@ async function fetchUpscalePresets() {
  */
 async function fetchUpscaleModels() {
     try {
-        var resp = await fetch('/configbuilder/model_lists', { method: 'POST' });
+        var resp = await fetch('/configbuilder/model_lists');
         if (resp.ok) {
             var data = await resp.json();
             upscaleModalState.availableModels = data.upscale_models || [];
@@ -100,6 +139,11 @@ async function fetchUpscaleModels() {
  */
 async function saveUpscalePreset(name) {
     if (!name || !upscaleModalState.currentConfig) return;
+    // Check for duplicate name and replace if exists
+    var existingIdx = -1;
+    for (var i = 0; i < upscaleModalState.presets.length; i++) {
+        if (upscaleModalState.presets[i].name === name) { existingIdx = i; break; }
+    }
     var preset = {
         name: name,
         pipelines: JSON.parse(JSON.stringify(upscaleModalState.currentConfig.pipelines)),
@@ -107,7 +151,11 @@ async function saveUpscalePreset(name) {
         hires_prompt_behavior: upscaleModalState.currentConfig.hires_prompt_behavior || "append_end",
         hires_prompt_text: upscaleModalState.currentConfig.hires_prompt_text || "",
     };
-    upscaleModalState.presets.push(preset);
+    if (existingIdx >= 0) {
+        upscaleModalState.presets[existingIdx] = preset;
+    } else {
+        upscaleModalState.presets.push(preset);
+    }
     try {
         await fetch('/configbuilder/upscale_presets', {
             method: 'POST',
@@ -145,6 +193,13 @@ function loadUpscalePreset(index) {
         hires_prompt_behavior: preset.hires_prompt_behavior || "append_end",
         hires_prompt_text: preset.hires_prompt_text || "",
     };
+    // Ensure all loaded steps have required fields
+    upscaleModalState.currentConfig.pipelines.forEach(function(p) {
+        if (p.active === undefined) p.active = true;
+        if (!p.name) p.name = "Pipeline";
+        if (!p.steps || p.steps.length === 0) p.steps = [_defaultUpscaleStep()];
+        p.steps.forEach(_ensureUpscaleStepFields);
+    });
     renderUpscaleModal();
 }
 
@@ -191,6 +246,501 @@ function _makeInput(label, currentVal, placeholder, onChange) {
     row.appendChild(inp);
     return row;
 }
+
+/**
+ * Helper: create a labeled number input
+ */
+function _makeNumber(label, currentVal, min, max, step, onChange) {
+    var row = document.createElement('div');
+    row.style.cssText = 'display: flex; align-items: center; gap: 6px; margin-bottom: 6px;';
+    var lbl = document.createElement('span');
+    lbl.textContent = label;
+    lbl.style.cssText = 'font-size: 11px; color: #999; min-width: 70px;';
+    var inp = document.createElement('input');
+    inp.type = 'number';
+    inp.value = currentVal;
+    inp.min = min;
+    inp.max = max;
+    inp.step = step;
+    inp.style.cssText = 'flex: 1; background: #1a1a1a; color: #ccc; border: 1px solid #444; border-radius: 4px; padding: 3px 6px; font-size: 11px; max-width: 80px;';
+    inp.onchange = function() { var v = parseInt(inp.value); onChange(isNaN(v) ? min : Math.max(min, Math.min(max, v))); };
+    row.appendChild(lbl);
+    row.appendChild(inp);
+    return row;
+}
+
+/**
+ * Helper: create a labeled checkbox
+ */
+function _makeCheckbox(label, checked, onChange) {
+    var row = document.createElement('div');
+    row.style.cssText = 'display: flex; align-items: center; gap: 6px; margin-bottom: 6px;';
+    var cb = document.createElement('input');
+    cb.type = 'checkbox';
+    cb.checked = checked;
+    cb.onchange = function() { onChange(cb.checked); };
+    var lbl = document.createElement('span');
+    lbl.textContent = label;
+    lbl.style.cssText = 'font-size: 11px; color: #ccc; cursor: pointer;';
+    lbl.onclick = function() { cb.checked = !cb.checked; onChange(cb.checked); };
+    row.appendChild(cb);
+    row.appendChild(lbl);
+    return row;
+}
+
+// ============================================================================
+// PIPELINE EDITOR — Full pipeline/step UI, reusable component
+// Mirrors the Builder UI's renderPipelines() in conf-builder-config-management.js
+// ============================================================================
+
+/**
+ * Render the full pipeline editor into a container.
+ * @param {HTMLElement} container — DOM element to render into (will be cleared)
+ * @param {Object} config — { pipelines: [...], hires_prompt_adjust, hires_prompt_behavior, hires_prompt_text }
+ * @param {Array} modelList — array of upscale model filenames
+ * @param {Object} callbacks — { onUpdate(), onRender() }
+ *   onUpdate — called when any config value changes (caller can persist)
+ *   onRender — called when DOM needs full re-render (add/remove pipeline/step, mode change)
+ */
+function renderPipelineEditor(container, config, modelList, callbacks) {
+    container.textContent = '';
+
+    // Ensure all pipelines/steps have required fields
+    if (!config.pipelines || config.pipelines.length === 0) {
+        config.pipelines = [{ active: true, name: "Pipeline 1", steps: [_defaultUpscaleStep()] }];
+    }
+    config.pipelines.forEach(function(p) {
+        if (p.active === undefined) p.active = true;
+        if (!p.name) p.name = "Pipeline";
+        if (!p.steps || p.steps.length === 0) p.steps = [_defaultUpscaleStep()];
+        p.steps.forEach(_ensureUpscaleStepFields);
+    });
+
+    // --- HiRes Prompt Adjustment Section ---
+    var hiresDiv = document.createElement('div');
+    hiresDiv.style.cssText = 'margin-bottom: 8px; padding: 6px 8px; background: #1e1e1e; border-radius: 4px;';
+    var hiresPromptRow = _makeCheckbox('Adjust Prompt During HiRes Fix', config.hires_prompt_adjust || false, function(v) {
+        config.hires_prompt_adjust = v;
+        hiresOpts.style.display = v ? 'block' : 'none';
+        callbacks.onUpdate();
+    });
+    hiresDiv.appendChild(hiresPromptRow);
+
+    var hiresOpts = document.createElement('div');
+    hiresOpts.style.cssText = 'margin-top: 4px; display: ' + (config.hires_prompt_adjust ? 'block' : 'none') + ';';
+    hiresOpts.appendChild(_makeSelect('Behavior:', [
+        { value: 'prepend', label: 'Append To Front' },
+        { value: 'append_end', label: 'Append To End' },
+        { value: 'replace', label: 'Replace Prompt' },
+    ], config.hires_prompt_behavior || 'append_end', function(v) {
+        config.hires_prompt_behavior = v;
+        callbacks.onUpdate();
+    }));
+    // Prompt text textarea
+    var promptRow = document.createElement('div');
+    promptRow.style.cssText = 'margin-bottom: 6px;';
+    var promptLbl = document.createElement('span');
+    promptLbl.textContent = 'HiRes Prompt:';
+    promptLbl.style.cssText = 'font-size: 11px; color: #999; display: block; margin-bottom: 2px;';
+    var promptTa = document.createElement('textarea');
+    promptTa.value = config.hires_prompt_text || '';
+    promptTa.placeholder = 'Enter prompt adjustment text...';
+    promptTa.style.cssText = 'width: 100%; min-height: 40px; background: #1a1a1a; color: #ccc; border: 1px solid #444; border-radius: 4px; padding: 4px 6px; font-size: 11px; resize: vertical; box-sizing: border-box;';
+    promptTa.onchange = function() { config.hires_prompt_text = promptTa.value; callbacks.onUpdate(); };
+    promptRow.appendChild(promptLbl);
+    promptRow.appendChild(promptTa);
+    hiresOpts.appendChild(promptRow);
+    hiresDiv.appendChild(hiresOpts);
+    container.appendChild(hiresDiv);
+
+    // --- Pipelines ---
+    var pipelinesContainer = document.createElement('div');
+
+    function reRender() {
+        renderPipelineEditor(container, config, modelList, callbacks);
+    }
+
+    config.pipelines.forEach(function(pipeline, pipeIdx) {
+        var pipeCard = document.createElement('div');
+        pipeCard.style.cssText = 'border: 2px solid #665599; border-radius: 8px; margin-bottom: 8px; background: #1a1a2e;' + (pipeline.active === false ? ' opacity: 0.5;' : '');
+
+        // Pipeline header (collapsible)
+        var pipeHeader = document.createElement('div');
+        pipeHeader.style.cssText = 'display: flex; justify-content: space-between; align-items: center; padding: 6px 10px; cursor: pointer; background: #252540; border-radius: 6px 6px 0 0;';
+
+        var pipeLeft = document.createElement('div');
+        pipeLeft.style.cssText = 'display: flex; align-items: center; gap: 6px;';
+
+        var pipeActiveCb = document.createElement('input');
+        pipeActiveCb.type = 'checkbox';
+        pipeActiveCb.checked = pipeline.active !== false;
+        pipeActiveCb.title = pipeline.active !== false ? 'Pipeline is ON' : 'Pipeline is OFF';
+        pipeActiveCb.onclick = function(e) { e.stopPropagation(); };
+        pipeActiveCb.onchange = function() {
+            pipeline.active = pipeActiveCb.checked;
+            pipeCard.style.opacity = pipeline.active !== false ? '1' : '0.5';
+            callbacks.onUpdate();
+        };
+        pipeLeft.appendChild(pipeActiveCb);
+
+        var pipeNameInput = document.createElement('input');
+        pipeNameInput.type = 'text';
+        pipeNameInput.value = pipeline.name || ('Pipeline ' + (pipeIdx + 1));
+        pipeNameInput.style.cssText = 'font-weight: bold; color: #cc99ff; font-size: 12px; background: transparent; border: 1px solid transparent; padding: 2px 4px; width: 130px;';
+        pipeNameInput.onclick = function(e) { e.stopPropagation(); };
+        pipeNameInput.onfocus = function() { pipeNameInput.style.borderColor = '#665599'; };
+        pipeNameInput.onblur = function() { pipeNameInput.style.borderColor = 'transparent'; };
+        pipeNameInput.onchange = function() { pipeline.name = pipeNameInput.value; callbacks.onUpdate(); };
+        pipeLeft.appendChild(pipeNameInput);
+
+        var pipeStepCount = document.createElement('span');
+        pipeStepCount.style.cssText = 'font-size: 10px; color: #888;';
+        pipeStepCount.textContent = '(' + pipeline.steps.length + ' step' + (pipeline.steps.length !== 1 ? 's' : '') + ')';
+        pipeLeft.appendChild(pipeStepCount);
+
+        pipeHeader.appendChild(pipeLeft);
+
+        var pipeRight = document.createElement('div');
+        pipeRight.style.cssText = 'display: flex; align-items: center; gap: 6px;';
+
+        if (config.pipelines.length > 1) {
+            var pipeDelBtn = document.createElement('button');
+            pipeDelBtn.textContent = '\u2715';
+            pipeDelBtn.style.cssText = 'background: #cc3333; color: #fff; border: none; border-radius: 3px; padding: 2px 8px; font-size: 12px; cursor: pointer;';
+            pipeDelBtn.onclick = function(e) {
+                e.stopPropagation();
+                config.pipelines.splice(pipeIdx, 1);
+                callbacks.onUpdate();
+                reRender();
+            };
+            pipeRight.appendChild(pipeDelBtn);
+        }
+
+        var collapseIcon = document.createElement('span');
+        collapseIcon.style.cssText = 'color: #888; font-size: 12px; user-select: none;';
+        collapseIcon.textContent = '\u25BC';
+        pipeRight.appendChild(collapseIcon);
+
+        pipeHeader.appendChild(pipeRight);
+        pipeCard.appendChild(pipeHeader);
+
+        // Pipeline body (collapsible)
+        var pipeBody = document.createElement('div');
+        pipeBody.style.cssText = 'padding: 6px 10px;';
+
+        pipeHeader.onclick = function() {
+            var isCollapsed = pipeBody.style.display === 'none';
+            pipeBody.style.display = isCollapsed ? 'block' : 'none';
+            collapseIcon.textContent = isCollapsed ? '\u25BC' : '\u25B6';
+        };
+
+        // Render steps
+        pipeline.steps.forEach(function(ucfg, stepIdx) {
+            _renderStep(pipeBody, config, pipeline, ucfg, stepIdx, modelList, callbacks, reRender);
+        });
+
+        // Add Step button
+        var addStepBtn = document.createElement('button');
+        addStepBtn.textContent = '+ Add Step';
+        addStepBtn.style.cssText = 'background: #333; color: #cc99ff; border: 1px solid #665599; border-radius: 4px; padding: 3px 10px; font-size: 11px; cursor: pointer; margin-top: 4px;';
+        addStepBtn.onclick = function() {
+            pipeline.steps.push(_defaultUpscaleStep());
+            callbacks.onUpdate();
+            reRender();
+        };
+        pipeBody.appendChild(addStepBtn);
+
+        pipeCard.appendChild(pipeBody);
+        pipelinesContainer.appendChild(pipeCard);
+    });
+
+    // Add Pipeline button
+    var addPipeBtn = document.createElement('button');
+    addPipeBtn.textContent = '+ Add Pipeline';
+    addPipeBtn.style.cssText = 'background: #333; color: #cc99ff; border: 1px solid #cc99ff; border-radius: 4px; padding: 4px 12px; font-size: 11px; cursor: pointer; margin-top: 4px;';
+    addPipeBtn.onclick = function() {
+        config.pipelines.push({
+            active: true,
+            name: 'Pipeline ' + (config.pipelines.length + 1),
+            steps: [_defaultUpscaleStep()]
+        });
+        callbacks.onUpdate();
+        reRender();
+    };
+    pipelinesContainer.appendChild(addPipeBtn);
+
+    container.appendChild(pipelinesContainer);
+}
+
+/**
+ * Render a single step card inside a pipeline body.
+ * Internal helper for renderPipelineEditor.
+ */
+function _renderStep(pipeBody, config, pipeline, ucfg, stepIdx, modelList, callbacks, reRender) {
+    var card = document.createElement('div');
+    card.style.cssText = 'border: 1px solid #444; border-radius: 6px; margin-bottom: 6px; padding: 8px;' + (ucfg.active === false ? ' opacity: 0.5;' : '');
+
+    // Card header
+    var cardHeader = document.createElement('div');
+    cardHeader.style.cssText = 'display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;';
+
+    var cardLeft = document.createElement('div');
+    cardLeft.style.cssText = 'display: flex; align-items: center; gap: 6px;';
+
+    var activeCb = document.createElement('input');
+    activeCb.type = 'checkbox';
+    activeCb.checked = ucfg.active !== false;
+    activeCb.onchange = function() {
+        ucfg.active = activeCb.checked;
+        card.style.opacity = ucfg.active !== false ? '1' : '0.5';
+        callbacks.onUpdate();
+    };
+    cardLeft.appendChild(activeCb);
+
+    var cardTitle = document.createElement('span');
+    cardTitle.style.cssText = 'font-weight: bold; color: #cc99ff; font-size: 12px;';
+    cardTitle.textContent = 'Step ' + (stepIdx + 1);
+    cardLeft.appendChild(cardTitle);
+
+    // Repeat field inline
+    var repeatLbl = document.createElement('span');
+    repeatLbl.style.cssText = 'font-size: 10px; color: #888; margin-left: 6px;';
+    repeatLbl.textContent = 'Repeat:';
+    cardLeft.appendChild(repeatLbl);
+
+    var repeatInput = document.createElement('input');
+    repeatInput.type = 'number';
+    repeatInput.value = ucfg.repeat || 1;
+    repeatInput.min = 1; repeatInput.max = 20; repeatInput.step = 1;
+    repeatInput.style.cssText = 'width: 44px; padding: 1px 3px; font-size: 10px; background: #1a1a1a; color: #ccc; border: 1px solid #444; border-radius: 3px;';
+    repeatInput.onchange = function() { ucfg.repeat = Math.max(1, parseInt(repeatInput.value) || 1); callbacks.onUpdate(); reRender(); };
+    cardLeft.appendChild(repeatInput);
+
+    if (ucfg.repeat > 1) {
+        var repeatNote = document.createElement('span');
+        repeatNote.style.cssText = 'font-size: 9px; color: #cc99ff;';
+        repeatNote.textContent = '(\u00D7' + ucfg.repeat + ' feedback loop)';
+        cardLeft.appendChild(repeatNote);
+    }
+
+    cardHeader.appendChild(cardLeft);
+
+    if (pipeline.steps.length > 1) {
+        var delBtn = document.createElement('button');
+        delBtn.textContent = '\u2715';
+        delBtn.style.cssText = 'background: #cc3333; color: #fff; border: none; border-radius: 3px; padding: 2px 8px; font-size: 11px; cursor: pointer;';
+        delBtn.onclick = function() {
+            pipeline.steps.splice(stepIdx, 1);
+            callbacks.onUpdate();
+            reRender();
+        };
+        cardHeader.appendChild(delBtn);
+    }
+    card.appendChild(cardHeader);
+
+    // Grid of settings
+    var grid = document.createElement('div');
+    grid.style.cssText = 'display: flex; flex-wrap: wrap; gap: 4px;';
+
+    // Mode select
+    grid.appendChild(_makeSelect('Mode:', [
+        { value: 'hires_only', label: 'HiRes Fix Only' },
+        { value: 'model_only', label: 'Model Upscale Only' },
+        { value: 'model_then_hires', label: 'Model + HiRes Fix' },
+    ], ucfg.mode, function(v) {
+        ucfg.mode = v;
+        callbacks.onUpdate();
+        reRender();
+    }));
+
+    // Resize method
+    grid.appendChild(_makeSelect('Resize:', [
+        'nearest-exact', 'bilinear', 'area', 'bicubic', 'lanczos'
+    ], ucfg.resize_method || 'bilinear', function(v) {
+        ucfg.resize_method = v;
+        callbacks.onUpdate();
+    }));
+
+    var showHires = ucfg.mode === 'hires_only' || ucfg.mode === 'model_then_hires';
+    var showModel = ucfg.mode === 'model_only' || ucfg.mode === 'model_then_hires';
+
+    // --- HiRes fields ---
+    if (showHires) {
+        grid.appendChild(_makeInput('Ratios:', ucfg.upscale_ratios || '1.5', '1.2, 1.5, 2.0', function(v) {
+            ucfg.upscale_ratios = v; callbacks.onUpdate();
+        }));
+        grid.appendChild(_makeInput('Denoise:', ucfg.hires_denoise || '0.3', '0.2, 0.3, 0.5', function(v) {
+            ucfg.hires_denoise = v; callbacks.onUpdate();
+        }));
+        grid.appendChild(_makeNumber('HiRes Steps:', ucfg.hires_steps || 0, 0, 150, 1, function(v) {
+            ucfg.hires_steps = v; callbacks.onUpdate();
+        }));
+
+        // Tiled sampling
+        grid.appendChild(_makeCheckbox('HiRes Tiled Sampling', ucfg.hires_tiled_sampling || false, function(v) {
+            ucfg.hires_tiled_sampling = v; callbacks.onUpdate(); reRender();
+        }));
+
+        if (ucfg.hires_tiled_sampling) {
+            grid.appendChild(_makeNumber('Tile Width:', ucfg.hires_tile_width || 512, 128, 2048, 64, function(v) {
+                ucfg.hires_tile_width = v; callbacks.onUpdate();
+            }));
+            grid.appendChild(_makeNumber('Tile Height:', ucfg.hires_tile_height || 512, 128, 2048, 64, function(v) {
+                ucfg.hires_tile_height = v; callbacks.onUpdate();
+            }));
+            grid.appendChild(_makeNumber('Mask Blur:', ucfg.hires_mask_blur || 8, 0, 64, 1, function(v) {
+                ucfg.hires_mask_blur = v; callbacks.onUpdate();
+            }));
+            grid.appendChild(_makeNumber('Tile Padding:', ucfg.hires_tile_padding || 32, 0, 256, 8, function(v) {
+                ucfg.hires_tile_padding = v; callbacks.onUpdate();
+            }));
+            grid.appendChild(_makeCheckbox('Force Uniform Tiles', ucfg.hires_force_uniform_tiles !== false, function(v) {
+                ucfg.hires_force_uniform_tiles = v; callbacks.onUpdate();
+            }));
+        }
+
+        // Tiled VAE
+        grid.appendChild(_makeCheckbox('Tiled VAE Decode', ucfg.tiled_vae || false, function(v) {
+            ucfg.tiled_vae = v; callbacks.onUpdate(); reRender();
+        }));
+
+        if (ucfg.tiled_vae) {
+            grid.appendChild(_makeNumber('Tile Size:', ucfg.tile_size || 512, 128, 1024, 64, function(v) {
+                ucfg.tile_size = v; callbacks.onUpdate();
+            }));
+            grid.appendChild(_makeNumber('Tile Overlap:', ucfg.tile_overlap || 64, 0, 512, 8, function(v) {
+                ucfg.tile_overlap = v; callbacks.onUpdate();
+            }));
+            grid.appendChild(_makeNumber('Temporal Size:', ucfg.temporal_size || 512, 128, 1024, 64, function(v) {
+                ucfg.temporal_size = v; callbacks.onUpdate();
+            }));
+            grid.appendChild(_makeNumber('Temporal Overlap:', ucfg.temporal_overlap || 64, 0, 512, 8, function(v) {
+                ucfg.temporal_overlap = v; callbacks.onUpdate();
+            }));
+        }
+    }
+
+    // --- Model fields ---
+    if (showModel) {
+        // Output size multiplier — only for model_only mode
+        if (ucfg.mode === 'model_only') {
+            grid.appendChild(_makeInput('Size Mult:', ucfg.upscale_size || '2.0', '2.0', function(v) {
+                ucfg.upscale_size = v; callbacks.onUpdate();
+            }));
+        }
+
+        // Model multi-select: chips + searchable dropdown
+        var modelsWrap = document.createElement('div');
+        modelsWrap.style.cssText = 'width: 100%; margin-bottom: 6px;';
+
+        var noModels = !ucfg.upscale_models || ucfg.upscale_models.length === 0;
+        if (noModels) {
+            modelsWrap.style.border = '2px solid #ff3333';
+            modelsWrap.style.borderRadius = '4px';
+            modelsWrap.style.padding = '4px';
+        }
+
+        var modelsLbl = document.createElement('div');
+        modelsLbl.style.cssText = 'font-size: 11px; color: ' + (noModels ? '#ff3333' : '#999') + '; margin-bottom: 3px;';
+        modelsLbl.textContent = 'Upscale Models (' + (ucfg.upscale_models || []).length + ')' + (noModels ? ' \u2014 Select a model!' : '');
+        modelsWrap.appendChild(modelsLbl);
+
+        // Model chips
+        (ucfg.upscale_models || []).forEach(function(modelName, mIdx) {
+            var chip = document.createElement('div');
+            chip.style.cssText = 'display: inline-flex; align-items: center; gap: 3px; background: #333; border-radius: 4px; padding: 2px 6px; margin: 2px; font-size: 10px; color: #ccc;';
+            chip.textContent = modelName.replace(/\\/g, '/').split('/').pop();
+            var removeBtn = document.createElement('span');
+            removeBtn.textContent = '\u2715';
+            removeBtn.style.cssText = 'cursor: pointer; color: #cc3333; margin-left: 3px; font-size: 11px;';
+            removeBtn.onclick = function() {
+                ucfg.upscale_models.splice(mIdx, 1);
+                callbacks.onUpdate();
+                reRender();
+            };
+            chip.appendChild(removeBtn);
+            modelsWrap.appendChild(chip);
+        });
+
+        // Searchable model dropdown
+        var modelSearchWrap = document.createElement('div');
+        modelSearchWrap.style.cssText = 'position: relative; margin-top: 3px;';
+
+        var modelSearchInput = document.createElement('input');
+        modelSearchInput.type = 'text';
+        modelSearchInput.placeholder = 'Search upscale models...';
+        modelSearchInput.style.cssText = 'width: 100%; background: #1a1a1a; color: #ccc; border: 1px solid #444; border-radius: 4px; padding: 3px 6px; font-size: 10px; box-sizing: border-box;';
+
+        var modelDropdown = document.createElement('div');
+        modelDropdown.style.cssText = 'display: none; position: absolute; top: 100%; left: 0; right: 0; max-height: 150px; overflow-y: auto; background: #222; border: 1px solid #555; border-radius: 4px; z-index: 100;';
+
+        function populateModelDropdown(query) {
+            modelDropdown.textContent = '';
+            var q = (query || '').toLowerCase();
+            var existing = ucfg.upscale_models || [];
+            var filtered = (modelList || []).filter(function(m) {
+                if (existing.indexOf(m) >= 0) return false;
+                return !q || m.toLowerCase().indexOf(q) >= 0;
+            });
+            if (filtered.length === 0) {
+                modelDropdown.style.display = 'none';
+                return;
+            }
+            modelDropdown.style.display = 'block';
+            filtered.forEach(function(m) {
+                var opt = document.createElement('div');
+                opt.style.cssText = 'padding: 3px 8px; font-size: 10px; color: #ccc; cursor: pointer;';
+                opt.textContent = m.replace(/\\/g, '/').split('/').pop();
+                opt.title = m;
+                opt.onmouseenter = function() { opt.style.background = '#444'; };
+                opt.onmouseleave = function() { opt.style.background = 'transparent'; };
+                opt.onclick = function() {
+                    if (!ucfg.upscale_models) ucfg.upscale_models = [];
+                    if (ucfg.upscale_models.indexOf(m) < 0) {
+                        ucfg.upscale_models.push(m);
+                        callbacks.onUpdate();
+                        reRender();
+                    }
+                };
+                modelDropdown.appendChild(opt);
+            });
+        }
+
+        modelSearchInput.onfocus = function() { populateModelDropdown(modelSearchInput.value); };
+        modelSearchInput.oninput = function() { populateModelDropdown(modelSearchInput.value); };
+        modelSearchInput.onblur = function() {
+            // Delay hide so click on dropdown item registers
+            setTimeout(function() { modelDropdown.style.display = 'none'; }, 200);
+        };
+
+        modelSearchWrap.appendChild(modelSearchInput);
+        modelSearchWrap.appendChild(modelDropdown);
+        modelsWrap.appendChild(modelSearchWrap);
+        grid.appendChild(modelsWrap);
+    }
+
+    card.appendChild(grid);
+
+    // Iteration count display
+    var countDisplay = document.createElement('div');
+    countDisplay.style.cssText = 'color: #00cc00; font-family: monospace; font-size: 10px; margin-top: 4px;';
+    var ratios = (ucfg.upscale_ratios || '1.5').split(',').map(function(s) { return s.trim(); }).filter(function(s) { return s; }).length;
+    var denoises = (ucfg.hires_denoise || '0.3').split(',').map(function(s) { return s.trim(); }).filter(function(s) { return s; }).length;
+    var models = Math.max(1, (ucfg.upscale_models || []).length);
+    var combos = 1;
+    if (showHires) combos *= ratios * denoises;
+    if (showModel) combos *= models;
+    var repeatCount = ucfg.repeat || 1;
+    countDisplay.textContent = combos + ' upscale combo(s) per image' + (repeatCount > 1 ? ' \u00D7 ' + repeatCount + ' repeats' : '');
+    card.appendChild(countDisplay);
+
+    pipeBody.appendChild(card);
+}
+
+
+// ============================================================================
+// MODAL RENDERING — Uses renderPipelineEditor for full pipeline UI
+// ============================================================================
 
 /**
  * Render the upscale modal
@@ -243,61 +793,26 @@ function renderUpscaleModal() {
     scopeDiv.appendChild(radioAll); scopeDiv.appendChild(labelAll);
     modal.appendChild(scopeDiv);
 
-    // === INLINE UPSCALE CONFIGURATION ===
+    // === FULL PIPELINE EDITOR ===
     var configDiv = document.createElement('div');
-    configDiv.style.cssText = 'margin-bottom: 10px; padding: 8px; background: #252525; border-radius: 4px;';
+    configDiv.style.cssText = 'margin-bottom: 10px; padding: 8px; background: #252525; border-radius: 4px; max-height: 55vh; overflow-y: auto;';
 
     var configTitle = document.createElement('div');
     configTitle.style.cssText = 'font-size: 12px; color: #fff; font-weight: bold; margin-bottom: 8px;';
-    configTitle.textContent = 'Upscale Settings';
+    configTitle.textContent = 'Upscale Pipeline Configuration';
     configDiv.appendChild(configTitle);
 
     // Ensure config exists
     if (!cfg) { cfg = _defaultUpscaleConfig(); upscaleModalState.currentConfig = cfg; }
-    var step = cfg.pipelines[0] && cfg.pipelines[0].steps[0] ? cfg.pipelines[0].steps[0] : _defaultUpscaleStep();
 
-    // Mode selector
-    configDiv.appendChild(_makeSelect('Mode:', [
-        { value: 'hires_only', label: 'HiRes Fix Only' },
-        { value: 'model_only', label: 'Model Upscale Only' },
-        { value: 'model_then_hires', label: 'Model + HiRes Fix' },
-    ], step.mode, function(v) {
-        step.mode = v;
-        // Show/hide model selector based on mode
-        if (modelRow) modelRow.style.display = (v === 'hires_only') ? 'none' : 'flex';
-        if (denoiseRow) denoiseRow.style.display = (v === 'model_only') ? 'none' : 'flex';
-    }));
+    // Pipeline editor container (separate from configDiv title so reRender only clears this)
+    var editorContainer = document.createElement('div');
+    configDiv.appendChild(editorContainer);
 
-    // Upscale model selector
-    var showModel = step.mode !== 'hires_only';
-    var modelOptions = [{ value: '', label: '-- Select Model --' }];
-    upscaleModalState.availableModels.forEach(function(m) {
-        var short = m.replace(/\\/g, '/').split('/').pop();
-        modelOptions.push({ value: m, label: short });
+    renderPipelineEditor(editorContainer, cfg, upscaleModalState.availableModels, {
+        onUpdate: function() { /* config is mutated in-place, nothing to persist */ },
+        onRender: function() { /* no-op — renderPipelineEditor self-re-renders via reRender() */ }
     });
-    var modelRow = _makeSelect('Model:', modelOptions, step.upscale_models[0] || '', function(v) {
-        step.upscale_models = v ? [v] : [];
-    });
-    modelRow.style.display = showModel ? 'flex' : 'none';
-    configDiv.appendChild(modelRow);
-
-    // Ratio
-    configDiv.appendChild(_makeInput('Ratio:', step.upscale_ratios, '1.5', function(v) {
-        step.upscale_ratios = v;
-    }));
-
-    // Denoise
-    var showDenoise = step.mode !== 'model_only';
-    var denoiseRow = _makeInput('Denoise:', step.hires_denoise, '0.3', function(v) {
-        step.hires_denoise = v;
-    });
-    denoiseRow.style.display = showDenoise ? 'flex' : 'none';
-    configDiv.appendChild(denoiseRow);
-
-    // HiRes Steps (0 = use original steps)
-    configDiv.appendChild(_makeInput('HiRes Steps:', step.hires_steps || '0', '0 = use original', function(v) {
-        step.hires_steps = parseInt(v) || 0;
-    }));
 
     modal.appendChild(configDiv);
 
@@ -372,13 +887,19 @@ function renderUpscaleModal() {
     cancelBtn.textContent = 'Cancel';
     cancelBtn.style.cssText = 'background: #444; color: #fff; border: none; border-radius: 4px; padding: 6px 16px; font-size: 12px; cursor: pointer;';
     cancelBtn.onclick = function() {
-        if (upscaleModalState.jobId) {
+        if (upscaleModalState.jobId && upscaleModalState.pollInterval) {
+            // Active upscale — send cancel and let the poll detect "cancelled" status
             fetch('/config_tester/cancel_upscale', {
                 method: 'POST', headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ job_id: upscaleModalState.jobId })
             });
+            cancelBtn.disabled = true;
+            cancelBtn.textContent = 'Cancelling...';
+            cancelBtn.style.opacity = '0.5';
+        } else {
+            // No active upscale — just close
+            closeUpscaleModal();
         }
-        closeUpscaleModal();
     };
     var startBtn = document.createElement('button');
     startBtn.textContent = 'Start Upscale';
@@ -439,12 +960,18 @@ async function startUpscaleFromModal() {
                 if (status.status === 'complete' || status.status === 'error' || status.status === 'cancelled') {
                     clearInterval(upscaleModalState.pollInterval);
                     upscaleModalState.pollInterval = null;
+                    upscaleModalState.jobId = null;
                     if (text) {
                         if (status.status === 'complete') text.textContent = 'Complete! ' + status.completed + ' images upscaled.';
                         else if (status.status === 'cancelled') text.textContent = 'Cancelled. ' + status.completed + '/' + status.total + ' completed.';
                         else text.textContent = 'Error: ' + (status.error || 'Unknown error');
                     }
                     if (startBtn) { startBtn.disabled = false; startBtn.style.opacity = '1'; startBtn.textContent = 'Start Upscale'; }
+                    // Reset cancel button to Close
+                    var cBtn = document.querySelector('#upscale-modal-content button');
+                    if (cBtn && (cBtn.textContent === 'Cancelling...' || cBtn.textContent === 'Cancel')) {
+                        cBtn.disabled = false; cBtn.style.opacity = '1'; cBtn.textContent = 'Close';
+                    }
                 }
             } catch (e) { /* ignore poll errors */ }
         }, 2000);
