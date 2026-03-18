@@ -25,11 +25,13 @@ Read `ProjectStructure.md` in this directory for the full reference (file struct
 
 | File | Lines | Role |
 |------|-------|------|
-| `__init__.py` | 933 | API endpoints (config CRUD, dashboard save/export/delete, scan), node mappings, path security |
+| `__init__.py` | ~1000 | API endpoints (config CRUD, dashboard save/export/delete, scan, upscale presets, config presets, async upscale), node mappings, path security |
 | `sampler_node.py` | 314 | Main node class. Unwraps configs, extracts `_distribution` + `_session_settings`, delegates to orchestrator |
-| `config_builder_node.py` | 1167 | Config builder node. `generate_config()` reads ALL state from `lora_config` widget. API endpoints for model lists, trigger lookups |
-| `generation_orchestrator.py` | 2281 | **Largest file.** Main generation loop, smart skip, upscaling (lines 1096-1204), GPU cooldown (1249-1265), distribution, ETA tracking |
-| `image_generation.py` | 748 | KSampler wrapper, VAE decode, `flush_batch_with_vae()` (saves images + updates manifest), `upscale_image()`, `create_image_metadata()` |
+| `config_builder_node.py` | ~1200 | Config builder node. `generate_config()` reads ALL state from `lora_config` widget. API endpoints for model lists, trigger lookups |
+| `generation_orchestrator.py` | ~2600 | **Largest file.** Main generation loop, smart skip, upscaling pipelines, deferred upscales (`run_deferred_upscales()`), GPU cooldown, distribution, ETA tracking, Start At Job # |
+| `image_generation.py` | ~780 | KSampler wrapper, VAE decode, `flush_batch_with_vae()` (saves images + updates manifest), `upscale_image()`, `create_image_metadata()`, rolling ETA |
+| `network_utils.py` | 280 | **All outbound network requests.** CivitAI API, HuggingFace Remote VAE (allowlisted), Distribution LAN calls. No other file imports urllib. |
+| `upscale_runner.py` | 371 | Dashboard async upscaling. Background thread loads models, runs pipeline chains, updates manifests, sends progress events. |
 | `config_utils.py` | 674 | Config expansion (Cartesian products), nested prompt parsing, job preparation |
 | `model_loader.py` | 805 | Checkpoint/LoRA/VAE/GGUF loading |
 | `model_cache.py` | 900 | 3-tier cache: LoRA files → incremental states → patched models. Async preloading |
@@ -73,9 +75,15 @@ JS node.state
 {
   "upscaling": {
     "enabled": true,
-    "configs": [{ "mode": "hires_only", "upscale_models": [], "upscale_ratios": "1.5", "hires_denoise": "0.3", "hires_steps": 0, "tiled_vae": false, "tile_size": 512 }]
+    "save_pre_upscale": false,
+    "run_upscales_at_end": false,
+    "hires_prompt_adjust": false,
+    "hires_prompt_behavior": "append_end",
+    "hires_prompt_text": "",
+    "pipelines": [{ "active": true, "name": "Pipeline 1", "steps": [{ "active": true, "mode": "hires_only", "repeat": 1, "upscale_models": [], "upscale_ratios": "1.5", "hires_denoise": "0.3", "hires_steps": 0, ... }] }]
   },
-  "cooldown": { "enabled": true, "seconds": 5, "every_n": 1, "clear_vram": false }
+  "cooldown": { "enabled": true, "seconds": 5, "every_n": 1, "clear_vram": false },
+  "start_at_job": 0
 }
 ```
 Extracted by `sampler_node.py` line 277, passed to orchestrator as `session_settings` param.
@@ -109,7 +117,7 @@ Images saved as WebP at `output/benchmarks/{session}/images/img_{id}.webp`
 - **Model discovery:** `folder_paths.get_filename_list("key")` → API at `/configbuilder/model_lists` → JS `getModelLists()`
 - **Path security:** All endpoints use `_is_path_within()` + `re.sub(r'[^\w\-]', '', name)` sanitization
 - **Dashboard updates:** `PromptServer.send_sync("ultimate_grid.update", {...})` → `dashboard.js` → `postMessage()` → iframe
-- **No `import requests`** — use `urllib.request` (ComfyUI Registry security requirement)
+- **All outbound network requests go through `network_utils.py`** — no other file imports `urllib.request`. CivitAI, HuggingFace VAE, and Distribution calls are all centralized there.
 - **No `subprocess`, `os.system`, `eval()`, `exec()`** — blocked by security scanner
 - **LoRA string format:** `"name:model_str:clip_str"`, stacked with `" + "` separator
 - **Prompt nesting:** Flat list = OR, nested lists = AND (Cartesian product). Recursive in `parse_prompt_input_nested()`

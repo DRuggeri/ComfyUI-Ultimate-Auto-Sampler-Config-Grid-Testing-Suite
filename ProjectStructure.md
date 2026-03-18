@@ -50,6 +50,8 @@ ComfyUI-Ultimate-Sampler-Grid/
 ├── directory_scanner.py         # External Directory Session Scanner (463 lines)
 ├── metadata_packer.py           # PNG/WebP Metadata Embedding for Exports (561 lines)
 ├── manifest_utils.py            # Manifest Read/Write/Merge Helpers (120 lines)
+├── network_utils.py             # ALL outbound network requests (CivitAI, HuggingFace VAE, Distribution LAN) (280 lines)
+├── upscale_runner.py            # Dashboard async upscaling background thread (371 lines)
 ├── html_generator.py            # Reads /resources/ to build the Dashboard HTML (57 lines)
 │
 ├── distribution_manager.py      # Distributed Job Queue Coordinator/Master (634 lines)
@@ -74,12 +76,13 @@ ComfyUI-Ultimate-Sampler-Grid/
 │   ├── logic_pipeline.js        # Data Processing (Filter -> Sort -> Layout) (510 lines)
 │   ├── logic_virtual.js         # Virtual DOM / Infinite Scroller Engine (925 lines)
 │   ├── logic_ui.js              # UI Renderer (DOM creation, Modal handling) (1780 lines)
+│   ├── logic_upscale_modal.js   # Dashboard upscale modal (inline config, presets, async upscale) (380 lines)
 │   ├── logic_events.js          # Interaction Handler (Hotkeys, API calls) (91 lines)
 │   └── logic_utils.js           # Helpers (Export, Scan, Session loading) (599 lines)
 │
 ├── docs/plans/                  # Design docs and implementation plans
 ├── pyproject.toml               # Package metadata (36 lines)
-├── requirements.txt             # Python deps — piexif only (1 line)
+├── requirements.txt             # Python deps — diffusers, piexif
 ├── .gitignore
 ├── README.md
 ├── Roadmap.md
@@ -95,6 +98,8 @@ ComfyUI/output/
     ├── loras_tags.json                # LoRA trigger word cache (shared, editable via UI)
     ├── model_hashes.json              # SHA256 hash cache for CivitAI lookups
     ├── USCG-custom-resolutions.json   # User-defined custom resolution presets
+    ├── USCG-upscale-presets.json      # Upscale pipeline presets (shared Builder UI + Dashboard)
+    ├── USCG-config-section-presets.json # Config array presets (full config setups)
     ├── model-data/                    # CivitAI metadata cache per model
     │   └── {model_name}/metadata.json
     └── {session_name}/
