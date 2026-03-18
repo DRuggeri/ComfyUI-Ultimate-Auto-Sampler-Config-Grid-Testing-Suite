@@ -142,12 +142,23 @@ def _run_upscale_thread(job, target_items, upscale_config, meta, manifest_data, 
         try:
             import server as comfy_server
             PromptServer = comfy_server.PromptServer
+            # Ensure last_prompt_id exists — KSampler progress callbacks require it
+            if PromptServer.instance is not None and not hasattr(PromptServer.instance, 'last_prompt_id'):
+                PromptServer.instance.last_prompt_id = f"dashboard_upscale_{job['id']}"
         except Exception:
             pass
 
         for img_idx, item in enumerate(target_items):
             if job["cancel"].is_set():
-                print(f"[DashboardUpscale] 🛑 Cancelled")
+                print(f"[DashboardUpscale] 🛑 Cancelled — clearing VRAM...")
+                try:
+                    mm.soft_empty_cache()
+                    import gc
+                    gc.collect()
+                    if torch.cuda.is_available():
+                        torch.cuda.empty_cache()
+                except Exception:
+                    pass
                 job["status"] = "cancelled"
                 return
 
@@ -311,12 +322,18 @@ def _run_upscale_thread(job, target_items, upscale_config, meta, manifest_data, 
                         # Create manifest entry — copy source item fields, override with upscale info
                         upscaled_meta = {
                             k: v for k, v in item.items()
-                            if k not in ("id", "filename", "upscaled", "width", "height", "duration",
+                            if k not in ("id", "gen_index", "file", "filename", "upscaled", "width", "height", "duration",
                                          "upscale_source", "upscale_pipeline", "upscale_mode",
                                          "upscale_ratio", "upscale_denoise", "upscale_model")
                         }
+                        # gen_index: place upscaled images at the end (newest) since they were just created
+                        # Use current manifest length so each new upscale gets the next sequential position
+                        upscale_gen_index = len(manifest_data["items"])
+
                         upscaled_meta.update({
                             "id": upscale_id,
+                            "gen_index": upscale_gen_index,
+                            "file": f"/view?filename={upscaled_filename}&type=output&subfolder=benchmarks/{session_name}/images",
                             "filename": upscaled_filename,
                             "width": up_w,
                             "height": up_h,
@@ -339,12 +356,13 @@ def _run_upscale_thread(job, target_items, upscale_config, meta, manifest_data, 
 
             if upscale_combo_idx > 0:
                 save_manifest(manifest_path, manifest_data)
-                # Send new items to dashboard
+                # Send all new items to dashboard (may be multiple from different pipelines/combos)
                 if PromptServer is not None:
                     try:
+                        new_items = manifest_data["items"][-upscale_combo_idx:]
                         PromptServer.instance.send_sync("ultimate_grid.update_data", {
                             "session_name": session_name,
-                            "new_items": [manifest_data["items"][-1]]
+                            "new_items": new_items
                         })
                     except Exception:
                         pass
@@ -369,7 +387,17 @@ def _run_upscale_thread(job, target_items, upscale_config, meta, manifest_data, 
 
             print(f"[DashboardUpscale] 🔄 Upscaled {img_idx+1}/{len(target_items)}: {filename}")
 
-        # Done
+        # Done — clear VRAM and RAM
+        print(f"[DashboardUpscale] 🧹 Clearing VRAM and RAM...")
+        try:
+            mm.soft_empty_cache()
+            import gc
+            gc.collect()
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
+        except Exception as cleanup_err:
+            print(f"[DashboardUpscale] ⚠️ Cleanup warning: {cleanup_err}")
+
         job["status"] = "complete"
         print(f"[DashboardUpscale] ✅ Complete: {job['completed']}/{job['total']} images upscaled")
 
@@ -379,3 +407,13 @@ def _run_upscale_thread(job, target_items, upscale_config, meta, manifest_data, 
         job["status"] = "error"
         job["error"] = str(e)
         print(f"[DashboardUpscale] ❌ Error: {e}")
+    finally:
+        # Always attempt cleanup on any exit path
+        try:
+            mm.soft_empty_cache()
+            import gc
+            gc.collect()
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
+        except Exception:
+            pass
