@@ -4676,15 +4676,20 @@ export function renderUpscalingSection(node, container, modelLists) {
     presetDefaultOpt.value = ""; presetDefaultOpt.textContent = "-- Presets --";
     presetSelect.appendChild(presetDefaultOpt);
 
+    // Initialize presets array immediately (fetch will populate it)
+    presetSelect._presets = [];
+
     // Fetch presets async
     fetch("/configbuilder/upscale_presets").then(r => r.json()).then(data => {
-        (data.presets || []).forEach((p, i) => {
+        const presets = data.presets || [];
+        presets.forEach((p, i) => {
             const opt = document.createElement("option");
             opt.value = i; opt.textContent = p.name;
             presetSelect.appendChild(opt);
         });
-        presetSelect._presets = data.presets || [];
-    }).catch(() => {});
+        presetSelect._presets = presets;
+        console.log("[ConfigBuilder] Loaded " + presets.length + " upscale presets");
+    }).catch(e => { console.error("[ConfigBuilder] Failed to load upscale presets:", e); });
 
     const presetLoadBtn = document.createElement("button");
     presetLoadBtn.textContent = "Load";
@@ -4720,17 +4725,19 @@ export function renderUpscalingSection(node, container, modelLists) {
             hires_prompt_behavior: ups.hires_prompt_behavior || "append_end",
             hires_prompt_text: ups.hires_prompt_text || "",
         });
+        console.log("[ConfigBuilder] Saving upscale preset:", name, "total:", presets.length);
         fetch("/configbuilder/upscale_presets", {
             method: "POST",
             headers: {"Content-Type": "application/json"},
             body: JSON.stringify({presets: presets})
-        }).then(() => {
+        }).then(r => {
+            console.log("[ConfigBuilder] Preset save response:", r.status);
             presetSelect._presets = presets;
             const opt = document.createElement("option");
             opt.value = presets.length - 1; opt.textContent = name;
             presetSelect.appendChild(opt);
             presetSelect.value = presets.length - 1;
-        });
+        }).catch(e => { console.error("[ConfigBuilder] Preset save failed:", e); });
     };
 
     presetRow.appendChild(presetLabel);
