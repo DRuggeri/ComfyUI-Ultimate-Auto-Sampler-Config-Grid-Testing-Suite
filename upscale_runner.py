@@ -121,9 +121,13 @@ def _run_upscale_thread(job, target_items, upscale_config, meta, manifest_data, 
         vae_name = meta.get("vae", "")
 
         print(f"[DashboardUpscale] 🔄 Loading model: {model_name}")
-        loaded_model, loaded_clip, loaded_vae, _ = load_checkpoint(model_name)
+        loaded_model, loaded_clip, loaded_vae = load_checkpoint(
+            target_model_name=model_name,
+            ckpt_name=model_name,  # Same as target since we're loading directly
+            use_remote_vae=False,
+        )
 
-        if vae_name and vae_name != "None":
+        if vae_name and vae_name != "None" and vae_name != "Default":
             print(f"[DashboardUpscale] 🔄 Loading VAE: {vae_name}")
             loaded_vae = load_vae_by_name(vae_name)
 

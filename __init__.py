@@ -124,7 +124,10 @@ async def get_upscale_presets(request):
 @server.PromptServer.instance.routes.post("/configbuilder/upscale_presets")
 async def save_upscale_presets(request):
     try:
-        data = await request.json()
+        body = await request.text()
+        if not body or not body.strip():
+            return web.Response(status=400, text="Empty request body")
+        data = json.loads(body)
         os.makedirs(os.path.dirname(UPSCALE_PRESETS_FILE), exist_ok=True)
         with open(UPSCALE_PRESETS_FILE, "w", encoding="utf-8") as f:
             json.dump(data, f, indent=2)
@@ -147,7 +150,10 @@ async def get_config_section_presets(request):
 @server.PromptServer.instance.routes.post("/configbuilder/config_section_presets")
 async def save_config_section_presets(request):
     try:
-        data = await request.json()
+        body = await request.text()
+        if not body or not body.strip():
+            return web.Response(status=400, text="Empty request body")
+        data = json.loads(body)
         os.makedirs(os.path.dirname(CONFIG_SECTION_PRESETS_FILE), exist_ok=True)
         with open(CONFIG_SECTION_PRESETS_FILE, "w", encoding="utf-8") as f:
             json.dump(data, f, indent=2)
