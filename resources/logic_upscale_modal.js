@@ -332,7 +332,7 @@ async function startUpscaleFromModal() {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
-                session_name: sessionName,
+                session_name: document.getElementById('session-input')?.value || "default",
                 image_ids: imageIds,
                 upscale_config: upscaleModalState.currentConfig,
                 all_favorited: allFavorited,
