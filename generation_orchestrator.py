@@ -2725,9 +2725,23 @@ def _run_distributed_generation(
     # be in the middle of submitting a result. The submit_result route only needs
     # manager != None (it does NOT check is_active). Deactivation already prevents
     # new job claims (claim_job returns 503). Delay the cleanup with a daemon thread
-    # so in-flight submissions can still be processed as duplicates.
+    # that waits for workers to go silent before clearing the manager.
     def _delayed_manager_cleanup():
-        time.sleep(30)
+        # Wait up to 5 minutes for all workers to stop submitting.
+        # Check every 10s whether any registered workers still have recent heartbeats.
+        for _ in range(30):  # 30 × 10s = 5 minutes max
+            time.sleep(10)
+            if not manager or not manager._workers:
+                break
+            now = time.time()
+            any_alive = False
+            with manager._lock:
+                for w in manager._workers.values():
+                    if now - w.get("last_heartbeat", 0) < 30:
+                        any_alive = True
+                        break
+            if not any_alive:
+                break
         set_distribution_manager(None)
 
     threading.Thread(target=_delayed_manager_cleanup, daemon=True).start()

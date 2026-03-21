@@ -99,6 +99,10 @@ async def submit_result(request):
     manager = get_distribution_manager()
     if not manager:
         return web.Response(status=503, text="Distribution not active")
+    # NOTE: We do NOT check manager.is_active here — only manager existence.
+    # After the master finishes, it deactivates (blocking new claims) but workers
+    # may still be submitting their last result. The orchestrator keeps the manager
+    # alive until all workers go silent.
 
     try:
         reader = await request.multipart()
