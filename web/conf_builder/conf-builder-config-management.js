@@ -3031,7 +3031,7 @@ export function renderExtraModelSamplingSection(node, div, configArray, arrayIdx
     const overrideSelect = document.createElement("select");
     overrideSelect.className = "cb-select";
     overrideSelect.style.cssText = "flex: 1; max-width: 200px;";
-    [["none", "None"], ["aura_flow", "AuraFlow (Qwen Image)"], ["flux", "Flux"], ["sd3", "SD3"]].forEach(([val, label]) => {
+    [["none", "None"], ["aura_flow", "AuraFlow (Qwen Image)"], ["flux", "Flux"], ["flux2", "Flux2"], ["sd3", "SD3"]].forEach(([val, label]) => {
         const opt = document.createElement("option");
         opt.value = val;
         opt.textContent = label;
@@ -3913,15 +3913,15 @@ export async function showTriggerLookupModal(node, arrayIdx) {
  * @param {string} borderColor - CSS color for left border accent
  * @returns {HTMLElement}
  */
-function createPromptGroupEditor(groups, onChange, label, borderColor = "#0066cc") {
+function createPromptGroupEditor(groups, onChange, label, borderColor = "#0066cc", { rawModeKey = null, uiState = null } = {}) {
     const container = document.createElement("div");
     container.style.cssText = `display: flex; flex-direction: column; gap: 8px; width: 100%;`;
 
     // Track current groups locally so mode switches use latest data
     let currentGroupsState = groups;
 
-    // Track mode state locally (visual vs raw)
-    let isRawMode = false;
+    // Track mode state — persist in uiState if key provided, otherwise local
+    let isRawMode = (rawModeKey && uiState && uiState.promptRawMode) ? (uiState.promptRawMode[rawModeKey] || false) : false;
 
     // --- HEADER ---
     const header = document.createElement("div");
@@ -3936,11 +3936,11 @@ function createPromptGroupEditor(groups, onChange, label, borderColor = "#0066cc
     modeToggleContainer.style.cssText = "display: flex; gap: 4px;";
 
     const visualBtn = document.createElement("button");
-    visualBtn.className = "cb-prompt-mode-toggle active";
+    visualBtn.className = isRawMode ? "cb-prompt-mode-toggle" : "cb-prompt-mode-toggle active";
     visualBtn.textContent = "Visual";
 
     const rawBtn = document.createElement("button");
-    rawBtn.className = "cb-prompt-mode-toggle";
+    rawBtn.className = isRawMode ? "cb-prompt-mode-toggle active" : "cb-prompt-mode-toggle";
     rawBtn.textContent = "JSON";
 
     modeToggleContainer.appendChild(visualBtn);
@@ -3950,11 +3950,11 @@ function createPromptGroupEditor(groups, onChange, label, borderColor = "#0066cc
 
     // --- VISUAL MODE CONTAINER ---
     const visualContainer = document.createElement("div");
-    visualContainer.style.cssText = "display: flex; flex-direction: column; gap: 6px;";
+    visualContainer.style.cssText = `display: ${isRawMode ? "none" : "flex"}; flex-direction: column; gap: 6px;`;
 
     // --- RAW MODE CONTAINER ---
     const rawContainer = document.createElement("div");
-    rawContainer.style.display = "none";
+    rawContainer.style.display = isRawMode ? "block" : "none";
 
     const rawTextarea = document.createElement("textarea");
     rawTextarea.className = "cb-prompt-raw-editor";
@@ -3987,6 +3987,7 @@ function createPromptGroupEditor(groups, onChange, label, borderColor = "#0066cc
         rawContainer.style.display = "none";
         visualBtn.classList.add("active");
         rawBtn.classList.remove("active");
+        if (rawModeKey && uiState && uiState.promptRawMode) uiState.promptRawMode[rawModeKey] = false;
     };
     rawBtn.onclick = () => {
         isRawMode = true;
@@ -3994,6 +3995,7 @@ function createPromptGroupEditor(groups, onChange, label, borderColor = "#0066cc
         rawContainer.style.display = "block";
         rawBtn.classList.add("active");
         visualBtn.classList.remove("active");
+        if (rawModeKey && uiState && uiState.promptRawMode) uiState.promptRawMode[rawModeKey] = true;
         // Sync raw editor with current groups (use tracked state, not stale parameter)
         rawTextarea.value = currentGroupsState.length > 0 ? JSON.stringify(currentGroupsState, null, 2) : "";
     };
@@ -4288,9 +4290,13 @@ export function renderGlobalPromptsSection(node, container) {
             node.saveState();
         },
         "✅ Positive Prompt Groups",
-        "#00aa44"
+        "#00aa44",
+        { rawModeKey: "global_positive", uiState: node.uiState }
     );
     positiveSection.appendChild(positiveEditor);
+    // Scrollable container for positive prompts (can get very long)
+    positiveSection.style.maxHeight = "1000px";
+    positiveSection.style.overflowY = "auto";
     contentDiv.appendChild(positiveSection);
 
     // Negative Prompt (simple text area, not nested groups)
@@ -4394,9 +4400,13 @@ export function renderConfigPromptsSection(node, div, configArray, arrayIdx) {
                 updatePromptCountDisplay();
             },
             "✅ Positive Prompt Groups",
-            "#9966cc"
+            "#9966cc",
+            { rawModeKey: `config_${arrayIdx}_positive`, uiState: node.uiState }
         );
         positiveSection.appendChild(positiveEditor);
+        // Scrollable container for positive prompts (can get very long)
+        positiveSection.style.maxHeight = "1000px";
+        positiveSection.style.overflowY = "auto";
         contentDiv.appendChild(positiveSection);
 
         // Negative Prompt (simple text)

@@ -73,7 +73,8 @@ app.registerExtension({
                     vaesCollapsed: {},
                     promptsSectionCollapsed: {},
                     globalPromptsSectionCollapsed: false,
-                    extraOptionsSectionCollapsed: {}
+                    extraOptionsSectionCollapsed: {},
+                    promptRawMode: {}  // Track JSON vs Visual mode per prompt editor
                 };
                 
                 // Initialize default state structure
