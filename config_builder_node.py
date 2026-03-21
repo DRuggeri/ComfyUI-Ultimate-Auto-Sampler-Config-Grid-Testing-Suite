@@ -644,6 +644,8 @@ class UltimateConfigBuilder:
                 if model_sampling_override == "flux":
                     config["model_sampling_flux_max_shift"] = model_sampling_flux_max_shift
                     config["model_sampling_flux_base_shift"] = model_sampling_flux_base_shift
+                elif model_sampling_override == "flux2":
+                    config["model_sampling_shift"] = model_sampling_shift if model_sampling_shift else "2.02"
                 else:
                     config["model_sampling_shift"] = model_sampling_shift
             config["use_advanced_sampling"] = use_advanced_sampling or False
@@ -1057,10 +1059,10 @@ async def get_model_lists_endpoint(request):
         clip_types = [
             "stable_diffusion", "stable_cascade", "sd3", "stable_audio",
             "mochi", "ltxv", "pixart", "cosmos", "lumina2", "wan",
-            "hidream", "chroma", "ace", "flux"
+            "hidream", "chroma", "ace", "flux", "flux2"
         ]
         dual_clip_types = [
-            "sdxl", "sd3", "flux", "hunyuan_video", "hidream",
+            "sdxl", "sd3", "flux", "flux2", "hunyuan_video", "hidream",
             "hunyuan_image", "hunyuan_video_15"
         ]
 

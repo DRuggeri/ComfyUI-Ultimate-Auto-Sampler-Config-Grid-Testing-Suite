@@ -129,6 +129,18 @@ def generate_image(
             patched_model.add_object_patch("model_sampling", model_sampling)
             print(f"[GridTester] 🔧 Applied ModelSamplingFlux (max_shift={max_s}, base_shift={base_s}, computed_shift={shift:.4f})")
 
+        elif model_sampling_override == "flux2":
+            # Flux2: uses ModelSamplingFlux with fixed shift (default 2.02, matching ComfyUI's Flux2 supported_models)
+            sampling_base = comfy.model_sampling.ModelSamplingFlux
+            sampling_type = comfy.model_sampling.CONST
+            class ModelSamplingAdvanced(sampling_base, sampling_type):
+                pass
+            shift = float(model_sampling_shift) if model_sampling_shift else 2.02
+            model_sampling = ModelSamplingAdvanced(patched_model.model.model_config)
+            model_sampling.set_parameters(shift=shift)
+            patched_model.add_object_patch("model_sampling", model_sampling)
+            print(f"[GridTester] 🔧 Applied ModelSamplingFlux2 (shift={shift})")
+
     # === Flux Guidance ===
     # Modify positive conditioning with guidance value (used by Flux 1 models)
     if flux_guidance_value and float(flux_guidance_value) > 0:
