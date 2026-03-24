@@ -568,6 +568,105 @@ def run_deferred_upscales(
     print(f"[GridTester] ✅ Deferred upscale phase complete: {len(upscale_durations)}/{total_jobs} images upscaled")
 
 
+def _expand_lora_weight_arrays(expanded_configs):
+    """
+    Expand LoRA weight array bracket notation into Cartesian product of configs.
+
+    Input format per lora part: "name:[0.5, 0.8]:1.0" or "name:0.5:[0.7, 1.0]"
+    Weight arrays use brackets in the STRENGTH fields (after first colon),
+    while folder random syntax uses brackets in the NAME field (before first colon).
+
+    If multiple loras in the same config have weight arrays, produces a Cartesian
+    product of all combinations:
+      lora1:[0.5, 1.0] + lora2:[0.7, 1.0] → 4 configs
+    """
+    import re
+    from itertools import product as itertools_product
+
+    result = []
+    weight_array_pattern = re.compile(r'\[([^\]]+)\]')
+
+    for conf in expanded_configs:
+        lora_str = conf.get("lora", "None")
+        if lora_str == "None" or ":" not in lora_str:
+            result.append(conf)
+            continue
+
+        lora_parts = lora_str.split(" + ")
+        # Check each part for weight arrays (brackets in strength fields, not name field)
+        parts_with_arrays = []
+        has_weight_arrays = False
+
+        for part in lora_parts:
+            part = part.strip()
+            colon_idx = part.find(":")
+            if colon_idx < 0:
+                # No strength specified — plain lora name
+                parts_with_arrays.append([(part, None, None)])
+                continue
+
+            name = part[:colon_idx]
+            strength_str = part[colon_idx + 1:]
+
+            # If brackets are in the name portion, it's folder syntax — skip
+            if "[" in name:
+                parts_with_arrays.append([(part, None, None)])
+                continue
+
+            # Parse strength fields for bracket arrays
+            # Format: "model_str:clip_str" where either can be "[val1, val2]"
+            strength_parts = strength_str.split(":")
+            model_strs = strength_parts[0] if len(strength_parts) > 0 else "1.0"
+            clip_strs = strength_parts[1] if len(strength_parts) > 1 else model_strs
+
+            # Extract arrays from model strength
+            model_match = weight_array_pattern.search(model_strs)
+            if model_match:
+                model_vals = [v.strip() for v in model_match.group(1).split(",")]
+                has_weight_arrays = True
+            else:
+                model_vals = [model_strs.strip()]
+
+            # Extract arrays from clip strength
+            clip_match = weight_array_pattern.search(clip_strs)
+            if clip_match:
+                clip_vals = [v.strip() for v in clip_match.group(1).split(",")]
+                has_weight_arrays = True
+            else:
+                clip_vals = [clip_strs.strip()]
+
+            # Build all combinations for this lora part
+            combos = []
+            for mv in model_vals:
+                for cv in clip_vals:
+                    combos.append((name, mv, cv))
+            parts_with_arrays.append(combos)
+
+        if not has_weight_arrays:
+            result.append(conf)
+            continue
+
+        # Cartesian product across all lora parts
+        for combo in itertools_product(*parts_with_arrays):
+            new_lora_parts = []
+            for item in combo:
+                name, mv, cv = item
+                if mv is None:
+                    # Passthrough (folder syntax or plain name)
+                    new_lora_parts.append(name)
+                else:
+                    new_lora_parts.append(f"{name}:{mv}:{cv}")
+
+            new_conf = conf.copy()
+            new_conf["lora"] = " + ".join(new_lora_parts)
+            result.append(new_conf)
+
+    if len(result) != len(expanded_configs):
+        print(f"[GridTester] 🎯 LoRA weight arrays expanded: {len(expanded_configs)} → {len(result)} configs")
+
+    return result
+
+
 def run_generation_loop(
     self,
     ckpt_name, positive_text, negative_text, seed, denoise, vae_batch_size,
@@ -630,6 +729,10 @@ def run_generation_loop(
     expanded = expand_configs(raw_configs, pos_prompts, neg_prompts, denoise_values, seed, extra_seeds, ckpt_name)
     expanded.sort(key=lambda x: (x.get('model_type', 'checkpoint'), x['model'], tuple(x.get('text_encoders', [])), x.get('vae', 'Default'), x['lora'], x.get('attention_mode', 'default'), x['positive'], x['negative']))
     
+    # ==== EXPAND LORA WEIGHT ARRAYS (Cartesian product) ====
+    # Format: "lora:[0.5, 0.8]:1.0" → expand into separate configs per strength combo
+    expanded = _expand_lora_weight_arrays(expanded)
+
     # ==== EXPAND LORA FOLDERS ====
     print(f"[GridTester] 🎲 Expanding LoRA folders and random selections...")
     for conf in expanded:
