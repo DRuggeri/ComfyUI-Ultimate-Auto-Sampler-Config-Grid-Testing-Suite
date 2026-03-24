@@ -43,6 +43,11 @@ UPSCALE_PRESETS_FILE = os.path.join(folder_paths.get_output_directory(), "benchm
 # --- CONFIG SECTION PRESETS FILE ---
 CONFIG_SECTION_PRESETS_FILE = os.path.join(folder_paths.get_output_directory(), "benchmarks", "USCG-config-section-presets.json")
 
+# --- INDIVIDUAL SECTION PRESETS FILES ---
+MODELS_PRESETS_FILE = os.path.join(folder_paths.get_output_directory(), "benchmarks", "USCG-models-presets.json")
+LORAS_PRESETS_FILE = os.path.join(folder_paths.get_output_directory(), "benchmarks", "USCG-loras-presets.json")
+PROMPTS_PRESETS_FILE = os.path.join(folder_paths.get_output_directory(), "benchmarks", "USCG-prompts-presets.json")
+
 
 # =============================================================================
 # API: CONFIG MANAGEMENT
@@ -160,6 +165,46 @@ async def save_config_section_presets(request):
         return web.Response(status=200, text="Saved")
     except Exception as e:
         print(f"[ConfigBuilder] Error saving config section presets: {e}")
+        return web.Response(status=500, text=str(e))
+
+# --- GENERIC SECTION PRESETS (models, loras, prompts) ---
+_SECTION_PRESET_FILES = {
+    "models": MODELS_PRESETS_FILE,
+    "loras": LORAS_PRESETS_FILE,
+    "prompts": PROMPTS_PRESETS_FILE,
+}
+
+@server.PromptServer.instance.routes.get("/configbuilder/section_presets")
+async def get_section_presets(request):
+    section = request.query.get("section", "")
+    filepath = _SECTION_PRESET_FILES.get(section)
+    if not filepath:
+        return web.Response(status=400, text=f"Unknown section: {section}")
+    try:
+        if os.path.exists(filepath):
+            with open(filepath, "r", encoding="utf-8") as f:
+                return web.json_response(json.load(f))
+        return web.json_response({"presets": []})
+    except Exception:
+        return web.json_response({"presets": []})
+
+@server.PromptServer.instance.routes.post("/configbuilder/section_presets")
+async def save_section_presets(request):
+    section = request.query.get("section", "")
+    filepath = _SECTION_PRESET_FILES.get(section)
+    if not filepath:
+        return web.Response(status=400, text=f"Unknown section: {section}")
+    try:
+        body = await request.text()
+        if not body or not body.strip():
+            return web.Response(status=400, text="Empty request body")
+        data = json.loads(body)
+        os.makedirs(os.path.dirname(filepath), exist_ok=True)
+        with open(filepath, "w", encoding="utf-8") as f:
+            json.dump(data, f, indent=2)
+        return web.Response(status=200, text="Saved")
+    except Exception as e:
+        print(f"[ConfigBuilder] Error saving {section} presets: {e}")
         return web.Response(status=500, text=str(e))
 
 @server.PromptServer.instance.routes.post("/configbuilder/load_config")

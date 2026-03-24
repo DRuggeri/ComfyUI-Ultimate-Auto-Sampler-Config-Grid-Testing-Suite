@@ -1670,6 +1670,47 @@ export function createLoraElement(node, loraStr, arrayIdx, loraIdx, availableLor
             node.saveState();
         });
         contentDiv.appendChild(clipSliderContainer);
+
+        // CLIP Weight Array (compare different CLIP strengths) — mirrors Model strength array
+        const clipArrayDiv = document.createElement("div");
+        clipArrayDiv.style.cssText = "display: flex; align-items: center; gap: 4px; margin-top: 2px;";
+
+        const existingClipArr = weightArrays[parsed.name + "_clip"];
+        const clipArrayBtn = document.createElement("button");
+        clipArrayBtn.className = "cb-button";
+        clipArrayBtn.style.cssText = "font-size: 9px; padding: 1px 6px; background: #9966cc33; border: 1px solid #9966cc; color: #cc99ff;";
+        clipArrayBtn.textContent = existingClipArr ? "\u2715 CLIP Array" : "+ Compare CLIP";
+
+        const clipArrayInput = document.createElement("input");
+        clipArrayInput.type = "text";
+        clipArrayInput.className = "cb-input";
+        clipArrayInput.style.cssText = "font-size: 10px; width: 120px; padding: 2px 4px;" + (existingClipArr ? "" : " display: none;");
+        clipArrayInput.placeholder = "0.5, 0.8, 1.0";
+        clipArrayInput.value = existingClipArr ? existingClipArr.join(", ") : "";
+
+        clipArrayBtn.onclick = () => {
+            if (clipArrayInput.style.display === "none") {
+                clipArrayInput.style.display = "";
+                clipArrayBtn.textContent = "\u2715 CLIP Array";
+            } else {
+                clipArrayInput.style.display = "none";
+                clipArrayBtn.textContent = "+ Compare CLIP";
+                delete weightArrays[parsed.name + "_clip"];
+                node.saveState();
+            }
+        };
+        clipArrayInput.onchange = () => {
+            const vals = clipArrayInput.value.split(",").map(v => parseFloat(v.trim())).filter(v => !isNaN(v));
+            if (vals.length > 0) {
+                weightArrays[parsed.name + "_clip"] = vals;
+            } else {
+                delete weightArrays[parsed.name + "_clip"];
+            }
+            node.saveState();
+        };
+        clipArrayDiv.appendChild(clipArrayBtn);
+        clipArrayDiv.appendChild(clipArrayInput);
+        contentDiv.appendChild(clipArrayDiv);
     }
 
     // --- COLLAPSIBLE "MORE LORA OPTIONS" SECTION ---
@@ -2573,6 +2614,92 @@ async function showEditTriggersModal(node, arrayIdx, loraName) {
 }
 
 
+// --- SECTION PRESET UI HELPER ---
+// Creates a compact preset dropdown row (Load/Save/Delete) for any section
+function createSectionPresetRow(sectionName, getData, applyData, node) {
+    const row = document.createElement("div");
+    row.style.cssText = "display: flex; gap: 3px; align-items: center; margin-left: auto;";
+
+    const sel = document.createElement("select");
+    sel.style.cssText = "background: #1a1a1a; color: #ccc; border: 1px solid #444; border-radius: 3px; padding: 2px 4px; font-size: 9px; max-width: 100px;";
+    const defOpt = document.createElement("option");
+    defOpt.value = ""; defOpt.textContent = "Presets";
+    sel.appendChild(defOpt);
+    sel._presets = [];
+
+    // Fetch presets
+    fetch(`/configbuilder/section_presets?section=${sectionName}`).then(r => r.json()).then(data => {
+        (data.presets || []).forEach((p, i) => {
+            const opt = document.createElement("option");
+            opt.value = i; opt.textContent = p.name;
+            sel.appendChild(opt);
+        });
+        sel._presets = data.presets || [];
+    }).catch(() => {});
+
+    const loadBtn = document.createElement("button");
+    loadBtn.className = "cb-button";
+    loadBtn.style.cssText = "font-size: 8px; padding: 1px 4px;";
+    loadBtn.textContent = "Load";
+    loadBtn.onclick = () => {
+        const idx = parseInt(sel.value);
+        if (isNaN(idx) || !sel._presets[idx]) return;
+        applyData(JSON.parse(JSON.stringify(sel._presets[idx].data)));
+        node.saveState();
+        debouncedRenderUI(node);
+    };
+
+    const saveBtn = document.createElement("button");
+    saveBtn.className = "cb-button";
+    saveBtn.style.cssText = "font-size: 8px; padding: 1px 4px;";
+    saveBtn.textContent = "Save";
+    saveBtn.onclick = () => {
+        const name = prompt(`Save ${sectionName} preset as:`);
+        if (!name) return;
+        const presets = sel._presets || [];
+        const newPreset = { name, data: JSON.parse(JSON.stringify(getData())) };
+        const existingIdx = presets.findIndex(p => p.name === name);
+        if (existingIdx >= 0) presets[existingIdx] = newPreset;
+        else presets.push(newPreset);
+        fetch(`/configbuilder/section_presets?section=${sectionName}`, {
+            method: "POST", headers: {"Content-Type": "application/json"},
+            body: JSON.stringify({ presets })
+        }).then(() => {
+            sel._presets = presets;
+            // Refresh dropdown
+            while (sel.options.length > 1) sel.remove(1);
+            presets.forEach((p, i) => {
+                const opt = document.createElement("option");
+                opt.value = i; opt.textContent = p.name;
+                sel.appendChild(opt);
+            });
+        });
+    };
+
+    const delBtn = document.createElement("button");
+    delBtn.className = "cb-button";
+    delBtn.style.cssText = "font-size: 8px; padding: 1px 4px; color: #ff6666;";
+    delBtn.textContent = "\u2715";
+    delBtn.onclick = () => {
+        const idx = parseInt(sel.value);
+        if (isNaN(idx) || !sel._presets[idx]) return;
+        if (!confirm(`Delete "${sel._presets[idx].name}"?`)) return;
+        sel._presets.splice(idx, 1);
+        fetch(`/configbuilder/section_presets?section=${sectionName}`, {
+            method: "POST", headers: {"Content-Type": "application/json"},
+            body: JSON.stringify({ presets: sel._presets })
+        });
+        sel.remove(idx + 1);
+        sel.value = "";
+    };
+
+    row.appendChild(sel);
+    row.appendChild(loadBtn);
+    row.appendChild(saveBtn);
+    row.appendChild(delBtn);
+    return row;
+}
+
 // --- RENDER MODELS AND LORAS SECTIONS ---
 
 export function renderModelsSection(node, div, configArray, arrayIdx, modelLists) {
@@ -2609,6 +2736,19 @@ export function renderModelsSection(node, div, configArray, arrayIdx, modelLists
     const titleSpan = document.createElement("span");
     titleSpan.textContent = `Models (${configArray.models.length} Entries, Totaling ${totalModels} Models)`;
     modelHeader.appendChild(titleSpan);
+
+    // Models section presets
+    const modelsPresetRow = createSectionPresetRow("models",
+        () => ({ models: configArray.models, text_encoders: configArray.text_encoders || [], clip_type: configArray.clip_type || "stable_diffusion" }),
+        (data) => {
+            node.state.config_arrays[arrayIdx].models = data.models || ["None"];
+            if (data.text_encoders) node.state.config_arrays[arrayIdx].text_encoders = data.text_encoders;
+            if (data.clip_type) node.state.config_arrays[arrayIdx].clip_type = data.clip_type;
+        },
+        node
+    );
+    modelsPresetRow.onclick = (e) => e.stopPropagation(); // Don't toggle collapse on preset clicks
+    modelHeader.appendChild(modelsPresetRow);
 
     const arrowSpan = document.createElement("span");
     arrowSpan.textContent = isSectionCollapsed ? "▶" : "▼";
@@ -3587,6 +3727,19 @@ export function renderLorasSection(node, div, configArray, arrayIdx, availableLo
     const titleSpan = document.createElement("span");
     titleSpan.textContent = `LoRAs (${totalEntries} Entries, Totaling ${totalLoras} LoRAs)`;
     loraHeader.appendChild(titleSpan);
+
+    // LoRAs section presets
+    const lorasPresetRow = createSectionPresetRow("loras",
+        () => ({ loras: configArray.loras, lora_weight_arrays: configArray.lora_weight_arrays || {}, lora_strength_lock: configArray.lora_strength_lock || {} }),
+        (data) => {
+            node.state.config_arrays[arrayIdx].loras = data.loras || ["None"];
+            if (data.lora_weight_arrays) node.state.config_arrays[arrayIdx].lora_weight_arrays = data.lora_weight_arrays;
+            if (data.lora_strength_lock) node.state.config_arrays[arrayIdx].lora_strength_lock = data.lora_strength_lock;
+        },
+        node
+    );
+    lorasPresetRow.onclick = (e) => e.stopPropagation(); // Don't toggle collapse on preset clicks
+    loraHeader.appendChild(lorasPresetRow);
 
     const arrowSpan = document.createElement("span");
     arrowSpan.textContent = isSectionCollapsed ? "▶" : "▼";
