@@ -8,6 +8,7 @@ import { normalizePath } from './conf-builder-utilities.js';
 // --- SEARCHABLE SELECT COMPONENT ---
 
 export function createSearchableSelect(options, currentValue, onChange, placeholder = "Search...") {
+    const MAX_VISIBLE = 50; // Only render first N items for performance
     const container = document.createElement("div");
     container.style.position = "relative";
     container.style.width = "100%";
@@ -38,32 +39,49 @@ export function createSearchableSelect(options, currentValue, onChange, placehol
     let filteredOptions = options;
 
     const renderOptions = () => {
-        dropdown.innerHTML = "";
-        filteredOptions.forEach(opt => {
+        dropdown.textContent = "";
+        const showCount = Math.min(filteredOptions.length, MAX_VISIBLE);
+        for (let i = 0; i < showCount; i++) {
             const optDiv = document.createElement("div");
-            optDiv.textContent = opt;
-            optDiv.style.cssText = `
-                padding: 8px 10px;
-                cursor: pointer;
-                color: white;
-                font-size: 13px;
-                font-family: monospace;
-            `;
-            optDiv.onmouseover = () => optDiv.style.background = "#2a2a2a";
-            optDiv.onmouseout = () => optDiv.style.background = "transparent";
-            optDiv.onclick = () => {
-                input.value = opt;
-                dropdown.style.display = "none";
-                onChange(opt);
-            };
+            optDiv.textContent = filteredOptions[i];
+            optDiv.dataset.idx = i;
+            optDiv.style.cssText = "padding: 8px 10px; cursor: pointer; color: white; font-size: 13px; font-family: monospace;";
             dropdown.appendChild(optDiv);
-        });
+        }
+
+        if (filteredOptions.length > MAX_VISIBLE) {
+            const more = document.createElement("div");
+            more.textContent = `... ${filteredOptions.length - MAX_VISIBLE} more \u2014 type to filter`;
+            more.style.cssText = "padding: 6px 10px; color: #666; font-size: 11px; font-style: italic;";
+            dropdown.appendChild(more);
+        }
 
         if (filteredOptions.length === 0) {
             const noResults = document.createElement("div");
             noResults.textContent = "No matches found";
             noResults.style.cssText = "padding: 8px 10px; color: #666; font-style: italic;";
             dropdown.appendChild(noResults);
+        }
+    };
+
+    // Event delegation for dropdown clicks and hover (instead of per-option handlers)
+    dropdown.onmouseover = (e) => {
+        const t = e.target;
+        if (t.dataset && t.dataset.idx !== undefined) t.style.background = "#2a2a2a";
+    };
+    dropdown.onmouseout = (e) => {
+        const t = e.target;
+        if (t.dataset && t.dataset.idx !== undefined) t.style.background = "transparent";
+    };
+    dropdown.onclick = (e) => {
+        const t = e.target;
+        if (t.dataset && t.dataset.idx !== undefined) {
+            const opt = filteredOptions[parseInt(t.dataset.idx)];
+            if (opt !== undefined) {
+                input.value = opt;
+                dropdown.style.display = "none";
+                onChange(opt);
+            }
         }
     };
 
@@ -92,12 +110,11 @@ export function createSearchableSelect(options, currentValue, onChange, placehol
         }
     };
 
-    // Close dropdown when clicking outside
-    document.addEventListener("click", (e) => {
-        if (!container.contains(e.target)) {
-            dropdown.style.display = "none";
-        }
-    });
+    // Close dropdown when clicking outside — use onblur instead of global listener
+    input.onblur = () => {
+        // Delay to allow dropdown click to register before hiding
+        setTimeout(() => { dropdown.style.display = "none"; }, 200);
+    };
 
     container.appendChild(input);
     container.appendChild(dropdown);
