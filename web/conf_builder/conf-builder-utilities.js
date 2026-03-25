@@ -34,6 +34,87 @@ let _configsLoaded = false;
 // Track all active ConfigBuilder nodes for refresh
 let activeConfigBuilderNodes = new Set();
 
+// --- localStorage PERSISTENT CACHE ---
+const LS_CACHE_KEY = "uscg_model_cache";
+const LS_COUNTS_KEY = "uscg_model_counts";
+
+function _saveToLocalStorage() {
+    try {
+        const data = {
+            ts: Date.now(),
+            availableLoras, loraFolders, availableModels, modelFolders,
+            availableDiffusionModels, diffusionModelFolders,
+            availableGGUFModels, ggufModelFolders,
+            availableTextEncoders, textEncoderFolders,
+            availableVAEs, vaeFolders, availableUpscaleModels, upscaleModelFolders,
+            clipTypes, dualClipTypes, availableSamplers, availableSchedulers
+        };
+        localStorage.setItem(LS_CACHE_KEY, JSON.stringify(data));
+    } catch (e) { /* localStorage may be full or unavailable */ }
+}
+
+function _loadFromLocalStorage() {
+    try {
+        const raw = localStorage.getItem(LS_CACHE_KEY);
+        if (!raw) return false;
+        const data = JSON.parse(raw);
+        // Only use cache from last 24 hours
+        if (Date.now() - data.ts > 86400000) return false;
+        availableLoras = data.availableLoras;
+        loraFolders = data.loraFolders;
+        availableModels = data.availableModels;
+        modelFolders = data.modelFolders;
+        availableDiffusionModels = data.availableDiffusionModels || [];
+        diffusionModelFolders = data.diffusionModelFolders || ["/"];
+        availableGGUFModels = data.availableGGUFModels || [];
+        ggufModelFolders = data.ggufModelFolders || ["/"];
+        availableTextEncoders = data.availableTextEncoders || [];
+        textEncoderFolders = data.textEncoderFolders || ["/"];
+        availableVAEs = data.availableVAEs || [];
+        vaeFolders = data.vaeFolders || ["/"];
+        availableUpscaleModels = data.availableUpscaleModels || [];
+        upscaleModelFolders = data.upscaleModelFolders || ["/"];
+        clipTypes = data.clipTypes || [];
+        dualClipTypes = data.dualClipTypes || [];
+        availableSamplers = data.availableSamplers || [];
+        availableSchedulers = data.availableSchedulers || [];
+        _modelListsLoaded = true;
+        console.log("[ConfigBuilder] ⚡ Loaded model cache from localStorage");
+        return true;
+    } catch (e) { return false; }
+}
+
+// --- BACKGROUND COUNT POLLING ---
+let _countPollInterval = null;
+let _lastKnownCounts = null;
+
+export function startModelCountPolling(onChangedCallback) {
+    if (_countPollInterval) return; // Already polling
+    _countPollInterval = setInterval(async () => {
+        try {
+            const resp = await fetch("/configbuilder/model_counts");
+            const counts = await resp.json();
+            if (_lastKnownCounts) {
+                let changed = false;
+                for (const key of Object.keys(counts)) {
+                    if (counts[key] !== _lastKnownCounts[key]) {
+                        console.log(`[ConfigBuilder] 🔍 ${key} changed: ${_lastKnownCounts[key]} → ${counts[key]}`);
+                        changed = true;
+                    }
+                }
+                if (changed && onChangedCallback) {
+                    onChangedCallback(counts);
+                }
+            }
+            _lastKnownCounts = counts;
+        } catch (e) { /* ignore poll errors */ }
+    }, 30000); // Check every 30 seconds
+}
+
+export function stopModelCountPolling() {
+    if (_countPollInterval) { clearInterval(_countPollInterval); _countPollInterval = null; }
+}
+
 // --- CACHE MANAGEMENT ---
 
 export function clearAllCaches() {
@@ -57,7 +138,13 @@ export function clearAllCaches() {
     _modelListsLoaded = false;
     _sessionsLoaded = false;
     _configsLoaded = false;
+    _objectInfoCache = null;
+    _objectInfoPromise = null;
+    try { localStorage.removeItem(LS_CACHE_KEY); } catch (e) {}
 }
+
+// Try to restore from localStorage immediately (before any fetches)
+_loadFromLocalStorage();
 
 // Targeted cache invalidation for when specific data changes
 export function clearConfigsCache() { _configsLoaded = false; }
@@ -96,11 +183,24 @@ export function getShortName(path) {
 
 // --- DATA FETCHING ---
 
+// Shared /object_info cache to avoid redundant fetches
+let _objectInfoCache = null;
+let _objectInfoPromise = null;
+
+async function _getObjectInfo() {
+    if (_objectInfoCache) return _objectInfoCache;
+    if (_objectInfoPromise) return _objectInfoPromise;
+    _objectInfoPromise = fetch("/object_info", { headers: { "X-Config-Builder-Internal": "true" } })
+        .then(r => r.json())
+        .then(data => { _objectInfoCache = data; _objectInfoPromise = null; return data; })
+        .catch(e => { _objectInfoPromise = null; throw e; });
+    return _objectInfoPromise;
+}
+
 export async function getAvailableLoras() {
     if (availableLoras) return availableLoras;
     try {
-        const resp = await fetch("/object_info", { headers: { "X-Config-Builder-Internal": "true" } });
-        const objectInfo = await resp.json();
+        const objectInfo = await _getObjectInfo();
         for (const nodeType in objectInfo) {
             const nodeDef = objectInfo[nodeType];
             if (nodeDef.input?.required?.lora_name) {
@@ -120,8 +220,7 @@ export async function getAvailableLoras() {
 export async function getAvailableModels() {
     if (availableModels) return availableModels;
     try {
-        const resp = await fetch("/object_info", { headers: { "X-Config-Builder-Internal": "true" } });
-        const objectInfo = await resp.json();
+        const objectInfo = await _getObjectInfo();
         // Look for standard CheckpointLoaderSimple or similar
         const loaderNode = objectInfo["CheckpointLoaderSimple"] || objectInfo["CheckpointLoader"];
         if (loaderNode?.input?.required?.ckpt_name) {
@@ -224,6 +323,8 @@ export async function getModelLists() {
             console.log(`[ConfigBuilder] ℹ️ No GGUF models found. Install ComfyUI-GGUF and place .gguf files in the unet_gguf folder.`);
         }
         _modelListsLoaded = true;
+        // Persist to localStorage for instant startup next time
+        _saveToLocalStorage();
         return data;
     } catch (e) {
         console.error("[ConfigBuilder] Error fetching model lists:", e);

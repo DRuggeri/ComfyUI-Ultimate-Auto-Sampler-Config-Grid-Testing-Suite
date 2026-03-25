@@ -1036,6 +1036,26 @@ async def lookup_model_metadata_endpoint(request):
         }, status=500)
 
 
+# Fast count endpoint — returns just file counts per category for change detection
+@server.PromptServer.instance.routes.get("/configbuilder/model_counts")
+async def get_model_counts_endpoint(request):
+    """Return file counts per model category. Very fast — uses folder_paths internal cache."""
+    try:
+        counts = {}
+        for cat in ["checkpoints", "diffusion_models", "text_encoders", "vae", "loras"]:
+            try:
+                counts[cat] = len(folder_paths.get_filename_list(cat))
+            except (KeyError, Exception):
+                counts[cat] = 0
+        for cat in ["unet_gguf", "clip_gguf", "upscale_models"]:
+            try:
+                counts[cat] = len(folder_paths.get_filename_list(cat))
+            except (KeyError, Exception):
+                counts[cat] = 0
+        return web.json_response(counts)
+    except Exception as e:
+        return web.json_response({"error": str(e)}, status=500)
+
 # API endpoint to get all model lists for unified model selector
 @server.PromptServer.instance.routes.get("/configbuilder/model_lists")
 async def get_model_lists_endpoint(request):

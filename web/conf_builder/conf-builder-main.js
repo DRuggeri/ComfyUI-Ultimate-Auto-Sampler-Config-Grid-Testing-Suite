@@ -537,7 +537,8 @@ app.registerExtension({
                         }
                     } catch (e) { }
 
-                    // Initial Data Fetch
+                    // Initial Data Fetch — localStorage cache provides instant data,
+                    // these calls refresh from server in background
                     await Promise.all([
                         utilities.getAvailableLoras(),
                         utilities.getLoraFolders(),
@@ -548,6 +549,19 @@ app.registerExtension({
 
                     // Finally Render
                     this.renderUI();
+
+                    // Start background polling for model changes (every 30s)
+                    const self = this;
+                    utilities.startModelCountPolling(async (newCounts) => {
+                        console.log("[ConfigBuilder] 🔍 Model changes detected, refreshing...");
+                        utilities.clearAllCaches();
+                        await Promise.all([
+                            utilities.getAvailableLoras(),
+                            utilities.getLoraFolders(),
+                            utilities.getModelLists()
+                        ]);
+                        self.renderUI();
+                    });
                 })();
 
                 return result;
@@ -558,6 +572,10 @@ app.registerExtension({
             nodeType.prototype.onRemoved = function () {
                 if (utilities) {
                     utilities.getActiveConfigBuilderNodes().delete(this);
+                    // Stop polling if no more active nodes
+                    if (utilities.getActiveConfigBuilderNodes().size === 0) {
+                        utilities.stopModelCountPolling();
+                    }
                 }
                 if (onRemoved) {
                     onRemoved.apply(this, arguments);
