@@ -831,9 +831,9 @@ def run_generation_loop(
 
     if dist_enabled:
         print(f"[GridTester] 🌐 ENTERING DISTRIBUTED MODE with {len(distribution_config.get('worker_urls', []))} worker(s)")
-        # Warn if upscaling is enabled — not yet supported in distributed mode
+        # Upscaling in distributed mode: workers generate base images, master runs upscales after collection
         if session_settings and session_settings.get("upscaling", {}).get("enabled", False):
-            print(f"[GridTester] ⚠️ WARNING: Upscaling is enabled but not supported in distributed mode. Workers will generate images without upscaling.")
+            print(f"[GridTester] ℹ️ Upscaling enabled — workers will generate base images, master will run upscales after all generation completes.")
         return _run_distributed_generation(
             self, distribution_config, expanded, input_jobs, existing_data,
             overwrite_existing, has_optional_inputs, lora_triggerwords_mode,
@@ -2856,6 +2856,34 @@ def _run_distributed_generation(
         remote_vae_worker.stop()
 
     print_incompatible_loras_summary(incompatible_loras)
+
+    # === Run deferred upscales on master after all distributed generation is complete ===
+    if session_settings and session_settings.get("upscaling", {}).get("enabled", False):
+        upscale_settings = session_settings.get("upscaling", {})
+        print(f"[Distribution] 🔍 Running upscales on master for distributed results...")
+        # Build deferred upscale queue from all generated items
+        deferred_upscale_queue = []
+        for item_meta in existing_data.get("items", []):
+            if not item_meta.get("upscaled"):  # Skip items already upscaled
+                deferred_upscale_queue.append({
+                    "meta": item_meta,
+                    "config": {
+                        "model": item_meta.get("model", ckpt_name),
+                        "steps": item_meta.get("steps", 20),
+                        "sampler": item_meta.get("sampler", "euler"),
+                        "scheduler": item_meta.get("scheduler", "normal"),
+                        "cfg": item_meta.get("cfg", 7.0),
+                    }
+                })
+        if deferred_upscale_queue:
+            run_deferred_upscales(
+                deferred_upscale_queue, upscale_settings, existing_data,
+                session_name, paths, unique_id, ckpt_name,
+                conditioning_cache, model_cache,
+                use_remote_vae, remote_vae_endpoint
+            )
+        else:
+            print(f"[Distribution] ℹ️ No items to upscale")
 
     existing_data["meta"] = {
         "positive": positive_text, "negative": negative_text,
