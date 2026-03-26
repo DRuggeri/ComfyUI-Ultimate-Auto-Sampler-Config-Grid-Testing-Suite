@@ -153,6 +153,65 @@ async function loadSession() {
     }
 }
 
+/**
+ * Merge another session's images into the current view.
+ * Appends items from the target session, tagging each with a _session field.
+ * Does not save — the merge is view-only until user explicitly saves.
+ */
+async function mergeSession(sessionName) {
+    if (!sessionName) return;
+    console.log(`[Merge] 🔄 Merging session: ${sessionName}`);
+
+    try {
+        const r = await fetch(`/view?filename=manifest.json&type=output&subfolder=benchmarks/${sessionName}&t=${Date.now()}`);
+        if (!r.ok) throw new Error("Session not found: " + sessionName);
+        const data = await r.json();
+        const newItems = data.items || [];
+
+        if (newItems.length === 0) {
+            alert("No items in session: " + sessionName);
+            return;
+        }
+
+        // Tag items with source session and deduplicate by id
+        const existingIds = new Set(activeData.map(function(d) { return d.id; }));
+        var added = 0;
+        for (var i = 0; i < newItems.length; i++) {
+            newItems[i]._session = sessionName;
+            if (!existingIds.has(newItems[i].id)) {
+                fullManifest.items.push(newItems[i]);
+                added++;
+            }
+        }
+
+        // Update references
+        activeData = fullManifest.items;
+
+        console.log(`[Merge] 📊 Added ${added} items from "${sessionName}" (${newItems.length - added} duplicates skipped)`);
+
+        // Rebuild everything
+        refreshIndices();
+        if (typeof computeLabelGlobalValues === 'function' && labelMode && labelMode.enabled) {
+            computeLabelGlobalValues();
+        }
+        if (typeof initFilters === 'function') initFilters();
+        if (typeof renderSearchFilters === 'function') renderSearchFilters();
+        updateDataPipeline();
+
+        // Show merge notification
+        var notice = document.createElement('div');
+        notice.style.cssText = 'position: fixed; top: 60px; left: 50%; transform: translateX(-50%); background: #00aa44; color: #fff; padding: 8px 20px; border-radius: 6px; font-size: 13px; z-index: 9999; pointer-events: none;';
+        notice.textContent = 'Merged ' + added + ' images from "' + sessionName + '"';
+        document.body.appendChild(notice);
+        setTimeout(function() { notice.style.opacity = '0'; notice.style.transition = 'opacity 0.5s'; }, 2000);
+        setTimeout(function() { if (notice.parentNode) notice.parentNode.removeChild(notice); }, 2500);
+
+    } catch (e) {
+        console.error('[Merge] ❌ Merge failed:', e);
+        alert("Merge Error: " + e.message);
+    }
+}
+
 // Load session from picker dropdown or session card
 function filterSessionPicker(query) {
     const rows = document.querySelectorAll('.session-picker-row');
@@ -199,6 +258,13 @@ async function fetchAndShowSessions() {
                 const metaSpan = document.createElement('span');
                 metaSpan.style.cssText = 'color:#666; font-size:10px;';
                 metaSpan.textContent = ` (${s.item_count} imgs, ${dateStr})`;
+                // Merge button — adds this session's images to current view
+                const mergeBtn = document.createElement('button');
+                mergeBtn.textContent = '+Merge';
+                mergeBtn.title = 'Merge this session into current view';
+                mergeBtn.style.cssText = 'float: right; background: #335; color: #88f; border: 1px solid #446; border-radius: 3px; padding: 0 4px; font-size: 9px; cursor: pointer; margin-left: 4px;';
+                mergeBtn.onclick = function(e) { e.stopPropagation(); mergeSession(s.name); };
+                row.appendChild(mergeBtn);
                 row.appendChild(nameSpan);
                 row.appendChild(metaSpan);
                 pickerList.appendChild(row);
