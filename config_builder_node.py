@@ -677,8 +677,20 @@ class UltimateConfigBuilder:
                 config["_prompt_source"] = "global"
             # If neither, omit "positive"/"negative" keys - node inputs will be used as fallback
 
+            # --- CONFIG SCHEMA VALIDATION ---
+            # Catches JS/Python sync drift — warns if expected keys are missing
+            _EXPECTED_CONFIG_KEYS = {
+                "sampler", "scheduler", "steps", "cfg", "denoise", "seed", "seed_behavior",
+                "model", "model_type", "lora", "vae", "clip_type",
+                "model_sampling_override", "use_advanced_sampling", "use_flux_guidance",
+                "model_prompt_prefix", "model_prompt_suffix", "attention_mode",
+            }
+            missing = _EXPECTED_CONFIG_KEYS - set(config.keys())
+            if missing:
+                print(f"[ConfigBuilder] ⚠️ Config schema drift: missing keys {missing} in config for '{config.get('model', '?')}'")
+
             configs_output.append(config)
-        
+
         # Build the output object with configs and optional distribution settings
         output_obj = {"configs": configs_output}
 
