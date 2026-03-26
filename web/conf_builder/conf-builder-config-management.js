@@ -72,13 +72,78 @@ const REMOTE_VAE_PRESETS = {
 };
 
 // Debounced renderUI to batch rapid state changes and avoid redundant full rebuilds
+// Pass optional arrayIdx for partial re-render of just one config section
 let _renderUITimer = null;
-function debouncedRenderUI(node) {
+function debouncedRenderUI(node, arrayIdx) {
     if (_renderUITimer) clearTimeout(_renderUITimer);
     _renderUITimer = setTimeout(() => {
         _renderUITimer = null;
-        node.renderUI();
+        if (arrayIdx !== undefined && arrayIdx !== null) {
+            rerenderConfigSection(node, arrayIdx);
+        } else {
+            node.renderUI();
+        }
     }, 150);
+}
+
+/**
+ * Partial re-render: rebuild only a specific config array section instead of the entire UI.
+ * Much faster than full renderUI() for structural changes within a single config
+ * (add/remove model, add/remove lora, etc.).
+ * Falls back to full renderUI if the target section isn't found in the DOM.
+ */
+function rerenderConfigSection(node, arrayIdx) {
+    const target = document.getElementById(`cb-config-${arrayIdx}`);
+    if (!target) {
+        // Section not in DOM (collapsed or first render) — fall back to full render
+        debouncedRenderUI(node);
+        return;
+    }
+
+    // Import model lists from cache (already loaded)
+    import('./conf-builder-utilities.js').then(async (utilities) => {
+        const modelLists = {
+            checkpoints: utilities.getAvailableModels ? await utilities.getAvailableModels() : [],
+            diffusionModels: utilities.getAvailableDiffusionModels(),
+            ggufModels: utilities.getAvailableGGUFModels(),
+            textEncoders: utilities.getAvailableTextEncoders(),
+            textEncoderFolders: utilities.getTextEncoderFolders(),
+            vae: utilities.getAvailableVAEs(),
+            vaeFolders: utilities.getVAEFolders(),
+            upscaleModels: utilities.getAvailableUpscaleModels ? utilities.getAvailableUpscaleModels() : [],
+            samplers: utilities.getAvailableSamplers(),
+            schedulers: utilities.getAvailableSchedulers(),
+            clipTypes: utilities.getClipTypes(),
+            dualClipTypes: utilities.getDualClipTypes(),
+        };
+        const availableLoras = await utilities.getAvailableLoras();
+        const loraFolders = await utilities.getLoraFolders();
+        const configArray = node.state.config_arrays[arrayIdx];
+        if (!configArray) return;
+
+        // Save scroll position of the section
+        const scrollParent = target.closest('.cb-main-content');
+        const savedScroll = scrollParent ? scrollParent.scrollTop : 0;
+
+        // Clear and rebuild just this config section
+        target.textContent = '';
+        const freshElement = createConfigArrayElement(node, configArray, arrayIdx, modelLists);
+        // Copy children from fresh element into existing target
+        while (freshElement.firstChild) target.appendChild(freshElement.firstChild);
+        // Copy styles
+        target.style.borderLeft = freshElement.style.borderLeft;
+
+        renderConfigPromptsSection(node, target, configArray, arrayIdx);
+        renderModelsSection(node, target, configArray, arrayIdx, modelLists);
+        renderVAEsSection(node, target, configArray, arrayIdx, modelLists);
+        renderLorasSection(node, target, configArray, arrayIdx, availableLoras, loraFolders);
+
+        // Update preview
+        if (typeof updatePreview === 'function') updatePreview(node);
+
+        // Restore scroll
+        if (scrollParent) scrollParent.scrollTop = savedScroll;
+    });
 }
 
 // --- DRAG-AND-DROP REORDER HELPER ---
