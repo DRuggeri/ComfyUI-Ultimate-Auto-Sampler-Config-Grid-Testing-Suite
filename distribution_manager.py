@@ -496,6 +496,11 @@ class DistributionManager:
         if released > 0:
             print(f"[Distribution] Released {released} timed-out jobs")
 
+    def release_timed_out_jobs(self):
+        """Public wrapper — call from the wait loop to reclaim dead worker jobs."""
+        with self._lock:
+            self._release_timed_out_jobs()
+
     def _persist_state(self):
         """
         Persist job states to disk for crash recovery.

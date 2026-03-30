@@ -2345,7 +2345,7 @@ def _run_distributed_generation(
     - Waits for all remote workers to finish
     - Returns the final HTML dashboard
     """
-    from .distribution_manager import DistributionManager
+    from .distribution_manager import DistributionManager, JobState
     from .distribution_routes import (
         set_distribution_manager, notify_workers_to_start,
         stop_all_workers, _send_distribution_status
@@ -2775,9 +2775,32 @@ def _run_distributed_generation(
         raise
 
     # === Wait for remote workers to finish ===
+    # Max wait timeout prevents infinite loops if workers crash without cleanup.
+    # After timeout, remaining claimed jobs are reclaimed and processed on master.
+    dist_wait_timeout = distribution_config.get("wait_timeout", 600)  # Default 10 minutes
     if manager.has_pending_or_claimed:
-        print(f"[Distribution] ⏳ Waiting for remote workers to finish...")
+        print(f"[Distribution] ⏳ Waiting for remote workers to finish (timeout: {dist_wait_timeout}s)...")
+        wait_start = time.time()
         while manager.has_pending_or_claimed:
+            # Release timed-out jobs from dead workers (was only called during claim_job)
+            manager.release_timed_out_jobs()
+
+            # Check max wait timeout — reclaim remaining jobs for master processing
+            elapsed_wait = time.time() - wait_start
+            if elapsed_wait > dist_wait_timeout:
+                status = manager.get_status()
+                remaining = status['pending'] + status['claimed']
+                print(f"[Distribution] ⏰ Wait timeout ({dist_wait_timeout}s) reached with {remaining} jobs remaining — reclaiming for master")
+                # Force-reclaim all remaining claimed jobs
+                with manager._lock:
+                    for job in manager._jobs.values():
+                        if job.state == JobState.CLAIMED and job.worker_id != "master":
+                            job.state = JobState.PENDING
+                            job.worker_id = None
+                            job.claimed_at = None
+                            manager._pending_queue.append(job.job_id)
+                break
+
             # Check for interrupt while waiting
             try:
                 import comfy.model_management as mm
@@ -2819,6 +2842,18 @@ def _run_distributed_generation(
             print(f"[Distribution] ⏳ Pending: {status['pending']}, "
                   f"Claimed: {status['claimed']}, "
                   f"Completed: {status['completed']}/{status['total']}")
+
+    # === Handle remaining jobs after wait timeout ===
+    if manager.has_pending_or_claimed:
+        status = manager.get_status()
+        remaining = status['pending'] + status['claimed']
+        print(f"[Distribution] ⚠️ {remaining} job(s) still incomplete after wait timeout — marking as failed and proceeding to finalization")
+        # Mark remaining jobs as failed so we don't block forever
+        with manager._lock:
+            for job in manager._jobs.values():
+                if job.state in (JobState.PENDING, JobState.CLAIMED):
+                    job.state = JobState.COMPLETED  # Mark done to unblock
+                    print(f"[Distribution] ⚠️ Abandoned job {job.job_id} (was {job.state})")
 
     # === Finalization ===
     stop_all_workers(worker_urls)
