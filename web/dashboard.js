@@ -180,9 +180,11 @@ app.registerExtension({
                     el.addEventListener('load', () => {
                         console.log('[UltimateGrid] Iframe reloaded after fullscreen toggle, restoring session...');
 
-                        // Get the session name from the node's widget
-                        const sessionWidget = graphNode.widgets?.find(w => w.name === "session_name");
-                        const sessionName = sessionWidget ? sessionWidget.value : null;
+                        // Get the session name — prefer the one from the iframe (user may have
+                        // loaded a different session via the picker), fall back to node widget
+                        const sessionName = event.data.session_name
+                            || graphNode.widgets?.find(w => w.name === "session_name")?.value
+                            || null;
 
                         if (sessionName && graphNode.forceLoadSession) {
                             graphNode.forceLoadSession(sessionName);

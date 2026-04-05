@@ -5,7 +5,9 @@
  */
 
 function toggleFullscreen() {
-    window.parent.postMessage({ type: 'toggle_fullscreen', node_id: TARGET_NODE_ID }, '*');
+    // Send current session name so fullscreen reload uses the right session
+    var currentSession = document.getElementById('session-input')?.value || '';
+    window.parent.postMessage({ type: 'toggle_fullscreen', node_id: TARGET_NODE_ID, session_name: currentSession }, '*');
 }
 
 
