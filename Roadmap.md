@@ -42,7 +42,7 @@ ProjectStructure.md has notes to assist AI in developing this project
 !!!!
 
 
-# Run this after lots of updates & before starting a new convo
+# Run this after lots of updates & before starting a new convo  
 
 ## Please update ProjectStructure.md to be better structured and fixed up for having all relevant AI Notes in it that will help and assist AI to develop this project further. Add your findings, file system notes, important considerations and more to it and make sure its up to date and full of helpful info.
 
@@ -137,3 +137,32 @@ More info needed on how this could work, would like to see a visual interface fo
 #### **24. Combinatorial Randomization** - More Randomization tools - generate x configs from y possibilities and z prompts - (very low priority)
 
 * **Problem:**  Feature. Combinatorial generation logic. Combine random prompts with random loras, fun!
+
+
+---
+
+## Strategic Roadmap (from R&D competitive analysis, 2026-04)
+
+#### **25. Image Quality Metrics** (unique differentiator — no competitor has this)
+Compute objective quality metrics during generation and store in manifest:
+- **Laplacian variance** (sharpness/blur detection)
+- **Histogram entropy** (color diversity/richness)
+- **Sobel edge quality** (detail preservation)
+Add as sortable/filterable fields in Dashboard. Enables data-driven parameter selection instead of purely visual comparison. Prior art: SamplerSchedulerMetricsTester (proves the concept, only 9 stars but validates demand).
+
+#### **26. Analytics Panel in Dashboard** (transforms tool from "look at pictures" to "data-driven decisions")
+* **Milestone 1:** Aggregate stats bar — avg generation time by sampler/scheduler, favorites rate by model/LoRA
+* **Milestone 2:** Canvas-based charts — bar charts, scatter plots (steps vs duration, CFG vs quality metrics)
+* **Milestone 3:** Export — downloadable reports with charts + top images
+Pure client-side using canvas API from existing `activeData`. Prior art: W&B dashboards.
+
+#### **27. Static Dashboard** (eliminate HTML regeneration requirement)
+* **Milestone 1:** REST manifest fetch — Dashboard loads manifest via `fetch('/config_tester/get_manifest?session=name')` instead of inline `__JSON_DATA__`
+* **Milestone 2:** Remove html_generator dependency — serve Dashboard as static HTML from `WEB_DIRECTORY`
+* **Milestone 3:** Hot-reload in dev — JS changes visible on browser refresh without re-running sampler
+Biggest architectural leverage: eliminates the #1 developer friction point.
+
+#### **28. Onboarding Wizard & Tutorial**
+* **Milestone 1:** First-run wizard in Builder UI — walks through: create session → pick model → add LoRA → run → view dashboard (5 interactive steps)
+* **Milestone 2:** Video tutorial (3-minute YouTube walkthrough)
+README is 2000+ words; most users won't read it. Efficiency Nodes grew via community tutorials.
