@@ -1249,14 +1249,24 @@ function createCard(d) {
     const aspectRatio = (d.width && d.height) ? (d.height / d.width) : 1;
     const paddingBottom = (aspectRatio * 100).toFixed(2);
 
+    // Detect video vs image and prepare variants
+    const isVideo = d.media_type === 'video';
+    const mediaElement = isVideo
+        ? `<video ondblclick="toggleFavorite(this)" data-src="${d.file}" muted loop playsinline preload="none" draggable="false"></video>`
+        : `<img ondblclick="toggleFavorite(this)" data-src="${d.file}" alt="Image ${d.id}" draggable="false">`;
+    const reviseBtn = isVideo ? '' : `<button class="revise-btn" onclick="openM(${d.id})">REVISE</button>`;
+    const upscaleBtn = isVideo ? '' : `<button class="upscale-btn" onclick="openUpscaleModal(${d.id})" title="Upscale this image">\u2B06</button>`;
+    const videoBadge = isVideo ? '<div class="video-badge">\u25B6 VIDEO</div>' : '';
+
     // FIXED LAYOUT: Star top-right, Revise below it, time bottom-right, index bottom-left
     card.innerHTML = `
         <div class="img-wrapper" style="padding-bottom: ${paddingBottom}%;">
-            <img ondblclick="toggleFavorite(this)" data-src="${d.file}" alt="Image ${d.id}" draggable="false">
+            ${mediaElement}
             <button class="reject-btn" onclick="rejectItem(this)">✕</button>
             <button class="favorite-btn ${favClass}" onclick="toggleFavorite(this)">${favIcon}</button>
-            <button class="revise-btn" onclick="openM(${d.id})">REVISE</button>
-            <button class="upscale-btn" onclick="openUpscaleModal(${d.id})" title="Upscale this image">⬆</button>
+            ${reviseBtn}
+            ${upscaleBtn}
+            ${videoBadge}
             <div class="time-tag">${d.duration}s</div>
             <div class="index-tag">#${totalIndex}</div>
             ${buildLabelOverlay(d)}
@@ -1273,6 +1283,37 @@ function createCard(d) {
             ${promptInfo}
             <div class="stat"><b>Size:</b> ${d.width}x${d.height} &nbsp; <b>Seed:</b> ${d.seed}</div>
         </div>`;
+
+    // For videos: hover-play, click for fullscreen, update aspect ratio once metadata loads
+    if (isVideo) {
+        const videoEl = card.querySelector('video');
+        if (videoEl) {
+            card.addEventListener('mouseenter', function() { videoEl.play().catch(function() {}); });
+            card.addEventListener('mouseleave', function() {
+                if (!document.fullscreenElement) { videoEl.pause(); videoEl.currentTime = 0; }
+            });
+            // Click: open native fullscreen with browser controls
+            videoEl.addEventListener('click', function(e) {
+                e.stopPropagation();
+                videoEl.controls = true;
+                if (videoEl.requestFullscreen) videoEl.requestFullscreen().catch(function() {});
+                else if (videoEl.webkitRequestFullscreen) videoEl.webkitRequestFullscreen();
+            });
+            // Remove controls when exiting fullscreen
+            videoEl.addEventListener('fullscreenchange', function() {
+                if (!document.fullscreenElement) { videoEl.controls = false; videoEl.pause(); }
+            });
+            videoEl.addEventListener('loadedmetadata', function() {
+                if (videoEl.videoWidth && videoEl.videoHeight) {
+                    d.width = videoEl.videoWidth;
+                    d.height = videoEl.videoHeight;
+                    const ar = videoEl.videoHeight / videoEl.videoWidth;
+                    const wrapper = card.querySelector('.img-wrapper');
+                    if (wrapper) wrapper.style.paddingBottom = (ar * 100).toFixed(2) + '%';
+                }
+            });
+        }
+    }
 
     return card;
 }

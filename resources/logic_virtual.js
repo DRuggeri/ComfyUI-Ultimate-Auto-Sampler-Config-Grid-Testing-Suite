@@ -309,6 +309,11 @@ function renderVisibleItems(forcePositionUpdate = false) {
                 img.src = img.dataset.src;
                 img.onload = () => img.style.opacity = '1';
             }
+            // Lazy-load videos too (same data-src → src pattern)
+            const vid = card.querySelector('video[data-src]');
+            if (vid && !vid.src) {
+                vid.src = vid.dataset.src;
+            }
 
         } else {
             const currentLeft = parseInt(card.style.left) || 0;

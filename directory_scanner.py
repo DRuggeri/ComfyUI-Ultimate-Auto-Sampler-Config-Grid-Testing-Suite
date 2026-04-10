@@ -317,6 +317,8 @@ def _load_existing_manifest_items(directory_path):
 # =============================================================================
 
 IMAGE_EXTENSIONS = {".png", ".jpg", ".jpeg", ".webp", ".bmp"}
+VIDEO_EXTENSIONS = {".mp4", ".webm", ".mov", ".m4v"}
+MEDIA_EXTENSIONS = IMAGE_EXTENSIONS | VIDEO_EXTENSIONS
 
 
 def scan_directory_for_images(directory_path, max_items=5000, view_subfolder=""):
@@ -356,7 +358,7 @@ def scan_directory_for_images(directory_path, max_items=5000, view_subfolder="")
             for entry in os.scandir(scan_dir):
                 if entry.is_file():
                     ext = os.path.splitext(entry.name)[1].lower()
-                    if ext in IMAGE_EXTENSIONS:
+                    if ext in MEDIA_EXTENSIONS:
                         image_files.append(entry.path)
     except PermissionError:
         raise ValueError(f"Permission denied: {directory_path}")
@@ -407,9 +409,11 @@ def scan_directory_for_images(directory_path, max_items=5000, view_subfolder="")
 
 def _process_single_image(file_path, directory_path, view_subfolder=""):
     """
-    Process a single image file into a manifest-compatible item dict.
+    Process a single image or video file into a manifest-compatible item dict.
     """
     filename = os.path.basename(file_path)
+    ext = os.path.splitext(filename)[1].lower()
+    is_video = ext in VIDEO_EXTENSIONS
 
     # Generate unique ID (matching existing manifest pattern)
     ts = int(time.time() * 100000) + random.randint(0, 1000)
@@ -417,6 +421,32 @@ def _process_single_image(file_path, directory_path, view_subfolder=""):
     # Build URL using ComfyUI's built-in /view endpoint
     from urllib.parse import quote
     file_url = f"/view?filename={quote(filename, safe='')}&type=output&subfolder={quote(view_subfolder, safe='/')}"
+
+    if is_video:
+        # Videos: browser will update dimensions on loadedmetadata — use 16:9 default
+        return {
+            "id": ts,
+            "file": file_url,
+            "media_type": "video",
+            "width": 1280,
+            "height": 720,
+            "seed": 0,
+            "steps": 0,
+            "cfg": 0,
+            "sampler": "video",
+            "scheduler": "video",
+            "positive": "",
+            "negative": "",
+            "denoise": 1,
+            "model": "Video",
+            "lora": "None",
+            "clip_skip": -1,
+            "duration": 0,
+            "batch_idx": 0,
+            "rejected": False,
+            "favorited": False,
+            "source_file": filename,
+        }
 
     # Get image dimensions from PIL
     try:
@@ -440,6 +470,7 @@ def _process_single_image(file_path, directory_path, view_subfolder=""):
     item = {
         "id": ts,
         "file": file_url,
+        "media_type": "image",
         "width": parsed.get("width") or width,
         "height": parsed.get("height") or height,
         "seed": parsed.get("seed", 0),
