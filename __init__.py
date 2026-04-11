@@ -1032,10 +1032,11 @@ async def cancel_upscale(request):
 
 def _create_image_links(source_dir, link_dir, items):
     """
-    Create symlinks (or copies on Windows) from source images into
+    Create symlinks (or copies on Windows) from source images and videos into
     the output directory so ComfyUI's built-in /view endpoint can serve them.
     """
-    IMAGE_EXTENSIONS = {".png", ".jpg", ".jpeg", ".webp", ".bmp"}
+    # Use shared media extensions (images + videos) from the scanner module
+    from .directory_scanner import MEDIA_EXTENSIONS
 
     # Collect all source files referenced by items
     filenames = set()
@@ -1056,7 +1057,7 @@ def _create_image_links(source_dir, link_dir, items):
                 if not entry.is_file():
                     continue
                 ext = os.path.splitext(entry.name)[1].lower()
-                if ext not in IMAGE_EXTENSIONS:
+                if ext not in MEDIA_EXTENSIONS:
                     continue
                 if entry.name not in filenames:
                     continue
