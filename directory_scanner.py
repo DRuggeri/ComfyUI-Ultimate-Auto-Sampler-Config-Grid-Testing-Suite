@@ -437,16 +437,23 @@ def scan_directory_for_images(directory_path, max_items=5000, view_subfolder="")
                 if entry.is_file():
                     ext = os.path.splitext(entry.name)[1].lower()
                     if ext in MEDIA_EXTENSIONS:
-                        image_files.append(entry.path)
+                        try:
+                            mtime = entry.stat().st_mtime
+                        except Exception:
+                            mtime = 0
+                        image_files.append((entry.path, mtime))
     except PermissionError:
         raise ValueError(f"Permission denied: {directory_path}")
 
-    image_files.sort()
+    # Sort by modification time ascending (oldest first) so gen_index
+    # monotonically increases with age — newest files get highest gen_index.
+    # Dashboard "oldest" sort ascends by gen_index, "newest" descends.
+    image_files.sort(key=lambda x: (x[1], x[0]))
 
     if len(image_files) > max_items:
         image_files = image_files[:max_items]
 
-    for file_path in image_files:
+    for gen_idx, (file_path, _mtime) in enumerate(image_files):
         stats["total"] += 1
         filename = os.path.basename(file_path)
 
@@ -457,6 +464,9 @@ def scan_directory_for_images(directory_path, max_items=5000, view_subfolder="")
             from urllib.parse import quote
             item["file"] = f"/view?filename={quote(filename, safe='')}&type=output&subfolder={quote(view_subfolder, safe='/')}"
             item["source_file"] = filename
+            # Assign gen_index based on mtime-sorted order so Oldest/Newest sort
+            # matches file age (overrides any stale gen_index from cached manifest)
+            item["gen_index"] = gen_idx
             # Ensure it has an ID
             if "id" not in item:
                 item["id"] = int(time.time() * 100000) + random.randint(0, 1000)
@@ -483,7 +493,7 @@ def scan_directory_for_images(directory_path, max_items=5000, view_subfolder="")
 
         # No manifest entry — fall through to normal image processing
         try:
-            item = _process_single_image(file_path, directory_path, view_subfolder)
+            item = _process_single_image(file_path, directory_path, view_subfolder, gen_index=gen_idx)
             if item:
                 items.append(item)
         except Exception as e:
@@ -502,7 +512,7 @@ def scan_directory_for_images(directory_path, max_items=5000, view_subfolder="")
     return items, stats
 
 
-def _process_single_image(file_path, directory_path, view_subfolder=""):
+def _process_single_image(file_path, directory_path, view_subfolder="", gen_index=0):
     """
     Process a single image or video file into a manifest-compatible item dict.
     """
@@ -524,6 +534,7 @@ def _process_single_image(file_path, directory_path, view_subfolder=""):
         vid_w, vid_h = probed if probed else (1280, 720)
         return {
             "id": ts,
+            "gen_index": gen_index,
             "file": file_url,
             "media_type": "video",
             "width": vid_w,
@@ -567,6 +578,7 @@ def _process_single_image(file_path, directory_path, view_subfolder=""):
     # Use parsed metadata, fall back to defaults
     item = {
         "id": ts,
+        "gen_index": gen_index,
         "file": file_url,
         "media_type": "image",
         "width": parsed.get("width") or width,
