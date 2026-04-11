@@ -145,6 +145,25 @@ const imageObserver = new IntersectionObserver((entries) => {
     });
 }, { rootMargin: '400px' });
 
+// --- VIDEO AUTOPLAY OBSERVER ---
+// Autoplay videos whose cards are visible in the viewport.
+// Pauses (and resets) videos that scroll off screen to save bandwidth/CPU.
+const videoAutoplayObserver = new IntersectionObserver((entries) => {
+    entries.forEach(entry => {
+        const vid = entry.target;
+        if (entry.isIntersecting) {
+            // Ensure src is loaded (lazy loader may not have fired yet)
+            if (vid.dataset.src && !vid.src) {
+                vid.src = vid.dataset.src;
+            }
+            vid.play().catch(() => { /* browser may block until user interaction */ });
+        } else {
+            vid.pause();
+            vid.currentTime = 0;
+        }
+    });
+}, { rootMargin: '0px', threshold: 0.25 });
+
 // --- CALCULATE VISIBLE RANGE ---
 function calculateVisibleRange() {
     const viewport = document.getElementById('viewport');
@@ -246,6 +265,12 @@ function renderVisibleItems(forcePositionUpdate = false) {
     toRemove.forEach(id => {
         const node = nodeMap.get(id);
         if (node) {
+            // Stop observing any video in this card and pause playback
+            const vid = node.querySelector('video');
+            if (vid) {
+                try { videoAutoplayObserver.unobserve(vid); } catch (e) {}
+                vid.pause();
+            }
             if (_cardPool.length < MAX_POOL_SIZE) {
                 // Pool the card for reuse instead of destroying
                 node.style.display = 'none';
@@ -309,10 +334,11 @@ function renderVisibleItems(forcePositionUpdate = false) {
                 img.src = img.dataset.src;
                 img.onload = () => img.style.opacity = '1';
             }
-            // Lazy-load videos too (same data-src → src pattern)
-            const vid = card.querySelector('video[data-src]');
-            if (vid && !vid.src) {
-                vid.src = vid.dataset.src;
+            // Videos: observe for autoplay-when-visible. Observer handles
+            // lazy src loading on first intersection too.
+            const vid = card.querySelector('video');
+            if (vid) {
+                videoAutoplayObserver.observe(vid);
             }
 
         } else {

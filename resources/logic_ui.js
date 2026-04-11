@@ -558,7 +558,7 @@ function initFilters() {
     if (!activeData || activeData.length === 0) return;
 
     // Ensure all filter Sets exist (add new ones if missing)
-    const filterKeys = ['model', 'sampler', 'scheduler', 'denoise', 'lora', 'positive', 'negative', 'size', 'seed', 'steps', 'cfg', 'upscaleMethod'];
+    const filterKeys = ['model', 'sampler', 'scheduler', 'denoise', 'lora', 'positive', 'negative', 'size', 'seed', 'steps', 'cfg', 'upscaleMethod', 'mediaType'];
     filterKeys.forEach(key => {
         if (!filters.hasOwnProperty(key) || !(filters[key] instanceof Set)) {
             filters[key] = new Set();
@@ -586,6 +586,7 @@ function initFilters() {
                 const shortModel = model ? String(model).replace(/\\/g, '/').split('/').pop().replace(/\.[^.]+$/, '') : '';
                 return shortModel ? `${mode} + ${shortModel}` : mode || 'Upscaled';
             }
+            if (key === 'mediaType') return d.media_type || 'image';
             return d[key];
         }))].sort();
 
@@ -1284,14 +1285,11 @@ function createCard(d) {
             <div class="stat"><b>Size:</b> ${d.width}x${d.height} &nbsp; <b>Seed:</b> ${d.seed}</div>
         </div>`;
 
-    // For videos: hover-play, click for fullscreen, update aspect ratio once metadata loads
+    // For videos: autoplay when visible is handled by videoAutoplayObserver in logic_virtual.js.
+    // This block wires click-to-fullscreen and loadedmetadata aspect ratio update.
     if (isVideo) {
         const videoEl = card.querySelector('video');
         if (videoEl) {
-            card.addEventListener('mouseenter', function() { videoEl.play().catch(function() {}); });
-            card.addEventListener('mouseleave', function() {
-                if (!document.fullscreenElement) { videoEl.pause(); videoEl.currentTime = 0; }
-            });
             // Click: open native fullscreen with browser controls
             videoEl.addEventListener('click', function(e) {
                 e.stopPropagation();
@@ -1301,7 +1299,7 @@ function createCard(d) {
             });
             // Remove controls when exiting fullscreen
             videoEl.addEventListener('fullscreenchange', function() {
-                if (!document.fullscreenElement) { videoEl.controls = false; videoEl.pause(); }
+                if (!document.fullscreenElement) { videoEl.controls = false; }
             });
             videoEl.addEventListener('loadedmetadata', function() {
                 if (videoEl.videoWidth && videoEl.videoHeight) {
