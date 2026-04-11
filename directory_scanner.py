@@ -445,15 +445,20 @@ def scan_directory_for_images(directory_path, max_items=5000, view_subfolder="")
     except PermissionError:
         raise ValueError(f"Permission denied: {directory_path}")
 
-    # Sort by modification time ascending (oldest first) so gen_index
-    # monotonically increases with age — newest files get highest gen_index.
-    # Dashboard "oldest" sort ascends by gen_index, "newest" descends.
-    image_files.sort(key=lambda x: (x[1], x[0]))
+    # Sort by modification time DESCENDING (newest first) to match the
+    # manifest convention used by generated sessions (items are prepended
+    # as they're created). The Dashboard's fast-path for oldest/newest sort
+    # assumes activeData is stored newest-first.
+    image_files.sort(key=lambda x: (-x[1], x[0]))
 
     if len(image_files) > max_items:
         image_files = image_files[:max_items]
 
-    for gen_idx, (file_path, _mtime) in enumerate(image_files):
+    total_files = len(image_files)
+    for i, (file_path, _mtime) in enumerate(image_files):
+        # gen_index: oldest=0, newest=total-1. Since image_files is
+        # newest-first, index 0 is the newest file.
+        gen_idx = total_files - 1 - i
         stats["total"] += 1
         filename = os.path.basename(file_path)
 

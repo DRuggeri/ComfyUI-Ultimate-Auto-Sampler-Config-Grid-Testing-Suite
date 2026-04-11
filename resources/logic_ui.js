@@ -1285,22 +1285,12 @@ function createCard(d) {
             <div class="stat"><b>Size:</b> ${d.width}x${d.height} &nbsp; <b>Seed:</b> ${d.seed}</div>
         </div>`;
 
-    // For videos: autoplay when visible is handled by videoAutoplayObserver in logic_virtual.js.
-    // This block wires click-to-fullscreen and loadedmetadata aspect ratio update.
+    // For videos: autoplay is handled by the virtual scroll lifecycle in logic_virtual.js.
+    // Double-click still toggles favorite (inherited from the ondblclick attribute).
+    // loadedmetadata updates per-card aspect ratio as a safety net for unprobed videos.
     if (isVideo) {
         const videoEl = card.querySelector('video');
         if (videoEl) {
-            // Click: open native fullscreen with browser controls
-            videoEl.addEventListener('click', function(e) {
-                e.stopPropagation();
-                videoEl.controls = true;
-                if (videoEl.requestFullscreen) videoEl.requestFullscreen().catch(function() {});
-                else if (videoEl.webkitRequestFullscreen) videoEl.webkitRequestFullscreen();
-            });
-            // Remove controls when exiting fullscreen
-            videoEl.addEventListener('fullscreenchange', function() {
-                if (!document.fullscreenElement) { videoEl.controls = false; }
-            });
             videoEl.addEventListener('loadedmetadata', function() {
                 if (videoEl.videoWidth && videoEl.videoHeight) {
                     d.width = videoEl.videoWidth;
