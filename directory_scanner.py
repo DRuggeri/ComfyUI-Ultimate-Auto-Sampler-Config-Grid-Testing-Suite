@@ -321,6 +321,84 @@ VIDEO_EXTENSIONS = {".mp4", ".webm", ".mov", ".m4v"}
 MEDIA_EXTENSIONS = IMAGE_EXTENSIONS | VIDEO_EXTENSIONS
 
 
+def _probe_mp4_dimensions(file_path):
+    """
+    Pure-Python MP4/MOV dimension probe. Parses the ISO BMFF container
+    to find the first video track's tkhd box and extracts width/height.
+    No dependencies — reads only the box headers (a few hundred bytes).
+
+    Returns:
+        tuple (width, height) or None if parsing fails or no video track.
+    """
+    def _find_tkhd(f, end_offset):
+        CONTAINER_BOXES = (b'moov', b'trak', b'mdia', b'minf', b'stbl', b'edts')
+        while f.tell() < end_offset:
+            header = f.read(8)
+            if len(header) < 8:
+                return None
+            size = int.from_bytes(header[0:4], 'big')
+            box_type = header[4:8]
+
+            if size == 1:
+                # 64-bit largesize
+                size_bytes = f.read(8)
+                if len(size_bytes) < 8:
+                    return None
+                size = int.from_bytes(size_bytes, 'big')
+                content_size = size - 16
+            elif size == 0:
+                # Box extends to end of file
+                content_size = end_offset - f.tell()
+            else:
+                content_size = size - 8
+
+            if content_size < 0:
+                return None
+
+            content_start = f.tell()
+            content_end = content_start + content_size
+
+            if box_type == b'tkhd':
+                try:
+                    version = f.read(1)[0]
+                    f.read(3)  # flags
+                    if version == 0:
+                        # 32-bit time fields: 4+4+4+4+4 = 20 bytes total
+                        f.read(20)
+                    else:
+                        # 64-bit time fields: 8+8+4+4+8 = 32 bytes
+                        f.read(32)
+                    f.read(8)  # reserved
+                    f.read(8)  # layer, alt_group, volume, reserved
+                    f.read(36)  # unity matrix
+                    width_raw = int.from_bytes(f.read(4), 'big')
+                    height_raw = int.from_bytes(f.read(4), 'big')
+                    # Width/height are 16.16 fixed-point
+                    width = width_raw >> 16
+                    height = height_raw >> 16
+                    if width > 0 and height > 0:
+                        return (width, height)
+                except Exception:
+                    pass
+                f.seek(content_end)
+                continue
+
+            if box_type in CONTAINER_BOXES:
+                result = _find_tkhd(f, content_end)
+                if result:
+                    return result
+
+            f.seek(content_end)
+        return None
+
+    try:
+        file_size = os.path.getsize(file_path)
+        with open(file_path, 'rb') as f:
+            return _find_tkhd(f, file_size)
+    except Exception:
+        return None
+
+
 def scan_directory_for_images(directory_path, max_items=5000, view_subfolder=""):
     """
     Scan a directory for image files and build manifest-compatible items.
@@ -382,6 +460,23 @@ def scan_directory_for_images(directory_path, max_items=5000, view_subfolder="")
             # Ensure it has an ID
             if "id" not in item:
                 item["id"] = int(time.time() * 100000) + random.randint(0, 1000)
+            # For videos: ensure media_type is set and probe real dimensions
+            # if the cached entry has missing or stale (default 1280x720) values.
+            ext_check = os.path.splitext(filename)[1].lower()
+            if ext_check in VIDEO_EXTENSIONS:
+                item["media_type"] = "video"
+                needs_probe = (
+                    not item.get("width")
+                    or not item.get("height")
+                    or (item.get("width") == 1280 and item.get("height") == 720)
+                )
+                if needs_probe:
+                    probed = _probe_mp4_dimensions(file_path)
+                    if probed:
+                        item["width"], item["height"] = probed
+            else:
+                if "media_type" not in item:
+                    item["media_type"] = "image"
             items.append(item)
             stats["from_manifest"] += 1
             continue
@@ -423,13 +518,16 @@ def _process_single_image(file_path, directory_path, view_subfolder=""):
     file_url = f"/view?filename={quote(filename, safe='')}&type=output&subfolder={quote(view_subfolder, safe='/')}"
 
     if is_video:
-        # Videos: browser will update dimensions on loadedmetadata — use 16:9 default
+        # Try to probe real dimensions from MP4/MOV container
+        # Falls back to 16:9 default if probing fails (e.g. WebM, corrupt file)
+        probed = _probe_mp4_dimensions(file_path)
+        vid_w, vid_h = probed if probed else (1280, 720)
         return {
             "id": ts,
             "file": file_url,
             "media_type": "video",
-            "width": 1280,
-            "height": 720,
+            "width": vid_w,
+            "height": vid_h,
             "seed": 0,
             "steps": 0,
             "cfg": 0,
