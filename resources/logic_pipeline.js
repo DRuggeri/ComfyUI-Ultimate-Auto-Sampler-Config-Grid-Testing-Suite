@@ -33,6 +33,7 @@ function getFilterKey() {
         [...filters.negative].sort().join(','),
         [...filters.size].sort().join(','),
         [...filters.seed].sort().join(','),
+        [...filters.mediaType].sort().join(','),
         searchFilters.map(f => `${f.type}:${f.term}`).join('|')
     ];
     return parts.join('|');
@@ -221,7 +222,8 @@ function incrementalFilter(newItems) {
         filters.seed.size > 0 ||
         filters.steps.size > 0 ||
         filters.cfg.size > 0 ||
-        filters.upscaleMethod.size > 0;
+        filters.upscaleMethod.size > 0 ||
+        filters.mediaType.size > 0;
 
     return newItems.filter(d => {
         // Apply top-level filters (Favorites/Non-Favorited/Rejected visibility)
@@ -263,6 +265,10 @@ function incrementalFilter(newItems) {
                     upVal = shortModel ? `${mode} + ${shortModel}` : mode || 'Upscaled';
                 }
                 if (!filters.upscaleMethod.has(upVal)) return false;
+            }
+            if (filters.mediaType.size > 0) {
+                const mt = d.media_type || 'image';
+                if (!filters.mediaType.has(mt)) return false;
             }
         }
 
@@ -311,7 +317,8 @@ function executePipeline() {
         filters.seed.size > 0 ||
         filters.steps.size > 0 ||
         filters.cfg.size > 0 ||
-        filters.upscaleMethod.size > 0;
+        filters.upscaleMethod.size > 0 ||
+        filters.mediaType.size > 0;
 
     const hasSearchFilters = typeof matchesSearchFilters === 'function' && searchFilters.length > 0;
 
@@ -352,6 +359,10 @@ function executePipeline() {
                     upVal = shortModel ? `${mode} + ${shortModel}` : mode || 'Upscaled';
                 }
                 if (!filters.upscaleMethod.has(upVal)) return false;
+            }
+            if (filters.mediaType.size > 0) {
+                const mt = d.media_type || 'image';
+                if (!filters.mediaType.has(mt)) return false;
             }
         }
 

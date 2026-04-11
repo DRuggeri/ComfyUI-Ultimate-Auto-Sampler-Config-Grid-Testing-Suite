@@ -31,7 +31,8 @@ var filters = filters || {
     seed: new Set(),
     steps: new Set(),
     cfg: new Set(),
-    upscaleMethod: new Set()
+    upscaleMethod: new Set(),
+    mediaType: new Set()
 };
 
 // Top-level filter toggles (true = show, false = hide)
