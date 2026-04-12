@@ -290,7 +290,7 @@ def _run_upscale_thread(job, target_items, upscale_config, meta, manifest_data, 
                                 "upscale_mode": "seedvr2",
                                 "upscale_model": sv_config.get("dit_model", ""),
                             })
-                            manifest_data["items"].append(upscaled_meta)
+                            manifest_data["items"].insert(0, upscaled_meta)
                             upscale_combo_idx += 1
                         else:
                             # For chained steps, the next step gets the PIL result
@@ -398,7 +398,7 @@ def _run_upscale_thread(job, target_items, upscale_config, meta, manifest_data, 
                             upscaled_meta["hires_prompt_behavior"] = hires_prompt_behavior_rt
                             upscaled_meta["hires_prompt_text"] = hires_prompt_text_rt
 
-                        manifest_data["items"].append(upscaled_meta)
+                        manifest_data["items"].insert(0, upscaled_meta)
                         upscale_combo_idx += 1
 
             if upscale_combo_idx > 0:
