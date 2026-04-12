@@ -995,53 +995,62 @@ def seedvr2_upscale(pil_image, seedvr2_config):
     print(f"[GridTester] 🎬 SeedVR2 upscale: model={sv.get('dit_model', '3b_fp8')}, "
           f"resolution={sv.get('resolution', 1080)}, seed={sv.get('seed', 42)}")
 
+    # Set up V3 API execution context — SeedVR2 nodes require this
+    # (they call get_executing_context().node_id internally)
+    from comfy_execution.utils import CurrentNodeContext
+    import uuid
+    dummy_prompt_id = str(uuid.uuid4())
+
     # Convert PIL image to ComfyUI IMAGE tensor [1, H, W, 3] float32 [0,1]
     img_np = np.array(pil_image.convert("RGB")).astype(np.float32) / 255.0
     img_tensor = torch.from_numpy(img_np).unsqueeze(0)  # [1, H, W, 3]
 
-    # Load DiT model
-    dit_result = SeedVR2LoadDiTModel.execute(
-        model=sv.get("dit_model", "seedvr2_ema_3b_fp8_e4m3fn.safetensors"),
-        device="cuda:0",
-        blocks_to_swap=sv.get("blocks_to_swap", 0),
-        swap_io_components=False,
-        offload_device=sv.get("offload_device", "cpu"),
-        cache_model=sv.get("cache_model", False),
-        attention_mode=sv.get("attention_mode", "sdpa")
-    )
-    dit = dit_result.output[0] if hasattr(dit_result, 'output') else dit_result[0]
+    # All SeedVR2 execute() calls run inside a mock execution context
+    # (V3 API nodes call get_executing_context().node_id internally)
+    with CurrentNodeContext(prompt_id=dummy_prompt_id, node_id="uscg_seedvr2", list_index=0):
+        # Load DiT model
+        dit_result = SeedVR2LoadDiTModel.execute(
+            model=sv.get("dit_model", "seedvr2_ema_3b_fp8_e4m3fn.safetensors"),
+            device="cuda:0",
+            blocks_to_swap=sv.get("blocks_to_swap", 0),
+            swap_io_components=False,
+            offload_device=sv.get("offload_device", "cpu"),
+            cache_model=sv.get("cache_model", False),
+            attention_mode=sv.get("attention_mode", "sdpa")
+        )
+        dit = dit_result.output[0] if hasattr(dit_result, 'output') else dit_result[0]
 
-    # Load VAE model
-    vae_result = SeedVR2LoadVAEModel.execute(
-        model="ema_vae_fp16.safetensors",
-        device="cuda:0",
-        encode_tiled=sv.get("encode_tiled", False),
-        encode_tile_size=sv.get("encode_tile_size", 1024),
-        encode_tile_overlap=sv.get("encode_tile_overlap", 128),
-        decode_tiled=sv.get("decode_tiled", False),
-        decode_tile_size=sv.get("decode_tile_size", 1024),
-        decode_tile_overlap=sv.get("decode_tile_overlap", 128),
-        offload_device=sv.get("vae_offload_device", "none"),
-        cache_model=sv.get("vae_cache_model", False)
-    )
-    vae = vae_result.output[0] if hasattr(vae_result, 'output') else vae_result[0]
+        # Load VAE model
+        vae_result = SeedVR2LoadVAEModel.execute(
+            model="ema_vae_fp16.safetensors",
+            device="cuda:0",
+            encode_tiled=sv.get("encode_tiled", False),
+            encode_tile_size=sv.get("encode_tile_size", 1024),
+            encode_tile_overlap=sv.get("encode_tile_overlap", 128),
+            decode_tiled=sv.get("decode_tiled", False),
+            decode_tile_size=sv.get("decode_tile_size", 1024),
+            decode_tile_overlap=sv.get("decode_tile_overlap", 128),
+            offload_device=sv.get("vae_offload_device", "none"),
+            cache_model=sv.get("vae_cache_model", False)
+        )
+        vae = vae_result.output[0] if hasattr(vae_result, 'output') else vae_result[0]
 
-    # Run upscale
-    upscale_result = SeedVR2VideoUpscaler.execute(
-        image=img_tensor,
-        dit=dit,
-        vae=vae,
-        seed=sv.get("seed", 42),
-        resolution=sv.get("resolution", 1080),
-        max_resolution=sv.get("max_resolution", 0),
-        batch_size=sv.get("batch_size", 1),
-        uniform_batch_size=False,
-        color_correction=sv.get("color_correction", "lab"),
-        input_noise_scale=sv.get("input_noise_scale", 0.0),
-        latent_noise_scale=sv.get("latent_noise_scale", 0.0),
-        offload_device=sv.get("offload_device", "cpu")
-    )
-    result_tensor = upscale_result.output[0] if hasattr(upscale_result, 'output') else upscale_result[0]
+        # Run upscale
+        upscale_result = SeedVR2VideoUpscaler.execute(
+            image=img_tensor,
+            dit=dit,
+            vae=vae,
+            seed=sv.get("seed", 42),
+            resolution=sv.get("resolution", 1080),
+            max_resolution=sv.get("max_resolution", 0),
+            batch_size=sv.get("batch_size", 1),
+            uniform_batch_size=False,
+            color_correction=sv.get("color_correction", "lab"),
+            input_noise_scale=sv.get("input_noise_scale", 0.0),
+            latent_noise_scale=sv.get("latent_noise_scale", 0.0),
+            offload_device=sv.get("offload_device", "cpu")
+        )
+        result_tensor = upscale_result.output[0] if hasattr(upscale_result, 'output') else upscale_result[0]
 
     # Convert back to PIL: [1, H', W', 3] float32 → PIL
     from PIL import Image
