@@ -418,115 +418,85 @@ function exportFavoritesAsConfigJSON() {
         }
     }
 
-    // Build config arrays from groups
-    var configArrays = [];
-    var groupKeys = Object.keys(groups);
-    for (var gi = 0; gi < groupKeys.length; gi++) {
-        var g = groups[groupKeys[gi]];
-        var f = g._first; // First item for advanced settings
+    // Build flat config entries — one per favorite item.
+    // Each config is a direct match for what the sampler node's expand_configs() expects:
+    // single values for sampler, scheduler, model, etc. (NOT arrays).
+    var flatConfigs = [];
+    var seen = {};
+    for (var fi = 0; fi < favorites.length; fi++) {
+        var d = favorites[fi];
 
-        // Parse LoRAs with strengths preserved
-        var loraList;
-        if (g.lora === 'None') {
-            loraList = ['None'];
-        } else {
-            loraList = g.lora.split(' + ').map(function(l) { return l.trim(); });
-        }
-
-        // VAEs: use collected unique values, default to 'None' if none specified
-        var vaeKeys = Object.keys(g.vaes);
-        var vaeList = vaeKeys.length > 0 ? vaeKeys : ['None'];
-
-        // Text encoders
-        var teKeys = Object.keys(g.text_encoders);
-
-        // Clip type: use most common (first found)
-        var clipKeys = Object.keys(g.clip_types);
-        var clipType = clipKeys.length > 0 ? clipKeys[0] : (f.clip_type || 'stable_diffusion');
-
-        // Attention modes
-        var attKeys = Object.keys(g.attention_modes);
-        var attModes = attKeys.length > 0 ? attKeys : ['default'];
-
-        // Resolutions as [{width, height}] objects
-        var resKeys = Object.keys(g.resolutions);
-        var resolutions = resKeys.map(function(r) {
-            var parts = r.split('x');
-            return { width: parseInt(parts[0]), height: parseInt(parts[1]) };
-        });
-
-        var configArray = {
-            name: 'Favorites ' + (gi + 1),
-            samplers: Object.keys(g.samplers),
-            schedulers: Object.keys(g.schedulers),
-            steps: Object.keys(g.steps).join(', '),
-            cfg: Object.keys(g.cfgs).join(', '),
+        // Build the flat config from the manifest item's actual fields
+        var flatConfig = {
+            sampler: d.sampler || 'euler',
+            scheduler: d.scheduler || 'normal',
+            steps: d.steps || 20,
+            cfg: d.cfg || 7,
+            denoise: d.denoise || 1,
+            seed: d.seed || 0,
             seed_behavior: 'fixed',
-            models: [g.model],
-            vaes: vaeList,
-            text_encoders: teKeys,
-            clip_type: clipType,
-            gguf_options: f.gguf_options || {},
-            loras: loraList,
-            lora_omit_triggers: [],
-            lora_triggerwords_append_settings: {},
-            lora_bypass_states: {},
-            lora_strength_lock: {},
-            model_bypass_states: {},
-            vae_bypass_states: {},
-            te_bypass_states: {},
-            combine: g.lora.includes(' + '),
-            positive_prompt_groups: g.positive ? [[g.positive]] : [],
-            negative_prompt: g.negative,
-            use_custom_prompts: true,
-            model_prompt_prefix: f.model_prompt_prefix || '',
-            model_prompt_suffix: f.model_prompt_suffix || '',
-            attention_modes: attModes,
-            resolutions: resolutions,
-            model_sampling_override: f.model_sampling_override || 'none',
-            model_sampling_shift: String(f.model_sampling_shift || '1.73'),
-            model_sampling_flux_max_shift: String(f.model_sampling_flux_max_shift || '1.15'),
-            model_sampling_flux_base_shift: String(f.model_sampling_flux_base_shift || '0.5'),
-            use_advanced_sampling: f.use_advanced_sampling || false,
-            advanced_guider: f.advanced_guider || 'cfg_guider',
-            advanced_scheduler: f.advanced_scheduler || 'basic',
-            use_flux_guidance: f.use_flux_guidance || false,
-            flux_guidance_value: String(f.flux_guidance_value || '3.5')
+            model: d.model || meta.model || 'None',
+            lora: d.lora || 'None',
+            vae: d.vae || 'Default',
+            clip_type: d.clip_type || 'stable_diffusion',
+            positive: d.config_positive || d.positive || meta.positive || '',
+            negative: d.config_negative || d.negative || meta.negative || '',
+            attention_mode: d.attention_mode || 'default'
         };
+
+        // Optional fields — only include if present on the item
+        if (d.text_encoders) flatConfig.text_encoders = d.text_encoders;
+        if (d.gguf_options) flatConfig.gguf_options = d.gguf_options;
+        if (d.model_prompt_prefix) flatConfig.model_prompt_prefix = d.model_prompt_prefix;
+        if (d.model_prompt_suffix) flatConfig.model_prompt_suffix = d.model_prompt_suffix;
+        if (d.model_sampling_override && d.model_sampling_override !== 'none') {
+            flatConfig.model_sampling_override = d.model_sampling_override;
+            if (d.model_sampling_shift) flatConfig.model_sampling_shift = d.model_sampling_shift;
+            if (d.model_sampling_flux_max_shift) flatConfig.model_sampling_flux_max_shift = d.model_sampling_flux_max_shift;
+            if (d.model_sampling_flux_base_shift) flatConfig.model_sampling_flux_base_shift = d.model_sampling_flux_base_shift;
+        }
+        if (d.use_advanced_sampling) {
+            flatConfig.use_advanced_sampling = true;
+            flatConfig.advanced_guider = d.advanced_guider || 'cfg_guider';
+            flatConfig.advanced_scheduler = d.advanced_scheduler || 'basic';
+        }
+        if (d.use_flux_guidance) {
+            flatConfig.use_flux_guidance = true;
+            flatConfig.flux_guidance_value = d.flux_guidance_value || 3.5;
+        }
+        if (d.clip_skip && d.clip_skip !== -1) flatConfig.clip_skip = d.clip_skip;
+
+        // Deduplicate: skip if we already have an identical config
+        // (same model + lora + sampler + scheduler + steps + cfg + seed + prompt)
+        var dedupKey = [flatConfig.model, flatConfig.lora, flatConfig.sampler,
+            flatConfig.scheduler, flatConfig.steps, flatConfig.cfg,
+            flatConfig.seed, flatConfig.positive].join('|');
+        if (seen[dedupKey]) continue;
+        seen[dedupKey] = true;
 
         // Model type handling (checkpoint, gguf, diffusion_model)
         if (g.model_type && g.model_type !== 'checkpoint') {
-            configArray.models = [{ path: g.model, type: g.model_type }];
+            flatConfig.model_type = g.model_type;
         }
 
-        configArrays.push(configArray);
+        flatConfigs.push(flatConfig);
     }
 
-    // Build the full config object
-    var sessionName = document.getElementById('session-input')?.value || 'favorites_rerun';
+    // Wrap in the format the sampler node expects: {"configs": [...]}
     var configOutput = {
-        session_name: sessionName + '_rerun',
-        config_name: 'favorites_export',
-        auto_save: false,
-        include_none: false,
-        label_mode: false,
-        global_positive_groups: [],
-        global_negative: '',
-        distribution_enabled: false,
-        worker_urls: [],
-        config_arrays: configArrays
+        configs: flatConfigs
     };
 
     // Copy to clipboard
     var jsonStr = JSON.stringify(configOutput, null, 2);
     navigator.clipboard.writeText(jsonStr).then(function() {
-        alert('Config JSON copied to clipboard! (' + favorites.length + ' favorites \u2192 ' + configArrays.length + ' config array' + (configArrays.length !== 1 ? 's' : '') + ')\n\nPaste into the Config Builder\'s lora_config widget to use.');
+        alert('Config JSON copied to clipboard! (' + favorites.length + ' favorites \u2192 ' + flatConfigs.length + ' config' + (flatConfigs.length !== 1 ? 's' : '') + ')\n\nPaste into the Sampler Grid node\'s configs_json input.');
     }).catch(function() {
         // Fallback: show in a prompt dialog
         prompt('Copy this Config JSON:', jsonStr);
     });
 
-    console.log('[Export] Exported ' + favorites.length + ' favorites as ' + configArrays.length + ' config arrays');
+    console.log('[Export] Exported ' + favorites.length + ' favorites as ' + flatConfigs.length + ' configs');
 }
 
 // Export favorited images to benchmark_favorites folder
