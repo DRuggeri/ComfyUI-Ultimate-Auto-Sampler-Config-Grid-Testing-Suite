@@ -348,8 +348,9 @@ function showSessionLandingIfEmpty() {
  * the Config Builder's lora_config widget to regenerate the same images
  * with different settings (size, steps, etc.).
  *
- * Groups favorites by unique (model, lora, prompt, sampler, scheduler)
- * combos into config arrays, deduplicating where possible.
+ * Groups favorites by unique (model, lora, prompt) combos into config
+ * arrays. Reads ALL fields from the manifest items — nothing is defaulted
+ * unless the item genuinely doesn't have that field.
  */
 function exportFavoritesAsConfigJSON() {
     if (!activeData || activeData.length === 0) {
@@ -363,20 +364,23 @@ function exportFavoritesAsConfigJSON() {
         return;
     }
 
-    // Group favorites by unique config combination
-    // Key: model|lora|positive|negative  →  collect unique samplers, schedulers, etc.
+    // Collect unique values into Sets per config-array-defining group.
+    // Group key: model + model_type + lora + positive + negative
+    // Within each group, collect unique samplers, schedulers, steps, cfg, etc.
     var groups = {};
     for (var i = 0; i < favorites.length; i++) {
         var d = favorites[i];
         var model = d.model || meta.model || 'None';
+        var modelType = d.model_type || 'checkpoint';
         var lora = d.lora || 'None';
-        var positive = d.positive || meta.positive || '';
-        var negative = d.negative || meta.negative || '';
-        var key = model + '||' + lora + '||' + positive + '||' + negative;
+        var positive = d.config_positive || d.positive || meta.positive || '';
+        var negative = d.config_negative || d.negative || meta.negative || '';
+        var key = model + '||' + modelType + '||' + lora + '||' + positive + '||' + negative;
 
         if (!groups[key]) {
             groups[key] = {
                 model: model,
+                model_type: modelType,
                 lora: lora,
                 positive: positive,
                 negative: negative,
@@ -385,7 +389,14 @@ function exportFavoritesAsConfigJSON() {
                 steps: {},
                 cfgs: {},
                 denoises: {},
-                seeds: []
+                seeds: [],
+                vaes: {},
+                text_encoders: {},
+                clip_types: {},
+                attention_modes: {},
+                resolutions: {},
+                // Grab advanced settings from first item in group (usually same for all)
+                _first: d
             };
         }
         var g = groups[key];
@@ -395,6 +406,16 @@ function exportFavoritesAsConfigJSON() {
         g.cfgs[String(d.cfg || 7)] = true;
         g.denoises[String(d.denoise || 1)] = true;
         if (d.seed) g.seeds.push(d.seed);
+        if (d.vae && d.vae !== 'Default') g.vaes[d.vae] = true;
+        if (d.clip_type) g.clip_types[d.clip_type] = true;
+        if (d.attention_mode && d.attention_mode !== 'default') g.attention_modes[d.attention_mode] = true;
+        if (d.width && d.height) g.resolutions[d.width + 'x' + d.height] = true;
+        // Text encoders (may be an array or comma-separated string)
+        var te = d.text_encoders;
+        if (te) {
+            if (Array.isArray(te)) { te.forEach(function(t) { if (t) g.text_encoders[t] = true; }); }
+            else if (typeof te === 'string' && te !== 'None') { g.text_encoders[te] = true; }
+        }
     }
 
     // Build config arrays from groups
@@ -402,6 +423,38 @@ function exportFavoritesAsConfigJSON() {
     var groupKeys = Object.keys(groups);
     for (var gi = 0; gi < groupKeys.length; gi++) {
         var g = groups[groupKeys[gi]];
+        var f = g._first; // First item for advanced settings
+
+        // Parse LoRAs with strengths preserved
+        var loraList;
+        if (g.lora === 'None') {
+            loraList = ['None'];
+        } else {
+            loraList = g.lora.split(' + ').map(function(l) { return l.trim(); });
+        }
+
+        // VAEs: use collected unique values, default to 'None' if none specified
+        var vaeKeys = Object.keys(g.vaes);
+        var vaeList = vaeKeys.length > 0 ? vaeKeys : ['None'];
+
+        // Text encoders
+        var teKeys = Object.keys(g.text_encoders);
+
+        // Clip type: use most common (first found)
+        var clipKeys = Object.keys(g.clip_types);
+        var clipType = clipKeys.length > 0 ? clipKeys[0] : (f.clip_type || 'stable_diffusion');
+
+        // Attention modes
+        var attKeys = Object.keys(g.attention_modes);
+        var attModes = attKeys.length > 0 ? attKeys : ['default'];
+
+        // Resolutions as [{width, height}] objects
+        var resKeys = Object.keys(g.resolutions);
+        var resolutions = resKeys.map(function(r) {
+            var parts = r.split('x');
+            return { width: parseInt(parts[0]), height: parseInt(parts[1]) };
+        });
+
         var configArray = {
             name: 'Favorites ' + (gi + 1),
             samplers: Object.keys(g.samplers),
@@ -410,11 +463,11 @@ function exportFavoritesAsConfigJSON() {
             cfg: Object.keys(g.cfgs).join(', '),
             seed_behavior: 'fixed',
             models: [g.model],
-            vaes: ['None'],
-            text_encoders: [],
-            clip_type: 'stable_diffusion',
-            gguf_options: {},
-            loras: g.lora === 'None' ? ['None'] : g.lora.split(' + ').map(function(l) { return l.trim(); }),
+            vaes: vaeList,
+            text_encoders: teKeys,
+            clip_type: clipType,
+            gguf_options: f.gguf_options || {},
+            loras: loraList,
             lora_omit_triggers: [],
             lora_triggerwords_append_settings: {},
             lora_bypass_states: {},
@@ -426,25 +479,24 @@ function exportFavoritesAsConfigJSON() {
             positive_prompt_groups: g.positive ? [[g.positive]] : [],
             negative_prompt: g.negative,
             use_custom_prompts: true,
-            model_prompt_prefix: '',
-            model_prompt_suffix: '',
-            attention_modes: ['default'],
-            resolutions: [],
-            model_sampling_override: 'none',
-            model_sampling_shift: '1.73',
-            model_sampling_flux_max_shift: '1.15',
-            model_sampling_flux_base_shift: '0.5',
-            use_advanced_sampling: false,
-            advanced_guider: 'cfg_guider',
-            advanced_scheduler: 'basic',
-            use_flux_guidance: false,
-            flux_guidance_value: '3.5'
+            model_prompt_prefix: f.model_prompt_prefix || '',
+            model_prompt_suffix: f.model_prompt_suffix || '',
+            attention_modes: attModes,
+            resolutions: resolutions,
+            model_sampling_override: f.model_sampling_override || 'none',
+            model_sampling_shift: String(f.model_sampling_shift || '1.73'),
+            model_sampling_flux_max_shift: String(f.model_sampling_flux_max_shift || '1.15'),
+            model_sampling_flux_base_shift: String(f.model_sampling_flux_base_shift || '0.5'),
+            use_advanced_sampling: f.use_advanced_sampling || false,
+            advanced_guider: f.advanced_guider || 'cfg_guider',
+            advanced_scheduler: f.advanced_scheduler || 'basic',
+            use_flux_guidance: f.use_flux_guidance || false,
+            flux_guidance_value: String(f.flux_guidance_value || '3.5')
         };
 
-        // Denoise: use comma-separated list for multi-value
-        var denoiseKeys = Object.keys(g.denoises);
-        if (denoiseKeys.length === 1 && denoiseKeys[0] === '1') {
-            // Skip — default denoise doesn't need explicit setting
+        // Model type handling (checkpoint, gguf, diffusion_model)
+        if (g.model_type && g.model_type !== 'checkpoint') {
+            configArray.models = [{ path: g.model, type: g.model_type }];
         }
 
         configArrays.push(configArray);
@@ -468,7 +520,7 @@ function exportFavoritesAsConfigJSON() {
     // Copy to clipboard
     var jsonStr = JSON.stringify(configOutput, null, 2);
     navigator.clipboard.writeText(jsonStr).then(function() {
-        alert('Config JSON copied to clipboard! (' + favorites.length + ' favorites → ' + configArrays.length + ' config array' + (configArrays.length !== 1 ? 's' : '') + ')\n\nPaste into the Config Builder\'s lora_config widget to use.');
+        alert('Config JSON copied to clipboard! (' + favorites.length + ' favorites \u2192 ' + configArrays.length + ' config array' + (configArrays.length !== 1 ? 's' : '') + ')\n\nPaste into the Config Builder\'s lora_config widget to use.');
     }).catch(function() {
         // Fallback: show in a prompt dialog
         prompt('Copy this Config JSON:', jsonStr);
