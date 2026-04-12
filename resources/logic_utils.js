@@ -444,6 +444,21 @@ function exportFavoritesAsConfigJSON() {
             attention_mode: d.attention_mode || 'default'
         };
 
+        // Model type: only set if genuinely non-checkpoint (gguf/diffusion_model).
+        // The manifest may have incorrect model_type from a Builder UI bug where
+        // a single config array's model_type applied to all models in the array.
+        // Safety check: .gguf extension = gguf, everything else defaults to checkpoint.
+        var exportModelType = d.model_type || 'checkpoint';
+        if (exportModelType !== 'checkpoint') {
+            var modelPath = (d.model || '').toLowerCase();
+            if (modelPath.endsWith('.gguf')) {
+                flatConfig.model_type = 'gguf';
+            } else if (exportModelType === 'diffusion_model' && !modelPath.endsWith('.safetensors')) {
+                flatConfig.model_type = 'diffusion_model';
+            }
+            // else: don't set model_type — defaults to checkpoint in expand_configs
+        }
+
         // Optional fields — only include if present on the item
         if (d.text_encoders) flatConfig.text_encoders = d.text_encoders;
         if (d.gguf_options) flatConfig.gguf_options = d.gguf_options;
