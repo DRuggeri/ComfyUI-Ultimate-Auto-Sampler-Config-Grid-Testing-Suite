@@ -5,6 +5,7 @@ Python reads everything from that widget
 """
 
 import os
+import sys
 import json
 import time
 import folder_paths
@@ -13,6 +14,24 @@ import server
 from aiohttp import web
 import hashlib
 from .network_utils import civitai_fetch_by_hash
+
+
+def safe_print(*args, **kwargs):
+    """
+    Windows-safe print that survives colorama/stdout corruption.
+    Falls back to raw sys.__stdout__ if the wrapped stdout is broken,
+    and silently drops the message if even that fails. This prevents
+    OSError [Errno 22] from Windows console bugs crashing node execution.
+    """
+    try:
+        print(*args, **kwargs)
+    except (OSError, ValueError):
+        try:
+            msg = " ".join(str(a) for a in args) + kwargs.get("end", "\n")
+            sys.__stdout__.write(msg)
+            sys.__stdout__.flush()
+        except Exception:
+            pass  # Drop silently — don't crash the node over a log line
 
 
 
@@ -463,11 +482,14 @@ class UltimateConfigBuilder:
     ):
         """
         Generate configuration.
-        
+
         NOTE: All widget parameters are IGNORED!
         The actual data comes from the lora_config widget which contains everything.
         """
-        
+        # Use Windows-safe print for all logging in this function. Prevents
+        # OSError [Errno 22] from colorama/stdout corruption crashing the node.
+        print = safe_print
+
         print(f"\n{'='*80}")
         print(f"[ConfigBuilder] 🎯 Generating Configuration")
         print(f"{'='*80}")
