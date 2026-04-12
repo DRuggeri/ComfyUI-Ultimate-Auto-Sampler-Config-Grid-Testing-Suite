@@ -46,18 +46,17 @@ def merge_manifest_user_changes(manifest_path, existing_data):
                 merged_count += 1
                 
                 # Preserve user-modified fields from the version on disk
-                if "favorite" in current_item:
-                    item["favorite"] = current_item["favorite"]
-                    if current_item["favorite"]:
-                        favorites_preserved += 1
-                        
-                if "rejected" in current_item:
-                    item["rejected"] = current_item["rejected"]
-                    if current_item["rejected"]:
-                        rejected_preserved += 1
-                        
-                if "notes" in current_item:
-                    item["notes"] = current_item["notes"]
+                # Field names: "favorited" (not "favorite"), "rejected", "note" (not "notes")
+                if current_item.get("favorited"):
+                    item["favorited"] = True
+                    favorites_preserved += 1
+
+                if current_item.get("rejected"):
+                    item["rejected"] = True
+                    rejected_preserved += 1
+
+                if current_item.get("note"):
+                    item["note"] = current_item["note"]
                     notes_preserved += 1
             # else: This is a new item, no merge needed
         
