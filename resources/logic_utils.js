@@ -343,6 +343,140 @@ function showSessionLandingIfEmpty() {
     }
 }
 
+/**
+ * Export favorited items as a Config Builder JSON — ready to paste into
+ * the Config Builder's lora_config widget to regenerate the same images
+ * with different settings (size, steps, etc.).
+ *
+ * Groups favorites by unique (model, lora, prompt, sampler, scheduler)
+ * combos into config arrays, deduplicating where possible.
+ */
+function exportFavoritesAsConfigJSON() {
+    if (!activeData || activeData.length === 0) {
+        alert('No data loaded');
+        return;
+    }
+
+    var favorites = activeData.filter(function(d) { return d.favorited; });
+    if (favorites.length === 0) {
+        alert('No favorited items to export');
+        return;
+    }
+
+    // Group favorites by unique config combination
+    // Key: model|lora|positive|negative  →  collect unique samplers, schedulers, etc.
+    var groups = {};
+    for (var i = 0; i < favorites.length; i++) {
+        var d = favorites[i];
+        var model = d.model || meta.model || 'None';
+        var lora = d.lora || 'None';
+        var positive = d.positive || meta.positive || '';
+        var negative = d.negative || meta.negative || '';
+        var key = model + '||' + lora + '||' + positive + '||' + negative;
+
+        if (!groups[key]) {
+            groups[key] = {
+                model: model,
+                lora: lora,
+                positive: positive,
+                negative: negative,
+                samplers: {},
+                schedulers: {},
+                steps: {},
+                cfgs: {},
+                denoises: {},
+                seeds: []
+            };
+        }
+        var g = groups[key];
+        g.samplers[d.sampler || 'euler'] = true;
+        g.schedulers[d.scheduler || 'normal'] = true;
+        g.steps[String(d.steps || 20)] = true;
+        g.cfgs[String(d.cfg || 7)] = true;
+        g.denoises[String(d.denoise || 1)] = true;
+        if (d.seed) g.seeds.push(d.seed);
+    }
+
+    // Build config arrays from groups
+    var configArrays = [];
+    var groupKeys = Object.keys(groups);
+    for (var gi = 0; gi < groupKeys.length; gi++) {
+        var g = groups[groupKeys[gi]];
+        var configArray = {
+            name: 'Favorites ' + (gi + 1),
+            samplers: Object.keys(g.samplers),
+            schedulers: Object.keys(g.schedulers),
+            steps: Object.keys(g.steps).join(', '),
+            cfg: Object.keys(g.cfgs).join(', '),
+            seed_behavior: 'fixed',
+            models: [g.model],
+            vaes: ['None'],
+            text_encoders: [],
+            clip_type: 'stable_diffusion',
+            gguf_options: {},
+            loras: g.lora === 'None' ? ['None'] : g.lora.split(' + ').map(function(l) { return l.trim(); }),
+            lora_omit_triggers: [],
+            lora_triggerwords_append_settings: {},
+            lora_bypass_states: {},
+            lora_strength_lock: {},
+            model_bypass_states: {},
+            vae_bypass_states: {},
+            te_bypass_states: {},
+            combine: g.lora.includes(' + '),
+            positive_prompt_groups: g.positive ? [[g.positive]] : [],
+            negative_prompt: g.negative,
+            use_custom_prompts: true,
+            model_prompt_prefix: '',
+            model_prompt_suffix: '',
+            attention_modes: ['default'],
+            resolutions: [],
+            model_sampling_override: 'none',
+            model_sampling_shift: '1.73',
+            model_sampling_flux_max_shift: '1.15',
+            model_sampling_flux_base_shift: '0.5',
+            use_advanced_sampling: false,
+            advanced_guider: 'cfg_guider',
+            advanced_scheduler: 'basic',
+            use_flux_guidance: false,
+            flux_guidance_value: '3.5'
+        };
+
+        // Denoise: use comma-separated list for multi-value
+        var denoiseKeys = Object.keys(g.denoises);
+        if (denoiseKeys.length === 1 && denoiseKeys[0] === '1') {
+            // Skip — default denoise doesn't need explicit setting
+        }
+
+        configArrays.push(configArray);
+    }
+
+    // Build the full config object
+    var sessionName = document.getElementById('session-input')?.value || 'favorites_rerun';
+    var configOutput = {
+        session_name: sessionName + '_rerun',
+        config_name: 'favorites_export',
+        auto_save: false,
+        include_none: false,
+        label_mode: false,
+        global_positive_groups: [],
+        global_negative: '',
+        distribution_enabled: false,
+        worker_urls: [],
+        config_arrays: configArrays
+    };
+
+    // Copy to clipboard
+    var jsonStr = JSON.stringify(configOutput, null, 2);
+    navigator.clipboard.writeText(jsonStr).then(function() {
+        alert('Config JSON copied to clipboard! (' + favorites.length + ' favorites → ' + configArrays.length + ' config array' + (configArrays.length !== 1 ? 's' : '') + ')\n\nPaste into the Config Builder\'s lora_config widget to use.');
+    }).catch(function() {
+        // Fallback: show in a prompt dialog
+        prompt('Copy this Config JSON:', jsonStr);
+    });
+
+    console.log('[Export] Exported ' + favorites.length + ' favorites as ' + configArrays.length + ' config arrays');
+}
+
 // Export favorited images to benchmark_favorites folder
 async function exportFavorites() {
     const statusEl = document.getElementById('export-status');

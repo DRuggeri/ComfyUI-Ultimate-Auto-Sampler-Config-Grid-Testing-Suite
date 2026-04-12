@@ -231,6 +231,16 @@
             <!-- Section 4: Export Favorites -->
             <div class="cog-panel-section">
                 <div class="cog-panel-section-title">EXPORT FAVORITES</div>
+
+                <button class="session-action-btn"
+                    style="background: #6366f1; width: 100%; font-size: 11px; padding: 10px; margin-bottom: 8px;"
+                    onclick="exportFavoritesAsConfigJSON()" title="Generate a Config Builder JSON from favorited items — paste into the Builder to re-run with different settings">
+                    📋 EXPORT FAVORITES AS CONFIG JSON
+                </button>
+                <div style="font-size: 9px; color: #666; margin-bottom: 10px;">
+                    Copies a Config Builder JSON to clipboard with all favorited items' settings (models, LoRAs, prompts, samplers, etc.). Paste into the Config Builder's lora_config widget to re-run with different sizes/settings.
+                </div>
+
                 <button class="session-action-btn"
                     style="background: #00d1b2; width: 100%; font-size: 11px; padding: 10px;"
                     onclick="exportFavorites()" title="Export favorited images to benchmark_favorites folder">
