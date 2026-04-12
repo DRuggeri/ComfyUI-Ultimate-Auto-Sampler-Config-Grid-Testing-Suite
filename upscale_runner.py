@@ -253,6 +253,52 @@ def _run_upscale_thread(job, target_items, upscale_config, meta, manifest_data, 
                     show_hires = mode in ("hires_only", "model_then_hires")
                     show_model = mode in ("model_only", "model_then_hires")
 
+                    # --- SeedVR2 upscale mode ---
+                    if mode == "seedvr2":
+                        from .image_generation import seedvr2_upscale
+                        sv_config = ucfg.get("seedvr2", {})
+                        # Convert source PIL image directly (no latent decoding needed)
+                        pil_input = PILImage.open(os.path.join(images_dir, filename))
+                        result_pil, up_w, up_h, sv_duration = seedvr2_upscale(pil_input, sv_config)
+                        total_upscale_duration += sv_duration
+
+                        is_last_step = step_idx == len(expanded_steps) - 1
+                        if is_last_step:
+                            # Save the upscaled image
+                            upscale_id = int(time.time() * 100000) + up_random.randint(0, 1000)
+                            upscaled_filename = f"img_{upscale_id}_upscaled.webp"
+                            result_pil.save(os.path.join(images_dir, upscaled_filename), format="WEBP", quality=95)
+
+                            # Create manifest entry
+                            upscaled_meta = {
+                                k: v for k, v in item.items()
+                                if k not in ("id", "gen_index", "file", "filename", "upscaled", "width", "height", "duration",
+                                             "upscale_source", "upscale_pipeline", "upscale_mode",
+                                             "upscale_ratio", "upscale_denoise", "upscale_model")
+                            }
+                            upscaled_meta.update({
+                                "id": upscale_id,
+                                "gen_index": len(manifest_data["items"]),
+                                "file": f"/view?filename={upscaled_filename}&type=output&subfolder=benchmarks/{session_name}/images",
+                                "filename": upscaled_filename,
+                                "width": up_w, "height": up_h,
+                                "duration": round(sv_duration, 2),
+                                "upscaled": True,
+                                "upscale_source": "dashboard",
+                                "upscale_pipeline": pipeline_name,
+                                "upscale_mode": "seedvr2",
+                                "upscale_model": sv_config.get("dit_model", ""),
+                            })
+                            manifest_data["items"].append(upscaled_meta)
+                            upscale_combo_idx += 1
+                        else:
+                            # For chained steps, the next step gets the PIL result
+                            # Re-read from saved temp or keep in memory
+                            pil_input = result_pil
+                            pipe_w_current = up_w
+                            pipe_h_current = up_h
+                        continue  # Skip the normal combo loop
+
                     raw_ratios = str(ucfg.get("upscale_ratios", "1.5"))
                     ratios = [float(r.strip()) for r in raw_ratios.split(",") if r.strip()] or [1.5]
                     raw_denoise = str(ucfg.get("hires_denoise", "0.3"))
