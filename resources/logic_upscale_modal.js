@@ -14,6 +14,32 @@ var upscaleModalState = {
     availableModels: [],  // Upscale model list from server
 };
 
+// Default SeedVR2 options — matches SeedVR2 node defaults
+function _defaultSeedVR2Options() {
+    return {
+        dit_model: "seedvr2_ema_3b_fp8_e4m3fn.safetensors",
+        resolution: 1080,
+        max_resolution: 0,
+        seed: 42,
+        color_correction: "lab",
+        batch_size: 1,
+        input_noise_scale: 0.0,
+        latent_noise_scale: 0.0,
+        blocks_to_swap: 0,
+        attention_mode: "sdpa",
+        offload_device: "cpu",
+        cache_model: false,
+        encode_tiled: false,
+        encode_tile_size: 1024,
+        encode_tile_overlap: 128,
+        decode_tiled: false,
+        decode_tile_size: 1024,
+        decode_tile_overlap: 128,
+        vae_offload_device: "none",
+        vae_cache_model: false
+    };
+}
+
 // Default upscale step config — ALL fields matching the Builder UI's createDefaultStep()
 function _defaultUpscaleStep() {
     return {
@@ -36,7 +62,8 @@ function _defaultUpscaleStep() {
         hires_tile_height: 512,
         hires_mask_blur: 8,
         hires_tile_padding: 32,
-        hires_force_uniform_tiles: false
+        hires_force_uniform_tiles: false,
+        seedvr2: _defaultSeedVR2Options()
     };
 }
 
@@ -61,6 +88,7 @@ function _ensureUpscaleStepFields(step) {
     if (step.hires_mask_blur === undefined) step.hires_mask_blur = 8;
     if (!step.hires_tile_padding) step.hires_tile_padding = 32;
     if (step.hires_force_uniform_tiles === undefined) step.hires_force_uniform_tiles = false;
+    if (!step.seedvr2) step.seedvr2 = _defaultSeedVR2Options();
 }
 
 // Default config
@@ -547,6 +575,7 @@ function _renderStep(pipeBody, config, pipeline, ucfg, stepIdx, modelList, callb
         { value: 'hires_only', label: 'HiRes Fix Only' },
         { value: 'model_only', label: 'Model Upscale Only' },
         { value: 'model_then_hires', label: 'Model + HiRes Fix' },
+        { value: 'seedvr2', label: 'SeedVR2 Upscale' },
     ], ucfg.mode, function(v) {
         ucfg.mode = v;
         callbacks.onUpdate();
@@ -563,6 +592,7 @@ function _renderStep(pipeBody, config, pipeline, ucfg, stepIdx, modelList, callb
 
     var showHires = ucfg.mode === 'hires_only' || ucfg.mode === 'model_then_hires';
     var showModel = ucfg.mode === 'model_only' || ucfg.mode === 'model_then_hires';
+    var showSeedVR2 = ucfg.mode === 'seedvr2';
 
     // --- HiRes fields ---
     if (showHires) {
@@ -719,6 +749,49 @@ function _renderStep(pipeBody, config, pipeline, ucfg, stepIdx, modelList, callb
         grid.appendChild(modelsWrap);
     }
 
+    // --- SeedVR2 fields ---
+    if (showSeedVR2) {
+        if (!ucfg.seedvr2) ucfg.seedvr2 = _defaultSeedVR2Options();
+        var sv = ucfg.seedvr2;
+
+        var ditModels = [
+            'seedvr2_ema_3b_fp8_e4m3fn.safetensors', 'seedvr2_ema_3b_fp16.safetensors',
+            'seedvr2_ema_3b-Q4_K_M.gguf', 'seedvr2_ema_3b-Q8_0.gguf',
+            'seedvr2_ema_7b_fp8_e4m3fn_mixed_block35_fp16.safetensors', 'seedvr2_ema_7b_fp16.safetensors',
+            'seedvr2_ema_7b-Q4_K_M.gguf', 'seedvr2_ema_7b_sharp_fp8_e4m3fn_mixed_block35_fp16.safetensors',
+            'seedvr2_ema_7b_sharp_fp16.safetensors', 'seedvr2_ema_7b_sharp-Q4_K_M.gguf'
+        ];
+        grid.appendChild(_makeSelect('DiT Model:', ditModels.map(function(m) {
+            return { value: m, label: m.replace('.safetensors', '').replace('.gguf', ' (GGUF)') };
+        }), sv.dit_model, function(v) { sv.dit_model = v; callbacks.onUpdate(); }));
+
+        grid.appendChild(_makeNumber('Resolution:', sv.resolution || 1080, 16, 16384, 2, function(v) { sv.resolution = v; callbacks.onUpdate(); }));
+        grid.appendChild(_makeNumber('Max Res (0=none):', sv.max_resolution || 0, 0, 16384, 2, function(v) { sv.max_resolution = v; callbacks.onUpdate(); }));
+        grid.appendChild(_makeNumber('Seed:', sv.seed || 42, 0, 4294967295, 1, function(v) { sv.seed = v; callbacks.onUpdate(); }));
+
+        grid.appendChild(_makeSelect('Color Correct:', ['lab', 'wavelet', 'wavelet_adaptive', 'hsv', 'adain', 'none'],
+            sv.color_correction || 'lab', function(v) { sv.color_correction = v; callbacks.onUpdate(); }));
+
+        grid.appendChild(_makeNumber('Input Noise:', sv.input_noise_scale || 0, 0, 1, 0.001, function(v) { sv.input_noise_scale = v; callbacks.onUpdate(); }));
+        grid.appendChild(_makeNumber('Latent Noise:', sv.latent_noise_scale || 0, 0, 1, 0.001, function(v) { sv.latent_noise_scale = v; callbacks.onUpdate(); }));
+        grid.appendChild(_makeNumber('Blocks to Swap:', sv.blocks_to_swap || 0, 0, 36, 1, function(v) { sv.blocks_to_swap = v; callbacks.onUpdate(); }));
+
+        grid.appendChild(_makeSelect('Attention:', ['sdpa', 'flash_attn_2', 'flash_attn_3', 'sageattn_2', 'sageattn_3'],
+            sv.attention_mode || 'sdpa', function(v) { sv.attention_mode = v; callbacks.onUpdate(); }));
+
+        grid.appendChild(_makeSelect('DiT Offload:', ['none', 'cpu'], sv.offload_device || 'cpu', function(v) { sv.offload_device = v; callbacks.onUpdate(); }));
+        grid.appendChild(_makeCheckbox('Encode Tiled', sv.encode_tiled || false, function(v) { sv.encode_tiled = v; callbacks.onUpdate(); reRender(); }));
+        if (sv.encode_tiled) {
+            grid.appendChild(_makeNumber('Enc Tile Size:', sv.encode_tile_size || 1024, 64, 4096, 32, function(v) { sv.encode_tile_size = v; callbacks.onUpdate(); }));
+            grid.appendChild(_makeNumber('Enc Overlap:', sv.encode_tile_overlap || 128, 0, 1024, 32, function(v) { sv.encode_tile_overlap = v; callbacks.onUpdate(); }));
+        }
+        grid.appendChild(_makeCheckbox('Decode Tiled', sv.decode_tiled || false, function(v) { sv.decode_tiled = v; callbacks.onUpdate(); reRender(); }));
+        if (sv.decode_tiled) {
+            grid.appendChild(_makeNumber('Dec Tile Size:', sv.decode_tile_size || 1024, 64, 4096, 32, function(v) { sv.decode_tile_size = v; callbacks.onUpdate(); }));
+            grid.appendChild(_makeNumber('Dec Overlap:', sv.decode_tile_overlap || 128, 0, 1024, 32, function(v) { sv.decode_tile_overlap = v; callbacks.onUpdate(); }));
+        }
+    }
+
     card.appendChild(grid);
 
     // Iteration count display
@@ -728,7 +801,8 @@ function _renderStep(pipeBody, config, pipeline, ucfg, stepIdx, modelList, callb
     var denoises = (ucfg.hires_denoise || '0.3').split(',').map(function(s) { return s.trim(); }).filter(function(s) { return s; }).length;
     var models = Math.max(1, (ucfg.upscale_models || []).length);
     var combos = 1;
-    if (showHires) combos *= ratios * denoises;
+    if (showSeedVR2) combos = 1;
+    else if (showHires) combos *= ratios * denoises;
     if (showModel) combos *= models;
     var repeatCount = ucfg.repeat || 1;
     countDisplay.textContent = combos + ' upscale combo(s) per image' + (repeatCount > 1 ? ' \u00D7 ' + repeatCount + ' repeats' : '');

@@ -1615,6 +1615,61 @@ def run_generation_loop(
                             show_hires = mode in ("hires_only", "model_then_hires")
                             show_model = mode in ("model_only", "model_then_hires")
 
+                            # --- SeedVR2 upscale mode ---
+                            if mode == "seedvr2":
+                                from .image_generation import seedvr2_upscale
+                                from PIL import Image as PILImage
+                                sv_config = ucfg.get("seedvr2", {})
+                                # Decode current latent to PIL for SeedVR2 input
+                                decoded = decode_latent_with_vae(pipe_latent, loaded_vae)
+                                pil_img = PILImage.fromarray((decoded[0].cpu().numpy() * 255).clip(0, 255).astype("uint8"))
+                                result_pil, up_w, up_h, sv_duration = seedvr2_upscale(pil_img, sv_config)
+                                total_upscale_duration += sv_duration
+                                is_last_step = step_idx == len(expanded_steps) - 1
+                                is_final_output = is_last_step
+                                if is_final_output:
+                                    # Save the upscaled image and update manifest
+                                    upscale_id = int(time.time() * 100000) + random.randint(0, 1000)
+                                    upscaled_filename = f"img_{upscale_id}.webp"
+                                    filepath = os.path.join(paths["images"], upscaled_filename)
+                                    result_pil.save(filepath, quality=80)
+                                    upscaled_meta = dict(meta)
+                                    upscaled_meta.update({
+                                        "id": upscale_id,
+                                        "gen_index": len(existing_data["items"]),
+                                        "file": f"/view?filename={upscaled_filename}&type=output&subfolder=benchmarks/{session_name}/images",
+                                        "filename": upscaled_filename,
+                                        "width": up_w, "height": up_h,
+                                        "duration": sv_duration,
+                                        "upscaled": True,
+                                        "upscale_source": "inline",
+                                        "upscale_pipeline": pipeline_name,
+                                        "upscale_mode": "seedvr2",
+                                        "upscale_model": sv_config.get("dit_model", ""),
+                                    })
+                                    existing_data["items"].append(upscaled_meta)
+                                    save_manifest(paths["manifest"], existing_data)
+                                    if PromptServer is not None:
+                                        try:
+                                            PromptServer.instance.send_sync("ultimate_grid.update_data", {
+                                                "session_name": session_name,
+                                                "new_items": [upscaled_meta]
+                                            })
+                                        except Exception:
+                                            pass
+                                    upscale_combo_idx += 1
+                                else:
+                                    # Re-encode for next step in chain
+                                    import torch as seedvr_torch
+                                    import numpy as seedvr_np
+                                    result_np = seedvr_np.array(result_pil.convert("RGB")).astype(seedvr_np.float32) / 255.0
+                                    result_tensor = seedvr_torch.from_numpy(result_np).unsqueeze(0)
+                                    pipe_latent = loaded_vae.encode(result_tensor[:, :, :, :3].movedim(-1, 1))
+                                    pipe_latent = {"samples": pipe_latent}
+                                    pipe_w_current = up_w
+                                    pipe_h_current = up_h
+                                continue  # Skip the normal combo loop for this step
+
                             # Parse multi-value fields
                             raw_ratios = str(ucfg.get("upscale_ratios", "1.5"))
                             ratios = [float(r.strip()) for r in raw_ratios.split(",") if r.strip()] or [1.5]

@@ -4721,6 +4721,32 @@ export function renderConfigPromptsSection(node, div, configArray, arrayIdx) {
 // UPSCALING SETTINGS (Session-level, pipeline-based with sequential steps)
 // ============================================================================
 
+// Default SeedVR2 options — matches SeedVR2 node defaults
+function createDefaultSeedVR2Options() {
+    return {
+        dit_model: "seedvr2_ema_3b_fp8_e4m3fn.safetensors",
+        resolution: 1080,
+        max_resolution: 0,
+        seed: 42,
+        color_correction: "lab",
+        batch_size: 1,
+        input_noise_scale: 0.0,
+        latent_noise_scale: 0.0,
+        blocks_to_swap: 0,
+        attention_mode: "sdpa",
+        offload_device: "cpu",
+        cache_model: false,
+        encode_tiled: false,
+        encode_tile_size: 1024,
+        encode_tile_overlap: 128,
+        decode_tiled: false,
+        decode_tile_size: 1024,
+        decode_tile_overlap: 128,
+        vae_offload_device: "none",
+        vae_cache_model: false
+    };
+}
+
 // Helper: create a default upscale step with all fields
 function createDefaultStep() {
     return {
@@ -4743,7 +4769,8 @@ function createDefaultStep() {
         hires_tile_height: 512,
         hires_mask_blur: 8,
         hires_tile_padding: 32,
-        hires_force_uniform_tiles: false
+        hires_force_uniform_tiles: false,
+        seedvr2: createDefaultSeedVR2Options()
     };
 }
 
@@ -4762,6 +4789,7 @@ function ensureStepFields(step) {
     if (step.hires_mask_blur === undefined) step.hires_mask_blur = 8;
     if (!step.hires_tile_padding) step.hires_tile_padding = 32;
     if (step.hires_force_uniform_tiles === undefined) step.hires_force_uniform_tiles = false;
+    if (!step.seedvr2) step.seedvr2 = createDefaultSeedVR2Options();
 }
 
 export function renderUpscalingSection(node, container, modelLists) {
@@ -5220,7 +5248,8 @@ export function renderUpscalingSection(node, container, modelLists) {
                 modeSelect.innerHTML = `
                     <option value="hires_only" ${ucfg.mode === "hires_only" ? 'selected' : ''}>HiRes Fix Only</option>
                     <option value="model_only" ${ucfg.mode === "model_only" ? 'selected' : ''}>Model Upscale Only</option>
-                    <option value="model_then_hires" ${ucfg.mode === "model_then_hires" ? 'selected' : ''}>Model Upscale → HiRes Fix</option>
+                    <option value="model_then_hires" ${ucfg.mode === "model_then_hires" ? 'selected' : ''}>Model Upscale \u2192 HiRes Fix</option>
+                    <option value="seedvr2" ${ucfg.mode === "seedvr2" ? 'selected' : ''}>SeedVR2 Upscale</option>
                 `;
                 modeSelect.onchange = () => {
                     ucfg.mode = modeSelect.value;
@@ -5241,6 +5270,7 @@ export function renderUpscalingSection(node, container, modelLists) {
 
                 const showHires = ucfg.mode === "hires_only" || ucfg.mode === "model_then_hires";
                 const showModel = ucfg.mode === "model_only" || ucfg.mode === "model_then_hires";
+                const showSeedVR2 = ucfg.mode === "seedvr2";
 
                 // --- HiRes fields (multi-value: ratios, denoise) ---
                 if (showHires) {
@@ -5448,6 +5478,198 @@ export function renderUpscalingSection(node, container, modelLists) {
                     grid.appendChild(modelsContainer);
                 }
 
+                // --- SeedVR2 fields ---
+                if (showSeedVR2) {
+                    if (!ucfg.seedvr2) ucfg.seedvr2 = createDefaultSeedVR2Options();
+                    const sv = ucfg.seedvr2;
+
+                    // DiT Model dropdown
+                    const ditModels = [
+                        "seedvr2_ema_3b_fp8_e4m3fn.safetensors",
+                        "seedvr2_ema_3b_fp16.safetensors",
+                        "seedvr2_ema_3b-Q4_K_M.gguf",
+                        "seedvr2_ema_3b-Q8_0.gguf",
+                        "seedvr2_ema_7b_fp8_e4m3fn_mixed_block35_fp16.safetensors",
+                        "seedvr2_ema_7b_fp16.safetensors",
+                        "seedvr2_ema_7b-Q4_K_M.gguf",
+                        "seedvr2_ema_7b_sharp_fp8_e4m3fn_mixed_block35_fp16.safetensors",
+                        "seedvr2_ema_7b_sharp_fp16.safetensors",
+                        "seedvr2_ema_7b_sharp-Q4_K_M.gguf"
+                    ];
+                    const ditSelect = document.createElement("select");
+                    ditSelect.className = "cb-select";
+                    ditModels.forEach(m => {
+                        const opt = document.createElement("option");
+                        opt.value = m; opt.textContent = m.replace(".safetensors", "").replace(".gguf", " (GGUF)");
+                        if (sv.dit_model === m) opt.selected = true;
+                        ditSelect.appendChild(opt);
+                    });
+                    ditSelect.onchange = () => { sv.dit_model = ditSelect.value; node.saveState(); };
+                    grid.appendChild(createInputGroup("DiT Model", ditSelect));
+
+                    // Resolution
+                    const resInput = document.createElement("input");
+                    resInput.type = "number"; resInput.className = "cb-input";
+                    resInput.value = sv.resolution || 1080; resInput.min = 16; resInput.max = 16384; resInput.step = 2;
+                    resInput.onchange = () => { sv.resolution = parseInt(resInput.value) || 1080; node.saveState(); };
+                    grid.appendChild(createInputGroup("Target Resolution", resInput));
+
+                    // Max Resolution
+                    const maxResInput = document.createElement("input");
+                    maxResInput.type = "number"; maxResInput.className = "cb-input";
+                    maxResInput.value = sv.max_resolution || 0; maxResInput.min = 0; maxResInput.max = 16384; maxResInput.step = 2;
+                    maxResInput.title = "Maximum any-edge resolution (0 = no limit)";
+                    maxResInput.onchange = () => { sv.max_resolution = parseInt(maxResInput.value) || 0; node.saveState(); };
+                    grid.appendChild(createInputGroup("Max Resolution (0=none)", maxResInput));
+
+                    // Seed
+                    const seedInput = document.createElement("input");
+                    seedInput.type = "number"; seedInput.className = "cb-input";
+                    seedInput.value = sv.seed || 42; seedInput.min = 0;
+                    seedInput.onchange = () => { sv.seed = parseInt(seedInput.value) || 42; node.saveState(); };
+                    grid.appendChild(createInputGroup("Seed", seedInput));
+
+                    // Color Correction
+                    const ccSelect = document.createElement("select");
+                    ccSelect.className = "cb-select";
+                    ["lab", "wavelet", "wavelet_adaptive", "hsv", "adain", "none"].forEach(cc => {
+                        const opt = document.createElement("option");
+                        opt.value = cc; opt.textContent = cc;
+                        if (sv.color_correction === cc) opt.selected = true;
+                        ccSelect.appendChild(opt);
+                    });
+                    ccSelect.onchange = () => { sv.color_correction = ccSelect.value; node.saveState(); };
+                    grid.appendChild(createInputGroup("Color Correction", ccSelect));
+
+                    // Noise scales
+                    const inNoiseInput = document.createElement("input");
+                    inNoiseInput.type = "number"; inNoiseInput.className = "cb-input";
+                    inNoiseInput.value = sv.input_noise_scale || 0; inNoiseInput.min = 0; inNoiseInput.max = 1; inNoiseInput.step = 0.001;
+                    inNoiseInput.onchange = () => { sv.input_noise_scale = parseFloat(inNoiseInput.value) || 0; node.saveState(); };
+                    grid.appendChild(createInputGroup("Input Noise Scale", inNoiseInput));
+
+                    const latNoiseInput = document.createElement("input");
+                    latNoiseInput.type = "number"; latNoiseInput.className = "cb-input";
+                    latNoiseInput.value = sv.latent_noise_scale || 0; latNoiseInput.min = 0; latNoiseInput.max = 1; latNoiseInput.step = 0.001;
+                    latNoiseInput.onchange = () => { sv.latent_noise_scale = parseFloat(latNoiseInput.value) || 0; node.saveState(); };
+                    grid.appendChild(createInputGroup("Latent Noise Scale", latNoiseInput));
+
+                    // Batch Size
+                    const batchInput = document.createElement("input");
+                    batchInput.type = "number"; batchInput.className = "cb-input";
+                    batchInput.value = sv.batch_size || 1; batchInput.min = 1; batchInput.max = 16384; batchInput.step = 4;
+                    batchInput.onchange = () => { sv.batch_size = parseInt(batchInput.value) || 1; node.saveState(); };
+                    grid.appendChild(createInputGroup("Batch Size", batchInput));
+
+                    // --- VRAM Optimization ---
+                    const vramLabel = document.createElement("div");
+                    vramLabel.style.cssText = "width: 100%; font-size: 11px; color: #cc99ff; font-weight: bold; margin-top: 4px; border-top: 1px solid #444; padding-top: 4px;";
+                    vramLabel.textContent = "VRAM Optimization";
+                    grid.appendChild(vramLabel);
+
+                    // Blocks to Swap
+                    const blocksInput = document.createElement("input");
+                    blocksInput.type = "number"; blocksInput.className = "cb-input";
+                    blocksInput.value = sv.blocks_to_swap || 0; blocksInput.min = 0; blocksInput.max = 36; blocksInput.step = 1;
+                    blocksInput.title = "Number of transformer blocks to offload to CPU (saves VRAM, slower)";
+                    blocksInput.onchange = () => { sv.blocks_to_swap = parseInt(blocksInput.value) || 0; node.saveState(); };
+                    grid.appendChild(createInputGroup("Blocks to Swap", blocksInput));
+
+                    // Attention Mode
+                    const attSelect = document.createElement("select");
+                    attSelect.className = "cb-select";
+                    ["sdpa", "flash_attn_2", "flash_attn_3", "sageattn_2", "sageattn_3"].forEach(a => {
+                        const opt = document.createElement("option");
+                        opt.value = a; opt.textContent = a;
+                        if (sv.attention_mode === a) opt.selected = true;
+                        attSelect.appendChild(opt);
+                    });
+                    attSelect.onchange = () => { sv.attention_mode = attSelect.value; node.saveState(); };
+                    grid.appendChild(createInputGroup("Attention Mode", attSelect));
+
+                    // DiT Offload Device
+                    const offloadSelect = document.createElement("select");
+                    offloadSelect.className = "cb-select";
+                    ["none", "cpu"].forEach(d => {
+                        const opt = document.createElement("option");
+                        opt.value = d; opt.textContent = d;
+                        if (sv.offload_device === d) opt.selected = true;
+                        offloadSelect.appendChild(opt);
+                    });
+                    offloadSelect.onchange = () => { sv.offload_device = offloadSelect.value; node.saveState(); };
+                    grid.appendChild(createInputGroup("DiT Offload Device", offloadSelect));
+
+                    // Cache DiT Model
+                    const cacheCb = document.createElement("input");
+                    cacheCb.type = "checkbox"; cacheCb.checked = sv.cache_model || false;
+                    cacheCb.onchange = () => { sv.cache_model = cacheCb.checked; node.saveState(); };
+                    grid.appendChild(createInputGroup("Cache DiT Model", cacheCb));
+
+                    // --- VAE Tiling ---
+                    const vaeLabel = document.createElement("div");
+                    vaeLabel.style.cssText = "width: 100%; font-size: 11px; color: #cc99ff; font-weight: bold; margin-top: 4px; border-top: 1px solid #444; padding-top: 4px;";
+                    vaeLabel.textContent = "VAE Tiling";
+                    grid.appendChild(vaeLabel);
+
+                    // Encode Tiled
+                    const encTiledCb = document.createElement("input");
+                    encTiledCb.type = "checkbox"; encTiledCb.checked = sv.encode_tiled || false;
+                    encTiledCb.onchange = () => { sv.encode_tiled = encTiledCb.checked; node.saveState(); renderPipelines(); };
+                    grid.appendChild(createInputGroup("Encode Tiled", encTiledCb));
+
+                    if (sv.encode_tiled) {
+                        const encTsInput = document.createElement("input");
+                        encTsInput.type = "number"; encTsInput.className = "cb-input";
+                        encTsInput.value = sv.encode_tile_size || 1024; encTsInput.min = 64; encTsInput.step = 32;
+                        encTsInput.onchange = () => { sv.encode_tile_size = parseInt(encTsInput.value) || 1024; node.saveState(); };
+                        grid.appendChild(createInputGroup("Encode Tile Size", encTsInput));
+
+                        const encToInput = document.createElement("input");
+                        encToInput.type = "number"; encToInput.className = "cb-input";
+                        encToInput.value = sv.encode_tile_overlap || 128; encToInput.min = 0; encToInput.step = 32;
+                        encToInput.onchange = () => { sv.encode_tile_overlap = parseInt(encToInput.value) || 128; node.saveState(); };
+                        grid.appendChild(createInputGroup("Encode Tile Overlap", encToInput));
+                    }
+
+                    // Decode Tiled
+                    const decTiledCb = document.createElement("input");
+                    decTiledCb.type = "checkbox"; decTiledCb.checked = sv.decode_tiled || false;
+                    decTiledCb.onchange = () => { sv.decode_tiled = decTiledCb.checked; node.saveState(); renderPipelines(); };
+                    grid.appendChild(createInputGroup("Decode Tiled", decTiledCb));
+
+                    if (sv.decode_tiled) {
+                        const decTsInput = document.createElement("input");
+                        decTsInput.type = "number"; decTsInput.className = "cb-input";
+                        decTsInput.value = sv.decode_tile_size || 1024; decTsInput.min = 64; decTsInput.step = 32;
+                        decTsInput.onchange = () => { sv.decode_tile_size = parseInt(decTsInput.value) || 1024; node.saveState(); };
+                        grid.appendChild(createInputGroup("Decode Tile Size", decTsInput));
+
+                        const decToInput = document.createElement("input");
+                        decToInput.type = "number"; decToInput.className = "cb-input";
+                        decToInput.value = sv.decode_tile_overlap || 128; decToInput.min = 0; decToInput.step = 32;
+                        decToInput.onchange = () => { sv.decode_tile_overlap = parseInt(decToInput.value) || 128; node.saveState(); };
+                        grid.appendChild(createInputGroup("Decode Tile Overlap", decToInput));
+                    }
+
+                    // VAE Offload Device
+                    const vaeOffloadSelect = document.createElement("select");
+                    vaeOffloadSelect.className = "cb-select";
+                    ["none", "cpu"].forEach(d => {
+                        const opt = document.createElement("option");
+                        opt.value = d; opt.textContent = d;
+                        if (sv.vae_offload_device === d) opt.selected = true;
+                        vaeOffloadSelect.appendChild(opt);
+                    });
+                    vaeOffloadSelect.onchange = () => { sv.vae_offload_device = vaeOffloadSelect.value; node.saveState(); };
+                    grid.appendChild(createInputGroup("VAE Offload Device", vaeOffloadSelect));
+
+                    // Cache VAE Model
+                    const vaeCacheCb = document.createElement("input");
+                    vaeCacheCb.type = "checkbox"; vaeCacheCb.checked = sv.vae_cache_model || false;
+                    vaeCacheCb.onchange = () => { sv.vae_cache_model = vaeCacheCb.checked; node.saveState(); };
+                    grid.appendChild(createInputGroup("Cache VAE Model", vaeCacheCb));
+                }
+
                 card.appendChild(grid);
 
                 // Iteration count for this step
@@ -5457,7 +5679,8 @@ export function renderUpscalingSection(node, container, modelLists) {
                 const denoises = (ucfg.hires_denoise || "0.3").split(",").map(s => s.trim()).filter(s => s).length;
                 const models = Math.max(1, (ucfg.upscale_models || []).length);
                 let combos = 1;
-                if (showHires) combos *= ratios * denoises;
+                if (showSeedVR2) combos = 1; // SeedVR2 = 1 output per input
+                else if (showHires) combos *= ratios * denoises;
                 if (showModel) combos *= models;
                 const repeatCount = ucfg.repeat || 1;
                 countDisplay.textContent = `⏱️ ${combos} upscale combination(s) per base image` + (repeatCount > 1 ? ` × ${repeatCount} repeats` : "");

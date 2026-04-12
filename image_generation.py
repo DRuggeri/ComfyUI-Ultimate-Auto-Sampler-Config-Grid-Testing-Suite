@@ -942,3 +942,117 @@ def flush_batch_with_remote_vae(pending_batch, remote_vae_worker, existing_data,
     
     print(f"[GridTester] 🌐 Queued {queued_count} images for remote VAE decoding")
     return queued_count
+
+
+# =============================================================================
+# SEEDVR2 UPSCALE — Calls ComfyUI-SeedVR2_VideoUpscaler nodes programmatically
+# Requires ComfyUI-SeedVR2_VideoUpscaler to be installed as a dependency.
+# =============================================================================
+
+def seedvr2_upscale(pil_image, seedvr2_config):
+    """
+    Upscale an image using SeedVR2 diffusion-based upscaler.
+
+    Args:
+        pil_image: PIL Image (RGB)
+        seedvr2_config: dict with SeedVR2 options (dit_model, resolution, seed, etc.)
+
+    Returns:
+        tuple: (pil_result, width, height, duration)
+    """
+    import time
+    import torch
+    import numpy as np
+
+    t0 = time.time()
+    sv = seedvr2_config
+
+    # Import SeedVR2 nodes — raises ImportError if not installed
+    try:
+        from custom_nodes import ComfyUI_SeedVR2_VideoUpscaler
+        # V3 API nodes use class method execute()
+        SeedVR2LoadDiTModel = None
+        SeedVR2LoadVAEModel = None
+        SeedVR2VideoUpscaler = None
+
+        # Try to find the node classes from ComfyUI's node registry
+        import nodes
+        for name, cls in nodes.NODE_CLASS_MAPPINGS.items():
+            if name == "SeedVR2LoadDiTModel":
+                SeedVR2LoadDiTModel = cls
+            elif name == "SeedVR2LoadVAEModel":
+                SeedVR2LoadVAEModel = cls
+            elif name == "SeedVR2VideoUpscaler":
+                SeedVR2VideoUpscaler = cls
+
+        if not SeedVR2LoadDiTModel or not SeedVR2LoadVAEModel or not SeedVR2VideoUpscaler:
+            raise ImportError("SeedVR2 node classes not found in NODE_CLASS_MAPPINGS")
+
+    except (ImportError, Exception) as e:
+        raise RuntimeError(
+            f"SeedVR2 upscale requires ComfyUI-SeedVR2_VideoUpscaler to be installed.\n"
+            f"Install from: https://github.com/numz/ComfyUI-SeedVR2_VideoUpscaler\n"
+            f"Error: {e}"
+        )
+
+    print(f"[GridTester] 🎬 SeedVR2 upscale: model={sv.get('dit_model', '3b_fp8')}, "
+          f"resolution={sv.get('resolution', 1080)}, seed={sv.get('seed', 42)}")
+
+    # Convert PIL image to ComfyUI IMAGE tensor [1, H, W, 3] float32 [0,1]
+    img_np = np.array(pil_image.convert("RGB")).astype(np.float32) / 255.0
+    img_tensor = torch.from_numpy(img_np).unsqueeze(0)  # [1, H, W, 3]
+
+    # Load DiT model
+    dit_result = SeedVR2LoadDiTModel.execute(
+        model=sv.get("dit_model", "seedvr2_ema_3b_fp8_e4m3fn.safetensors"),
+        device="cuda:0",
+        blocks_to_swap=sv.get("blocks_to_swap", 0),
+        swap_io_components=False,
+        offload_device=sv.get("offload_device", "cpu"),
+        cache_model=sv.get("cache_model", False),
+        attention_mode=sv.get("attention_mode", "sdpa")
+    )
+    dit = dit_result.output[0] if hasattr(dit_result, 'output') else dit_result[0]
+
+    # Load VAE model
+    vae_result = SeedVR2LoadVAEModel.execute(
+        model="ema_vae_fp16.safetensors",
+        device="cuda:0",
+        encode_tiled=sv.get("encode_tiled", False),
+        encode_tile_size=sv.get("encode_tile_size", 1024),
+        encode_tile_overlap=sv.get("encode_tile_overlap", 128),
+        decode_tiled=sv.get("decode_tiled", False),
+        decode_tile_size=sv.get("decode_tile_size", 1024),
+        decode_tile_overlap=sv.get("decode_tile_overlap", 128),
+        offload_device=sv.get("vae_offload_device", "none"),
+        cache_model=sv.get("vae_cache_model", False)
+    )
+    vae = vae_result.output[0] if hasattr(vae_result, 'output') else vae_result[0]
+
+    # Run upscale
+    upscale_result = SeedVR2VideoUpscaler.execute(
+        image=img_tensor,
+        dit=dit,
+        vae=vae,
+        seed=sv.get("seed", 42),
+        resolution=sv.get("resolution", 1080),
+        max_resolution=sv.get("max_resolution", 0),
+        batch_size=sv.get("batch_size", 1),
+        uniform_batch_size=False,
+        color_correction=sv.get("color_correction", "lab"),
+        input_noise_scale=sv.get("input_noise_scale", 0.0),
+        latent_noise_scale=sv.get("latent_noise_scale", 0.0),
+        offload_device=sv.get("offload_device", "cpu")
+    )
+    result_tensor = upscale_result.output[0] if hasattr(upscale_result, 'output') else upscale_result[0]
+
+    # Convert back to PIL: [1, H', W', 3] float32 → PIL
+    from PIL import Image
+    result_np = (result_tensor[0].cpu().numpy() * 255).clip(0, 255).astype(np.uint8)
+    result_pil = Image.fromarray(result_np, "RGB")
+    up_w, up_h = result_pil.size
+
+    duration = round(time.time() - t0, 2)
+    print(f"[GridTester] 🎬 SeedVR2 complete: {up_w}x{up_h} in {duration}s")
+
+    return result_pil, up_w, up_h, duration
