@@ -967,15 +967,13 @@ def seedvr2_upscale(pil_image, seedvr2_config):
     t0 = time.time()
     sv = seedvr2_config
 
-    # Import SeedVR2 nodes — raises ImportError if not installed
+    # Find SeedVR2 nodes from ComfyUI's node registry.
+    # SeedVR2 uses V3 API (ComfyExtension) so we scan NODE_CLASS_MAPPINGS directly
+    # rather than trying to import the custom_nodes package.
+    SeedVR2LoadDiTModel = None
+    SeedVR2LoadVAEModel = None
+    SeedVR2VideoUpscaler = None
     try:
-        from custom_nodes import ComfyUI_SeedVR2_VideoUpscaler
-        # V3 API nodes use class method execute()
-        SeedVR2LoadDiTModel = None
-        SeedVR2LoadVAEModel = None
-        SeedVR2VideoUpscaler = None
-
-        # Try to find the node classes from ComfyUI's node registry
         import nodes
         for name, cls in nodes.NODE_CLASS_MAPPINGS.items():
             if name == "SeedVR2LoadDiTModel":
@@ -984,15 +982,14 @@ def seedvr2_upscale(pil_image, seedvr2_config):
                 SeedVR2LoadVAEModel = cls
             elif name == "SeedVR2VideoUpscaler":
                 SeedVR2VideoUpscaler = cls
+    except Exception:
+        pass
 
-        if not SeedVR2LoadDiTModel or not SeedVR2LoadVAEModel or not SeedVR2VideoUpscaler:
-            raise ImportError("SeedVR2 node classes not found in NODE_CLASS_MAPPINGS")
-
-    except (ImportError, Exception) as e:
+    if not SeedVR2LoadDiTModel or not SeedVR2LoadVAEModel or not SeedVR2VideoUpscaler:
         raise RuntimeError(
-            f"SeedVR2 upscale requires ComfyUI-SeedVR2_VideoUpscaler to be installed.\n"
-            f"Install from: https://github.com/numz/ComfyUI-SeedVR2_VideoUpscaler\n"
-            f"Error: {e}"
+            "SeedVR2 upscale requires ComfyUI-SeedVR2_VideoUpscaler to be installed.\n"
+            "Install from: https://github.com/numz/ComfyUI-SeedVR2_VideoUpscaler\n"
+            "SeedVR2 nodes not found in ComfyUI's node registry."
         )
 
     print(f"[GridTester] 🎬 SeedVR2 upscale: model={sv.get('dit_model', '3b_fp8')}, "
