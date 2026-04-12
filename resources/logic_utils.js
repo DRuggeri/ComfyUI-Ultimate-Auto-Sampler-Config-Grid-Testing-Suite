@@ -678,19 +678,58 @@ function selectJSON(id) {
 
 // Trigger generation from Modal
 async function triggerGen(btn) {
-    const newCfg = [{
+    // Build a complete config from the modal fields + the original item's metadata.
+    // This produces an exact config_json entry that the sampler can run directly.
+    const d = activeData ? activeData.find(x => x.id === window.currentModalId) : null;
+
+    const config = {
         sampler: document.getElementById('f-smp').value,
         scheduler: document.getElementById('f-sch').value,
-        steps: parseInt(document.getElementById('f-stp').value),
-        cfg: parseFloat(document.getElementById('f-cfg').value),
-        denoise: parseFloat(document.getElementById('f-den').value),
-        lora: document.getElementById('f-lor').value
-    }];
-    const jsonStr = JSON.stringify(newCfg, null, 2);
+        steps: parseInt(document.getElementById('f-stp').value) || 20,
+        cfg: parseFloat(document.getElementById('f-cfg').value) || 7,
+        denoise: parseFloat(document.getElementById('f-den').value) || 1,
+        lora: document.getElementById('f-lor').value || 'None',
+        model: document.getElementById('f-model').value || 'None',
+        seed: parseInt(document.getElementById('f-seed').value) || 0,
+        seed_behavior: 'fixed',
+        positive: document.getElementById('f-pos').value || '',
+        negative: document.getElementById('f-neg').value || ''
+    };
+
+    // Carry over additional fields from the original item if available
+    if (d) {
+        if (d.vae && d.vae !== 'Default') config.vae = d.vae;
+        if (d.clip_type) config.clip_type = d.clip_type;
+        if (d.model_type && d.model_type !== 'checkpoint') config.model_type = d.model_type;
+        if (d.text_encoders && d.text_encoders.length > 0) config.text_encoders = d.text_encoders;
+        if (d.attention_mode && d.attention_mode !== 'default') config.attention_mode = d.attention_mode;
+        if (d.clip_skip && d.clip_skip !== -1) config.clip_skip = d.clip_skip;
+        if (d.model_sampling_override && d.model_sampling_override !== 'none') {
+            config.model_sampling_override = d.model_sampling_override;
+            if (d.model_sampling_shift) config.model_sampling_shift = d.model_sampling_shift;
+            if (d.model_sampling_flux_max_shift) config.model_sampling_flux_max_shift = d.model_sampling_flux_max_shift;
+            if (d.model_sampling_flux_base_shift) config.model_sampling_flux_base_shift = d.model_sampling_flux_base_shift;
+        }
+        if (d.use_advanced_sampling) {
+            config.use_advanced_sampling = true;
+            config.advanced_guider = d.advanced_guider || 'cfg_guider';
+            config.advanced_scheduler = d.advanced_scheduler || 'basic';
+        }
+        if (d.use_flux_guidance) {
+            config.use_flux_guidance = true;
+            config.flux_guidance_value = d.flux_guidance_value || 3.5;
+        }
+        if (d.gguf_options) config.gguf_options = d.gguf_options;
+    }
+
+    // Wrap in the format the sampler expects
+    const configOutput = { configs: [config] };
+    const jsonStr = JSON.stringify(configOutput, null, 2);
+
     try {
-        // Communicate with ComfyUI Graph   
+        // Communicate with ComfyUI Graph
         const graph = window.parent.app.graph;
-        node = graph._nodes.find(n => n.type === "UltimateSamplerGrid");
+        const node = graph._nodes.find(n => n.type === "UltimateSamplerGrid");
         if (node) {
             const widget = node.widgets.find(w => w.name === "configs_json");
             if (widget) {
