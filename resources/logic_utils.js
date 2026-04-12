@@ -390,14 +390,8 @@ function exportFavoritesAsConfigJSON() {
             attention_mode: d.attention_mode || 'default'
         };
 
-        // Model type: determine from file extension, NOT from manifest data.
-        // Manifest model_type can be stale/incorrect. The file extension is truth.
-        var modelLower = (d.model || '').toLowerCase();
-        if (modelLower.endsWith('.gguf')) {
-            flatConfig.model_type = 'gguf';
-        }
-        // else: don't set model_type — defaults to "checkpoint" in expand_configs
-        // (covers .safetensors, .ckpt, .pt, and any other checkpoint format)
+        // Copy model_type directly from manifest item
+        if (d.model_type) flatConfig.model_type = d.model_type;
 
         // Optional fields — only include if present on the item
         if (d.text_encoders && d.text_encoders.length > 0) flatConfig.text_encoders = d.text_encoders;
@@ -428,11 +422,6 @@ function exportFavoritesAsConfigJSON() {
             flatConfig.seed, flatConfig.positive].join('|');
         if (seen[dedupKey]) continue;
         seen[dedupKey] = true;
-
-        // Model type handling (checkpoint, gguf, diffusion_model)
-        if (g.model_type && g.model_type !== 'checkpoint') {
-            flatConfig.model_type = g.model_type;
-        }
 
         flatConfigs.push(flatConfig);
     }
