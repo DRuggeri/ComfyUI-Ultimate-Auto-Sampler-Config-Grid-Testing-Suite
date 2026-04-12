@@ -364,60 +364,6 @@ function exportFavoritesAsConfigJSON() {
         return;
     }
 
-    // Collect unique values into Sets per config-array-defining group.
-    // Group key: model + model_type + lora + positive + negative
-    // Within each group, collect unique samplers, schedulers, steps, cfg, etc.
-    var groups = {};
-    for (var i = 0; i < favorites.length; i++) {
-        var d = favorites[i];
-        var model = d.model || meta.model || 'None';
-        var modelType = d.model_type || 'checkpoint';
-        var lora = d.lora || 'None';
-        var positive = d.config_positive || d.positive || meta.positive || '';
-        var negative = d.config_negative || d.negative || meta.negative || '';
-        var key = model + '||' + modelType + '||' + lora + '||' + positive + '||' + negative;
-
-        if (!groups[key]) {
-            groups[key] = {
-                model: model,
-                model_type: modelType,
-                lora: lora,
-                positive: positive,
-                negative: negative,
-                samplers: {},
-                schedulers: {},
-                steps: {},
-                cfgs: {},
-                denoises: {},
-                seeds: [],
-                vaes: {},
-                text_encoders: {},
-                clip_types: {},
-                attention_modes: {},
-                resolutions: {},
-                // Grab advanced settings from first item in group (usually same for all)
-                _first: d
-            };
-        }
-        var g = groups[key];
-        g.samplers[d.sampler || 'euler'] = true;
-        g.schedulers[d.scheduler || 'normal'] = true;
-        g.steps[String(d.steps || 20)] = true;
-        g.cfgs[String(d.cfg || 7)] = true;
-        g.denoises[String(d.denoise || 1)] = true;
-        if (d.seed) g.seeds.push(d.seed);
-        if (d.vae && d.vae !== 'Default') g.vaes[d.vae] = true;
-        if (d.clip_type) g.clip_types[d.clip_type] = true;
-        if (d.attention_mode && d.attention_mode !== 'default') g.attention_modes[d.attention_mode] = true;
-        if (d.width && d.height) g.resolutions[d.width + 'x' + d.height] = true;
-        // Text encoders (may be an array or comma-separated string)
-        var te = d.text_encoders;
-        if (te) {
-            if (Array.isArray(te)) { te.forEach(function(t) { if (t) g.text_encoders[t] = true; }); }
-            else if (typeof te === 'string' && te !== 'None') { g.text_encoders[te] = true; }
-        }
-    }
-
     // Build flat config entries — one per favorite item.
     // Each config is a direct match for what the sampler node's expand_configs() expects:
     // single values for sampler, scheduler, model, etc. (NOT arrays).
@@ -444,23 +390,17 @@ function exportFavoritesAsConfigJSON() {
             attention_mode: d.attention_mode || 'default'
         };
 
-        // Model type: only set if genuinely non-checkpoint (gguf/diffusion_model).
-        // The manifest may have incorrect model_type from a Builder UI bug where
-        // a single config array's model_type applied to all models in the array.
-        // Safety check: .gguf extension = gguf, everything else defaults to checkpoint.
-        var exportModelType = d.model_type || 'checkpoint';
-        if (exportModelType !== 'checkpoint') {
-            var modelPath = (d.model || '').toLowerCase();
-            if (modelPath.endsWith('.gguf')) {
-                flatConfig.model_type = 'gguf';
-            } else if (exportModelType === 'diffusion_model' && !modelPath.endsWith('.safetensors')) {
-                flatConfig.model_type = 'diffusion_model';
-            }
-            // else: don't set model_type — defaults to checkpoint in expand_configs
+        // Model type: determine from file extension, NOT from manifest data.
+        // Manifest model_type can be stale/incorrect. The file extension is truth.
+        var modelLower = (d.model || '').toLowerCase();
+        if (modelLower.endsWith('.gguf')) {
+            flatConfig.model_type = 'gguf';
         }
+        // else: don't set model_type — defaults to "checkpoint" in expand_configs
+        // (covers .safetensors, .ckpt, .pt, and any other checkpoint format)
 
         // Optional fields — only include if present on the item
-        if (d.text_encoders) flatConfig.text_encoders = d.text_encoders;
+        if (d.text_encoders && d.text_encoders.length > 0) flatConfig.text_encoders = d.text_encoders;
         if (d.gguf_options) flatConfig.gguf_options = d.gguf_options;
         if (d.model_prompt_prefix) flatConfig.model_prompt_prefix = d.model_prompt_prefix;
         if (d.model_prompt_suffix) flatConfig.model_prompt_suffix = d.model_prompt_suffix;
