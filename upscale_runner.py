@@ -226,6 +226,7 @@ def _run_upscale_thread(job, target_items, upscale_config, meta, manifest_data, 
             pipe_w = item.get("width", 512)
             pipe_h = item.get("height", 512)
             upscale_combo_idx = 0
+            total_upscale_duration = 0
 
             for pipeline_idx, pipeline in enumerate(pipelines):
                 if pipeline.get("active", True) is False:
