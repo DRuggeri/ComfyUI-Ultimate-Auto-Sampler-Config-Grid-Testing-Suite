@@ -437,7 +437,7 @@ function exportFavoritesAsConfigJSON() {
             seed_behavior: 'fixed',
             model: d.model || meta.model || 'None',
             lora: d.lora || 'None',
-            vae: d.vae || 'Default',
+            vae: d.vae || (d.model_type && d.model_type !== 'checkpoint' ? 'None' : 'Default'),
             clip_type: d.clip_type || 'stable_diffusion',
             positive: d.config_positive || d.positive || meta.positive || '',
             negative: d.config_negative || d.negative || meta.negative || '',
@@ -487,10 +487,18 @@ function exportFavoritesAsConfigJSON() {
         configs: flatConfigs
     };
 
+    // Check for GGUF/diffusion models that need a VAE connected
+    var needsVaeWarning = flatConfigs.some(function(c) {
+        return c.model_type && c.model_type !== 'checkpoint' && (!c.vae || c.vae === 'Default' || c.vae === 'None');
+    });
+    var vaeNote = needsVaeWarning
+        ? '\n\n\u26a0\ufe0f Some configs use GGUF/diffusion models \u2014 make sure to connect a VAE to the sampler node\'s optional_vae input.'
+        : '';
+
     // Copy to clipboard
     var jsonStr = JSON.stringify(configOutput, null, 2);
     navigator.clipboard.writeText(jsonStr).then(function() {
-        alert('Config JSON copied to clipboard! (' + favorites.length + ' favorites \u2192 ' + flatConfigs.length + ' config' + (flatConfigs.length !== 1 ? 's' : '') + ')\n\nPaste into the Sampler Grid node\'s configs_json input.');
+        alert('Config JSON copied to clipboard! (' + favorites.length + ' favorites \u2192 ' + flatConfigs.length + ' config' + (flatConfigs.length !== 1 ? 's' : '') + ')\n\nPaste into the Sampler Grid node\'s configs_json input.' + vaeNote);
     }).catch(function() {
         // Fallback: show in a prompt dialog
         prompt('Copy this Config JSON:', jsonStr);
