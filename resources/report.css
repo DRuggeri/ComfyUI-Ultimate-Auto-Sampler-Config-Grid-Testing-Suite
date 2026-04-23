@@ -10,7 +10,11 @@
     --accent-negative: #8d0000;
     --accent-size: #ffd700;
     --accent-seed: #00ff88;
-    --danger: #ff3860; 
+    --accent-steps: #ff4099;
+    --accent-cfg: #00d4ff;
+    --accent-upscale: #7e57c2;
+    --accent-media: #ff7043;
+    --danger: #ff3860;
     --text: #e0e0e0; 
     --card-width: 250px;
 }
@@ -421,10 +425,34 @@ body {
     font-weight: 700; 
 }
 
-.filter-btn.active.seed { 
-    background: var(--accent-seed); 
-    color: #000; 
-    font-weight: 700; 
+.filter-btn.active.seed {
+    background: var(--accent-seed);
+    color: #000;
+    font-weight: 700;
+}
+
+.filter-btn.active.steps {
+    background: var(--accent-steps);
+    color: #fff;
+    font-weight: 700;
+}
+
+.filter-btn.active.cfg {
+    background: var(--accent-cfg);
+    color: #000;
+    font-weight: 700;
+}
+
+.filter-btn.active.upscaleMethod {
+    background: var(--accent-upscale);
+    color: #fff;
+    font-weight: 700;
+}
+
+.filter-btn.active.mediaType {
+    background: var(--accent-media);
+    color: #000;
+    font-weight: 700;
 }
 
 /* VIEWPORT - Pure pan mode (no scrollbars) */

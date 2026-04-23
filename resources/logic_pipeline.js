@@ -33,6 +33,9 @@ function getFilterKey() {
         [...filters.negative].sort().join(','),
         [...filters.size].sort().join(','),
         [...filters.seed].sort().join(','),
+        [...filters.steps].sort().join(','),
+        [...filters.cfg].sort().join(','),
+        [...filters.upscaleMethod].sort().join(','),
         [...filters.mediaType].sort().join(','),
         searchFilters.map(f => `${f.type}:${f.term}`).join('|')
     ];
