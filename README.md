@@ -16,6 +16,48 @@ Stop guessing which Sampler, Scheduler, Prompt, Denoise, Model, Lora or CFG valu
 
 ---
 
+## ⚡ Quick Start — The 3 Nodes You Need
+
+This suite is **three separate nodes** that must all be added and wired together. Don't stop after adding just one — here's how they connect:
+
+```
+┌──────────────────────────┐     configs_json    ┌──────────────────────────┐     dashboard_html    ┌──────────────────────────┐
+│                          │ ──────────────────▶ │                          │ ────────────────────▶ │                          │
+│  Ultimate Config Builder │                     │  Ultimate Sampler Grid   │                       │  Ultimate Grid Dashboard │
+│      (Visual UI)         │                     │       (Generator)        │                       │         (Viewer)         │
+│                          │                     │                          │                       │                          │
+└──────────────────────────┘                     └──────────────────────────┘                       └──────────────────────────┘
+   Point-and-click GUI for                          The engine — loads models,                         Renders the infinite-canvas
+   building your test grid.                          runs every sampler × CFG ×                         dashboard with your result
+   (Optional — you can also                          step × LoRA combination.                           grid for browsing, rating,
+   write JSON directly.)                             Also accepts Checkpoint, CLIP,                     and revising.
+                                                     and VAE inputs.
+```
+
+Node names in the "Add Node" menu, under `sampling/testing`:
+
+| # | Node Name                      | Role                                                |
+|---|--------------------------------|-----------------------------------------------------|
+| 1 | **Ultimate Config Builder**    | Visual GUI for building configs *(optional)*        |
+| 2 | **Ultimate Sampler Grid**      | The generator — **required**                        |
+| 3 | **Ultimate Grid Dashboard**    | The result viewer — **required**                    |
+
+### 🚀 Fastest way to try it
+
+**Drag [`SamplrConfig-Basic-Workflow.json`](SamplrConfig-Basic-Workflow.json) into your ComfyUI canvas** — it includes all three nodes pre-wired with a working example. Swap in your checkpoint and hit Run.
+
+> **Troubleshooting:** If the Config Builder loads as a plain node with no sliders/UI, right-click it and choose *Fix this node*, or delete and re-add it. Make sure you're on the latest version via Comfy Manager (1.9.2 or newer) and have restarted ComfyUI after updating.
+
+### Manual wiring
+
+If you'd rather build the graph yourself:
+
+1. Add **Ultimate Sampler Grid** and connect your Checkpoint / CLIP / VAE to its inputs.
+2. Add **Ultimate Grid Dashboard** and connect the Generator's `dashboard_html` output to the Viewer's input.
+3. *(Optional)* Add **Ultimate Config Builder** and wire its `configs_json` output into the Generator's `configs_json` input. Without it, you can type a JSON config directly into the Generator's `configs_json` widget.
+
+---
+
 ## 📑 Table of Contents
 
 - [Key Features](#-key-features)
