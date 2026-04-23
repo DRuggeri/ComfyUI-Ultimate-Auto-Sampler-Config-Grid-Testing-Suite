@@ -1685,10 +1685,12 @@ export function createLoraElement(node, loraStr, arrayIdx, loraIdx, availableLor
     modelArrayBtn.textContent = hasModelArray ? "✕ Array" : "+ Compare Strengths";
     modelArrayBtn.className = "cb-btn";
     modelArrayBtn.style.cssText = "font-size: 9px; padding: 1px 6px; color: " + (hasModelArray ? "#f80" : "#0af") + ";";
+    modelArrayBtn.title = "Test this LoRA at multiple Model strength values in one run.\n\nClick to expand, then enter comma-separated values (e.g. 0.5, 0.8, 1.0).\nThe grid will generate one image per strength and combine it with your sampler/scheduler/CFG/steps arrays for full cross-axis testing.\n\nClick again to remove the array and return to the single-slider value.";
 
     const modelArrayInput = document.createElement("input");
     modelArrayInput.type = "text";
     modelArrayInput.placeholder = "e.g. 0.5, 0.8, 1.0";
+    modelArrayInput.title = "Enter comma-separated Model strength values (e.g. 0.5, 0.8, 1.0). Each value generates a separate image in the grid.";
     modelArrayInput.style.cssText = "flex: 1; background: #1a1a1a; color: #ccc; border: 1px solid #444; border-radius: 4px; padding: 2px 6px; font-size: 10px; display: " + (hasModelArray ? "block" : "none") + ";";
     modelArrayInput.value = hasModelArray ? weightArrays[parsed.name + "_model"].join(", ") : "";
 
@@ -1745,12 +1747,14 @@ export function createLoraElement(node, loraStr, arrayIdx, loraIdx, availableLor
         clipArrayBtn.className = "cb-button";
         clipArrayBtn.style.cssText = "font-size: 9px; padding: 1px 6px; background: #9966cc33; border: 1px solid #9966cc; color: #cc99ff;";
         clipArrayBtn.textContent = existingClipArr ? "\u2715 CLIP Array" : "+ Compare CLIP";
+        clipArrayBtn.title = "Test this LoRA at multiple CLIP strength values in one run.\n\nClick to expand, then enter comma-separated values (e.g. 0.5, 0.8, 1.0).\nOnly available when Strength Lock is OFF — with lock ON, CLIP mirrors the Model Compare Strengths array.\n\nClick again to remove the array and return to the single-slider value.";
 
         const clipArrayInput = document.createElement("input");
         clipArrayInput.type = "text";
         clipArrayInput.className = "cb-input";
         clipArrayInput.style.cssText = "font-size: 10px; width: 120px; padding: 2px 4px;" + (existingClipArr ? "" : " display: none;");
         clipArrayInput.placeholder = "0.5, 0.8, 1.0";
+        clipArrayInput.title = "Enter comma-separated CLIP strength values (e.g. 0.5, 0.8, 1.0). Each value generates a separate image in the grid.";
         clipArrayInput.value = existingClipArr ? existingClipArr.join(", ") : "";
 
         clipArrayBtn.onclick = () => {
