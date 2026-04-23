@@ -8,6 +8,7 @@ import os
 import sys
 import json
 import time
+import builtins
 import folder_paths
 from typing import List, Dict, Any
 import server
@@ -24,7 +25,7 @@ def safe_print(*args, **kwargs):
     OSError [Errno 22] from Windows console bugs crashing node execution.
     """
     try:
-        print(*args, **kwargs)
+        builtins.print(*args, **kwargs)
     except (OSError, ValueError):
         try:
             msg = " ".join(str(a) for a in args) + kwargs.get("end", "\n")
@@ -32,6 +33,14 @@ def safe_print(*args, **kwargs):
             sys.__stdout__.flush()
         except Exception:
             pass  # Drop silently — don't crash the node over a log line
+
+
+# Shadow the module-level `print` so every print() call in this file routes
+# through safe_print. Without this, sibling methods (process_lora_array,
+# lookup_triggers_endpoint, etc.) still hit the broken stdout and crash with
+# OSError [Errno 22] on Windows — the local `print = safe_print` in
+# generate_config only covers that one function.
+print = safe_print
 
 
 
