@@ -1731,16 +1731,16 @@ function runManifestAnalysis(type) {
     let title = '';
 
     if (type === 'lora') {
-        title = 'LoRA Usage Stats (Favorited)';
-        results = analyzeFieldStats(items, 'lora', true);
+        title = 'LoRA Usage Stats';
+        results = analyzeFieldStats(items, 'lora');
     } else if (type === 'model') {
-        title = 'Model Usage Stats (Favorited)';
-        results = analyzeFieldStats(items, 'model', true);
+        title = 'Model Usage Stats';
+        results = analyzeFieldStats(items, 'model');
     } else if (type === 'prompt') {
-        title = 'Full Prompt Stats (All Items)';
+        title = 'Full Prompt Stats';
         results = analyzePromptStats(items);
     } else if (type === 'tags') {
-        title = 'Prompt Tag Stats (Favorited)';
+        title = 'Prompt Tag Stats';
         results = analyzeTagStats(items);
     }
 
@@ -1764,87 +1764,93 @@ function runManifestAnalysis(type) {
 /**
  * Generic counter for lora and model fields.
  * Splits field value by " + " to handle combined entries.
+ * Tracks both favorited and total occurrences per entry.
  * @param {Array} items - all manifest items
  * @param {string} field - 'lora' or 'model'
- * @param {boolean} favoritedOnly - true to count only favorited items
- * @returns {Array} sorted [{count, name}] descending
+ * @returns {Array} sorted [{favs, total, name}] descending by favs, then by percentage
  */
-function analyzeFieldStats(items, field, favoritedOnly) {
-    const counter = new Map();
+function analyzeFieldStats(items, field) {
+    const favs = new Map();
+    const totals = new Map();
 
     for (const item of items) {
-        if (favoritedOnly && !item.favorited) continue;
-
         const raw = item[field];
         if (!raw || raw === 'None') continue;
 
-        // Split by " + " to handle combined loras/models
         const entries = String(raw).split(' + ').map(s => s.trim()).filter(Boolean);
         for (const entry of entries) {
-            counter.set(entry, (counter.get(entry) || 0) + 1);
+            totals.set(entry, (totals.get(entry) || 0) + 1);
+            if (item.favorited) {
+                favs.set(entry, (favs.get(entry) || 0) + 1);
+            }
         }
     }
 
-    return Array.from(counter.entries())
-        .map(([name, count]) => ({ count, name }))
-        .sort((a, b) => b.count - a.count || a.name.localeCompare(b.name));
+    return Array.from(totals.entries())
+        .map(([name, total]) => ({ favs: favs.get(name) || 0, total, name }))
+        .sort((a, b) =>
+            b.favs - a.favs ||
+            (b.total ? b.favs / b.total : 0) - (a.total ? a.favs / a.total : 0) ||
+            a.name.localeCompare(b.name)
+        );
 }
 
 /**
- * Full Prompt Stats (unique behavior):
- * - ALL items register their prompt with count 0
- * - Only favorited items increment the count
+ * Full Prompt Stats: for each unique positive prompt, track favs and total.
  * @param {Array} items - all manifest items
- * @returns {Array} sorted [{count, name}] descending by count
+ * @returns {Array} sorted [{favs, total, name}] descending
  */
 function analyzePromptStats(items) {
-    const counter = new Map();
+    const favs = new Map();
+    const totals = new Map();
 
-    // Pass 1: register ALL prompts with count 0
     for (const item of items) {
         const prompt = item.positive;
-        if (prompt && !counter.has(prompt)) {
-            counter.set(prompt, 0);
+        if (!prompt) continue;
+        totals.set(prompt, (totals.get(prompt) || 0) + 1);
+        if (item.favorited) {
+            favs.set(prompt, (favs.get(prompt) || 0) + 1);
         }
     }
 
-    // Pass 2: increment for favorited items
-    for (const item of items) {
-        if (!item.favorited) continue;
-        const prompt = item.positive;
-        if (prompt && counter.has(prompt)) {
-            counter.set(prompt, counter.get(prompt) + 1);
-        }
-    }
-
-    return Array.from(counter.entries())
-        .map(([name, count]) => ({ count, name }))
-        .sort((a, b) => b.count - a.count || a.name.localeCompare(b.name));
+    return Array.from(totals.entries())
+        .map(([name, total]) => ({ favs: favs.get(name) || 0, total, name }))
+        .sort((a, b) =>
+            b.favs - a.favs ||
+            (b.total ? b.favs / b.total : 0) - (a.total ? a.favs / a.total : 0) ||
+            a.name.localeCompare(b.name)
+        );
 }
 
 /**
- * Tag Stats: splits item.positive by comma, trims, counts occurrences.
- * Only favorited items.
+ * Tag Stats: splits item.positive by comma, trims, tracks favs + total per tag.
  * @param {Array} items - all manifest items
- * @returns {Array} sorted [{count, name}] descending
+ * @returns {Array} sorted [{favs, total, name}] descending
  */
 function analyzeTagStats(items) {
-    const counter = new Map();
+    const favs = new Map();
+    const totals = new Map();
 
     for (const item of items) {
-        if (!item.favorited) continue;
         const prompt = item.positive;
         if (!prompt) continue;
 
         const tags = prompt.split(',').map(t => t.trim()).filter(Boolean);
         for (const tag of tags) {
-            counter.set(tag, (counter.get(tag) || 0) + 1);
+            totals.set(tag, (totals.get(tag) || 0) + 1);
+            if (item.favorited) {
+                favs.set(tag, (favs.get(tag) || 0) + 1);
+            }
         }
     }
 
-    return Array.from(counter.entries())
-        .map(([name, count]) => ({ count, name }))
-        .sort((a, b) => b.count - a.count || a.name.localeCompare(b.name));
+    return Array.from(totals.entries())
+        .map(([name, total]) => ({ favs: favs.get(name) || 0, total, name }))
+        .sort((a, b) =>
+            b.favs - a.favs ||
+            (b.total ? b.favs / b.total : 0) - (a.total ? a.favs / a.total : 0) ||
+            a.name.localeCompare(b.name)
+        );
 }
 
 /**
@@ -1886,11 +1892,12 @@ function showAnalyticsModal(title, results, type) {
     const truncated = results.length > 500;
 
     const rowsHtml = displayResults.map((r, i) => {
-        // Show full prompt text - no truncation
         const rank = i + 1;
+        const pct = r.total > 0 ? Math.round((r.favs / r.total) * 100) : 0;
+        const countText = r.favs + ' / ' + r.total + ' = ' + pct + '%';
         return '<tr class="analytics-row">' +
             '<td class="analytics-rank">' + rank + '</td>' +
-            '<td class="analytics-count" style="color:' + accent + ';">' + r.count + '</td>' +
+            '<td class="analytics-count" style="color:' + accent + ';">' + countText + '</td>' +
             '<td class="analytics-name">' + escapeHtml(r.name) + '</td>' +
         '</tr>';
     }).join('');
@@ -1902,14 +1909,16 @@ function showAnalyticsModal(title, results, type) {
         : '';
 
     // Count summary
-    const favCount = results.filter(r => r.count > 0).length;
-    const totalCount = results.reduce((s, r) => s + r.count, 0);
+    const favCount = results.filter(r => r.favs > 0).length;
+    const totalFavs = results.reduce((s, r) => s + r.favs, 0);
+    const totalOccurrences = results.reduce((s, r) => s + r.total, 0);
     const summaryHtml =
         '<div class="analytics-summary">' +
             '<span>' + totalItems + ' unique entries</span>' +
             '<span style="color:#666;">|</span>' +
-            '<span>' + totalCount + ' total occurrences</span>' +
-            (type === 'prompt' ? '<span style="color:#666;">|</span><span>' + favCount + ' with favorites</span>' : '') +
+            '<span>' + totalFavs + ' favorites / ' + totalOccurrences + ' total</span>' +
+            '<span style="color:#666;">|</span>' +
+            '<span>' + favCount + ' entries with favorites</span>' +
         '</div>';
 
     // For prompt type: build "Copy Favorited Prompts as JSON" button
@@ -1941,7 +1950,7 @@ function showAnalyticsModal(title, results, type) {
                     '<thead>' +
                         '<tr>' +
                             '<th class="analytics-th">#</th>' +
-                            '<th class="analytics-th" style="color:' + accent + ';">Count</th>' +
+                            '<th class="analytics-th" style="color:' + accent + ';">Favs / Total = %</th>' +
                             '<th class="analytics-th">Name</th>' +
                         '</tr>' +
                     '</thead>' +
@@ -1960,8 +1969,8 @@ function showAnalyticsModal(title, results, type) {
         const copyFavBtn = document.getElementById('analytics-copy-fav-btn');
         if (copyFavBtn) {
             copyFavBtn.addEventListener('click', async () => {
-                // All results with count > 0 are favorited prompts; include all (not just displayResults slice)
-                const favoritedPrompts = results.filter(r => r.count > 0).map(r => r.name);
+                // All results with favs > 0 are favorited prompts; include all (not just displayResults slice)
+                const favoritedPrompts = results.filter(r => r.favs > 0).map(r => r.name);
                 const jsonStr = JSON.stringify(favoritedPrompts, null, 2);
                 try {
                     await navigator.clipboard.writeText(jsonStr);
