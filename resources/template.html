@@ -242,7 +242,7 @@
                 </div>
 
                 <button class="session-action-btn"
-                    style="background: #00d1b2; width: 100%; font-size: 11px; padding: 10px;"
+                    style="background: #005e52; color: #fff; width: 100%; font-size: 11px; padding: 10px;"
                     onclick="exportFavorites()" title="Export favorited images to benchmark_favorites folder">
                     COPY FAVORITES TO BENCHMARK FAVORITES FOLDER
                 </button>
@@ -336,7 +336,7 @@
                     MODEL USAGE STATS
                 </button>
                 <button class="session-action-btn"
-                    style="background: #00d1b2; color: #000; width: 100%; font-size: 11px; padding: 10px; margin-bottom: 6px;"
+                    style="background: #005e52; color: #fff; width: 100%; font-size: 11px; padding: 10px; margin-bottom: 6px;"
                     onclick="runManifestAnalysis('prompt')" title="Count full prompts with favorited vs total">
                     FULL PROMPT STATS
                 </button>
@@ -367,6 +367,65 @@
                     </button>
                 </div>
                 <div id="scan-status" style="margin-top: 6px; font-size: 10px; color: #666; min-height: 16px;"></div>
+            </div>
+
+            <!-- Section 7: Keyboard Shortcuts Reference -->
+            <div class="cog-panel-section">
+                <div class="cog-panel-section-title">KEYBOARD SHORTCUTS</div>
+                <table style="width: 100%; border-collapse: collapse; margin-top: 8px; font-size: 11px;">
+                    <tr style="border-bottom: 1px solid #333;">
+                        <td style="padding: 4px 8px; color: #0af; font-family: monospace;">Space</td>
+                        <td style="padding: 4px 8px; color: #ccc;">Scroll down one row</td>
+                    </tr>
+                    <tr style="border-bottom: 1px solid #333;">
+                        <td style="padding: 4px 8px; color: #0af; font-family: monospace;">Shift+Space</td>
+                        <td style="padding: 4px 8px; color: #ccc;">Scroll up one row</td>
+                    </tr>
+                    <tr style="border-bottom: 1px solid #333;">
+                        <td style="padding: 4px 8px; color: #0af; font-family: monospace;">Arrow Keys</td>
+                        <td style="padding: 4px 8px; color: #ccc;">Pan in any direction</td>
+                    </tr>
+                    <tr style="border-bottom: 1px solid #333;">
+                        <td style="padding: 4px 8px; color: #0af; font-family: monospace;">+ / -</td>
+                        <td style="padding: 4px 8px; color: #ccc;">Zoom in / out</td>
+                    </tr>
+                    <tr style="border-bottom: 1px solid #333;">
+                        <td style="padding: 4px 8px; color: #0af; font-family: monospace;">0</td>
+                        <td style="padding: 4px 8px; color: #ccc;">Auto-fit first row to viewport</td>
+                    </tr>
+                    <tr style="border-bottom: 1px solid #333;">
+                        <td style="padding: 4px 8px; color: #0af; font-family: monospace;">F</td>
+                        <td style="padding: 4px 8px; color: #ccc;">Toggle fullscreen</td>
+                    </tr>
+                    <tr style="border-bottom: 1px solid #333;">
+                        <td style="padding: 4px 8px; color: #0af; font-family: monospace;">R</td>
+                        <td style="padding: 4px 8px; color: #ccc;">Reload session</td>
+                    </tr>
+                    <tr style="border-bottom: 1px solid #333;">
+                        <td style="padding: 4px 8px; color: #0af; font-family: monospace;">1-9</td>
+                        <td style="padding: 4px 8px; color: #ccc;">Quick favorite Nth visible card</td>
+                    </tr>
+                    <tr style="border-bottom: 1px solid #333;">
+                        <td style="padding: 4px 8px; color: #0af; font-family: monospace;">Shift+0-9</td>
+                        <td style="padding: 4px 8px; color: #ccc;">Set column count (0 = auto)</td>
+                    </tr>
+                    <tr style="border-bottom: 1px solid #333;">
+                        <td style="padding: 4px 8px; color: #0af; font-family: monospace;">Ctrl+S</td>
+                        <td style="padding: 4px 8px; color: #ccc;">Save (forwarded to ComfyUI)</td>
+                    </tr>
+                    <tr style="border-bottom: 1px solid #333;">
+                        <td style="padding: 4px 8px; color: #0af; font-family: monospace;">Escape</td>
+                        <td style="padding: 4px 8px; color: #ccc;">Close modal / lightbox</td>
+                    </tr>
+                    <tr style="border-bottom: 1px solid #333;">
+                        <td style="padding: 4px 8px; color: #0af; font-family: monospace;">Double-click</td>
+                        <td style="padding: 4px 8px; color: #ccc;">Toggle favorite on card</td>
+                    </tr>
+                    <tr>
+                        <td style="padding: 4px 8px; color: #0af; font-family: monospace;">Shift+Click</td>
+                        <td style="padding: 4px 8px; color: #ccc;">Isolate a single filter</td>
+                    </tr>
+                </table>
             </div>
 
         </div>
@@ -512,64 +571,6 @@
                 </div>
             </div>
 
-            <!-- Keyboard Shortcuts Reference -->
-            <div class="popup-section">
-                <div class="popup-section-title">KEYBOARD SHORTCUTS</div>
-                <table style="width: 100%; border-collapse: collapse; margin-top: 8px; font-size: 11px;">
-                    <tr style="border-bottom: 1px solid #333;">
-                        <td style="padding: 4px 8px; color: #0af; font-family: monospace;">Space</td>
-                        <td style="padding: 4px 8px; color: #ccc;">Scroll down one row</td>
-                    </tr>
-                    <tr style="border-bottom: 1px solid #333;">
-                        <td style="padding: 4px 8px; color: #0af; font-family: monospace;">Shift+Space</td>
-                        <td style="padding: 4px 8px; color: #ccc;">Scroll up one row</td>
-                    </tr>
-                    <tr style="border-bottom: 1px solid #333;">
-                        <td style="padding: 4px 8px; color: #0af; font-family: monospace;">Arrow Keys</td>
-                        <td style="padding: 4px 8px; color: #ccc;">Pan in any direction</td>
-                    </tr>
-                    <tr style="border-bottom: 1px solid #333;">
-                        <td style="padding: 4px 8px; color: #0af; font-family: monospace;">+ / -</td>
-                        <td style="padding: 4px 8px; color: #ccc;">Zoom in / out</td>
-                    </tr>
-                    <tr style="border-bottom: 1px solid #333;">
-                        <td style="padding: 4px 8px; color: #0af; font-family: monospace;">0</td>
-                        <td style="padding: 4px 8px; color: #ccc;">Auto-fit first row to viewport</td>
-                    </tr>
-                    <tr style="border-bottom: 1px solid #333;">
-                        <td style="padding: 4px 8px; color: #0af; font-family: monospace;">F</td>
-                        <td style="padding: 4px 8px; color: #ccc;">Toggle fullscreen</td>
-                    </tr>
-                    <tr style="border-bottom: 1px solid #333;">
-                        <td style="padding: 4px 8px; color: #0af; font-family: monospace;">R</td>
-                        <td style="padding: 4px 8px; color: #ccc;">Reload session</td>
-                    </tr>
-                    <tr style="border-bottom: 1px solid #333;">
-                        <td style="padding: 4px 8px; color: #0af; font-family: monospace;">1-9</td>
-                        <td style="padding: 4px 8px; color: #ccc;">Quick favorite Nth visible card</td>
-                    </tr>
-                    <tr style="border-bottom: 1px solid #333;">
-                        <td style="padding: 4px 8px; color: #0af; font-family: monospace;">Shift+0-9</td>
-                        <td style="padding: 4px 8px; color: #ccc;">Set column count (0 = auto)</td>
-                    </tr>
-                    <tr style="border-bottom: 1px solid #333;">
-                        <td style="padding: 4px 8px; color: #0af; font-family: monospace;">Ctrl+S</td>
-                        <td style="padding: 4px 8px; color: #ccc;">Save (forwarded to ComfyUI)</td>
-                    </tr>
-                    <tr style="border-bottom: 1px solid #333;">
-                        <td style="padding: 4px 8px; color: #0af; font-family: monospace;">Escape</td>
-                        <td style="padding: 4px 8px; color: #ccc;">Close modal / lightbox</td>
-                    </tr>
-                    <tr style="border-bottom: 1px solid #333;">
-                        <td style="padding: 4px 8px; color: #0af; font-family: monospace;">Double-click</td>
-                        <td style="padding: 4px 8px; color: #ccc;">Toggle favorite on card</td>
-                    </tr>
-                    <tr>
-                        <td style="padding: 4px 8px; color: #0af; font-family: monospace;">Shift+Click</td>
-                        <td style="padding: 4px 8px; color: #ccc;">Isolate a single filter</td>
-                    </tr>
-                </table>
-            </div>
         </div>
     </div>
 
