@@ -325,3 +325,38 @@ def load_ltx_models(config):
         out["latent_upscaler"] = u
 
     return out
+
+
+def encode_ltx_prompts(dual_clip, positive_text, negative_text, frame_rate):
+    """Dual-CLIP encode positive and negative prompts, then wrap with LTXVConditioning.
+
+    Returns:
+        Tuple (cond_pos, cond_neg) - LTXVConditioning-wrapped pair ready for
+        CFGGuider or LTXVCropGuides.
+    """
+    nodes_map = get_ltx_node_classes()
+
+    # Standard CLIPTextEncode (built-in V1)
+    encoder = nodes_map.get("CLIPTextEncode")
+    if encoder is None:
+        import nodes
+        encoder = nodes.NODE_CLASS_MAPPINGS["CLIPTextEncode"]
+    enc = encoder()
+
+    pos = enc.encode(clip=dual_clip, text=positive_text)[0]
+    neg = enc.encode(clip=dual_clip, text=negative_text)[0]
+
+    # LTXVConditioning wraps with frame_rate
+    cond_node = nodes_map["LTXVConditioning"]()
+    if hasattr(cond_node, "execute"):
+        # V3 API
+        from comfy_execution.utils import CurrentNodeContext
+        with CurrentNodeContext(prompt_id=str(uuid.uuid4()), node_id="uscg_ltx_cond", list_index=0):
+            r = cond_node.execute(positive=pos, negative=neg, frame_rate=int(frame_rate))
+        out = r.output if hasattr(r, "output") else r
+    else:
+        # V1 API - find the actual method (may be `apply` or similar)
+        method_name = next(n for n in dir(cond_node) if not n.startswith("_") and callable(getattr(cond_node, n)))
+        out = getattr(cond_node, method_name)(positive=pos, negative=neg, frame_rate=int(frame_rate))
+
+    return out[0], out[1]

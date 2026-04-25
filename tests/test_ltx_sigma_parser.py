@@ -79,3 +79,9 @@ def test_clear_ltx_caches_imports():
     assert callable(clear_ltx_caches)
     assert isinstance(ltx_diffusion_model_cache, dict)
     assert callable(_evict_to_max)
+
+
+def test_encode_ltx_prompts_imports():
+    """Smoke test: encode_ltx_prompts is importable and callable."""
+    from ltx_video_generation import encode_ltx_prompts
+    assert callable(encode_ltx_prompts)
