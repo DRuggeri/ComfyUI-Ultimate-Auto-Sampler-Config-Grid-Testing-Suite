@@ -236,6 +236,15 @@ def get_model_cache_key(conf):
     model_type = conf.get("model_type", "checkpoint")
     if model_type == "checkpoint":
         return conf["model"]
+    elif model_type == "ltx_video":
+        clip_models = conf.get("clip_models", ["", ""])
+        clip_a = clip_models[0] if len(clip_models) > 0 else ""
+        clip_b = clip_models[1] if len(clip_models) > 1 else ""
+        return (
+            "ltx::" + conf["model"] + "::" + clip_a + "::" + clip_b + "::" +
+            conf.get("vae_video", "") + "::" + conf.get("vae_audio", "") + "::" +
+            conf.get("latent_upscaler", "")
+        )
     else:
         te_key = "|".join(sorted(conf.get("text_encoders", [])))
         return f"{conf['model']}::{model_type}::{te_key}"
