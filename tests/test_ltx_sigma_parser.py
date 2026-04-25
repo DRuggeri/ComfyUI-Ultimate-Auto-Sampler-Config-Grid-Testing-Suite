@@ -45,3 +45,15 @@ def test_parse_leading_comma_raises():
 def test_parse_double_comma_raises():
     with pytest.raises(ValueError, match="empty token"):
         parse_sigmas("1.0,, 0.5, 0.0")
+
+
+def test_preflight_imports():
+    """Smoke test: preflight_ltx, get_ltx_node_classes, REQUIRED_LTX_NODE_NAMES are importable."""
+    from ltx_video_generation import preflight_ltx, get_ltx_node_classes, REQUIRED_LTX_NODE_NAMES
+    assert callable(preflight_ltx)
+    assert callable(get_ltx_node_classes)
+    assert isinstance(REQUIRED_LTX_NODE_NAMES, list)
+    assert len(REQUIRED_LTX_NODE_NAMES) >= 20  # At least all the required nodes
+    assert "DiffusionModelLoaderKJ" in REQUIRED_LTX_NODE_NAMES
+    assert "SamplerCustomAdvanced" in REQUIRED_LTX_NODE_NAMES
+    assert "SaveVideo" in REQUIRED_LTX_NODE_NAMES
