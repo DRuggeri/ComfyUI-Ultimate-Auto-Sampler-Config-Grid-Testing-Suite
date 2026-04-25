@@ -57,3 +57,25 @@ def test_preflight_imports():
     assert "DiffusionModelLoaderKJ" in REQUIRED_LTX_NODE_NAMES
     assert "SamplerCustomAdvanced" in REQUIRED_LTX_NODE_NAMES
     assert "SaveVideo" in REQUIRED_LTX_NODE_NAMES
+
+
+def test_load_ltx_models_imports():
+    """Smoke test: load_ltx_models is importable."""
+    from ltx_video_generation import load_ltx_models
+    assert callable(load_ltx_models)
+
+
+def test_clear_ltx_caches_imports():
+    """Smoke test: clear_ltx_caches and the 5 cache dicts are importable."""
+    from model_cache import (
+        clear_ltx_caches,
+        ltx_diffusion_model_cache,
+        ltx_dual_clip_cache,
+        ltx_video_vae_cache,
+        ltx_audio_vae_cache,
+        ltx_latent_upscaler_cache,
+        _evict_to_max,
+    )
+    assert callable(clear_ltx_caches)
+    assert isinstance(ltx_diffusion_model_cache, dict)
+    assert callable(_evict_to_max)

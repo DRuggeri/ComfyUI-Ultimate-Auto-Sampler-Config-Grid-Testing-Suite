@@ -899,3 +899,38 @@ class ModelCache:
                 "current_lora_files_cached": len(self.lora_files),
                 "has_incremental_state": self.last_patched_state is not None
             }
+
+
+# =============================================================================
+# LTX VIDEO CACHES (added 2026-04-17)
+# =============================================================================
+# Each LTX cache holds one resource keyed by concatenated file paths. LRU max=1
+# except dual_clip (max=2 lets us hold two CLIP pairs for fast A/B if user is
+# sweeping clip_models — rare). These caches are independent of the ModelCache
+# class above; LTX gen uses a different model loadout (5 separate files) and
+# doesn't fit the checkpoint+LoRA tiered model.
+
+ltx_diffusion_model_cache = {}   # max 1 entry
+ltx_dual_clip_cache = {}         # max 2 entries
+ltx_video_vae_cache = {}         # max 1 entry
+ltx_audio_vae_cache = {}         # max 1 entry
+ltx_latent_upscaler_cache = {}   # max 1 entry
+
+
+def _evict_to_max(cache, max_entries):
+    """Simple LRU: drop first-inserted (oldest) entries until size <= max."""
+    while len(cache) > max_entries:
+        first_key = next(iter(cache))
+        try:
+            del cache[first_key]
+        except Exception:
+            pass
+
+
+def clear_ltx_caches():
+    """Free all LTX caches (called when leaving LTX mode for image gen)."""
+    ltx_diffusion_model_cache.clear()
+    ltx_dual_clip_cache.clear()
+    ltx_video_vae_cache.clear()
+    ltx_audio_vae_cache.clear()
+    ltx_latent_upscaler_cache.clear()
