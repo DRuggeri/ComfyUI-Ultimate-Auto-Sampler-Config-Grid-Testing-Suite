@@ -85,3 +85,9 @@ def test_encode_ltx_prompts_imports():
     """Smoke test: encode_ltx_prompts is importable and callable."""
     from ltx_video_generation import encode_ltx_prompts
     assert callable(encode_ltx_prompts)
+
+
+def test_ltx_video_generate_imports():
+    """Smoke test: ltx_video_generate is importable and callable."""
+    from ltx_video_generation import ltx_video_generate
+    assert callable(ltx_video_generate)

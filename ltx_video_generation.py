@@ -360,3 +360,220 @@ def encode_ltx_prompts(dual_clip, positive_text, negative_text, frame_rate):
         out = getattr(cond_node, method_name)(positive=pos, negative=neg, frame_rate=int(frame_rate))
 
     return out[0], out[1]
+
+
+def ltx_video_generate(config, ltx_models, output_path):
+    """Run the two-stage LTX pipeline and write an mp4.
+
+    Phase A: text-to-video only. `input_image` is ignored.
+    `audio_mode` is always treated as "on".
+
+    Args:
+        config: Per-config dict (single config from cartesian expansion).
+        ltx_models: Output of load_ltx_models().
+        output_path: Absolute path for the mp4 output (no extension required;
+            ".mp4" appended if missing).
+
+    Returns:
+        Dict with manifest fields: video_path, frames, fps, duration, etc.
+
+    Raises:
+        Bubbles RuntimeError / OOM exceptions to caller.
+    """
+    from comfy_execution.utils import CurrentNodeContext
+    import torch
+
+    t0 = time.time()
+    nodes_map = get_ltx_node_classes()
+    prompt_id = str(uuid.uuid4())
+
+    width = int(config["width"])
+    height = int(config["height"])
+    duration_seconds = int(config["duration_seconds"])
+    frame_rate = int(config["frame_rate"])
+    cfg_scale = float(config.get("cfg", 1.0))
+    seed_stage1 = int(config["seed"])
+    seed_stage2 = seed_stage1 + 1
+
+    sigmas1 = config["sigmas_stage1"]
+    sigmas2 = config["sigmas_stage2"]
+    sampler_stage1 = config.get("sampler_stage1", "euler_ancestral_cfg_pp")
+    sampler_stage2 = config.get("sampler_stage2", "euler_cfg_pp")
+
+    frames = duration_seconds * frame_rate + 1
+
+    print("[GridTester] LTX gen: " + str(width) + "x" + str(height) +
+          ", dur=" + str(duration_seconds) + "s, fps=" + str(frame_rate) +
+          ", frames=" + str(frames) + ", seed=" + str(seed_stage1))
+
+    # Encode prompts
+    cond_pos, cond_neg = encode_ltx_prompts(
+        ltx_models["dual_clip"],
+        config.get("positive", ""),
+        config.get("negative", ""),
+        frame_rate,
+    )
+
+    diff_model = ltx_models["diffusion_model"]
+    video_vae = ltx_models["video_vae"]
+    audio_vae = ltx_models["audio_vae"]
+    upscaler = ltx_models["latent_upscaler"]
+
+    # Run all node executions inside a single mock V3 context
+    with CurrentNodeContext(prompt_id=prompt_id, node_id="uscg_ltx_gen", list_index=0):
+        # 1. Empty video latent (dimensions /2 for latent space)
+        empty_video = nodes_map["EmptyLTXVLatentVideo"].execute(
+            width=width // 2, height=height // 2, length=frames, batch_size=1
+        )
+        empty_video_latent = empty_video.output[0] if hasattr(empty_video, "output") else empty_video[0]
+
+        # 2. Empty audio latent
+        empty_audio = nodes_map["LTXVEmptyLatentAudio"].execute(
+            frames_number=frames, frame_rate=frame_rate, batch_size=1, audio_vae=audio_vae
+        )
+        empty_audio_latent = empty_audio.output[0] if hasattr(empty_audio, "output") else empty_audio[0]
+
+        # 3. Concat AV (stage 1 input). For t2v-only Phase A, no img inplace.
+        stage1_input = nodes_map["LTXVConcatAVLatent"].execute(
+            video_latent=empty_video_latent, audio_latent=empty_audio_latent
+        )
+        stage1_input_latent = stage1_input.output[0] if hasattr(stage1_input, "output") else stage1_input[0]
+
+        # 4. Stage 1 sampling
+        sampler1 = nodes_map["KSamplerSelect"].execute(sampler_name=sampler_stage1)
+        sampler1_obj = sampler1.output[0] if hasattr(sampler1, "output") else sampler1[0]
+
+        sigmas1_node = nodes_map["ManualSigmas"].execute(sigmas=sigmas1)
+        sigmas1_tensor = sigmas1_node.output[0] if hasattr(sigmas1_node, "output") else sigmas1_node[0]
+
+        noise1 = nodes_map["RandomNoise"].execute(noise_seed=seed_stage1)
+        noise1_obj = noise1.output[0] if hasattr(noise1, "output") else noise1[0]
+
+        guider1 = nodes_map["CFGGuider"].execute(
+            model=diff_model, positive=cond_pos, negative=cond_neg, cfg=cfg_scale
+        )
+        guider1_obj = guider1.output[0] if hasattr(guider1, "output") else guider1[0]
+
+        sampled1 = nodes_map["SamplerCustomAdvanced"].execute(
+            noise=noise1_obj, guider=guider1_obj, sampler=sampler1_obj,
+            sigmas=sigmas1_tensor, latent_image=stage1_input_latent,
+        )
+        sampled1_latent = sampled1.output[0] if hasattr(sampled1, "output") else sampled1[0]
+
+        # 5. Separate AV
+        sep1 = nodes_map["LTXVSeparateAVLatent"].execute(av_latent=sampled1_latent)
+        if hasattr(sep1, "output"):
+            video1, audio1 = sep1.output[0], sep1.output[1]
+        else:
+            video1, audio1 = sep1[0], sep1[1]
+
+        # 6. Spatial upscale of video latent
+        ups = nodes_map["LTXVLatentUpsampler"].execute(
+            samples=video1, upscale_model=upscaler, vae=video_vae
+        )
+        upscaled_video = ups.output[0] if hasattr(ups, "output") else ups[0]
+
+        # 7. Phase A skips LTXVImgToVideoInplace stage 2 (t2v + no upscale-input
+        #    refinement image). The upscaled latent goes straight to crop guides.
+        # 8. Crop guides on the upscaled latent
+        crop = nodes_map["LTXVCropGuides"].execute(
+            positive=cond_pos, negative=cond_neg, latent=upscaled_video
+        )
+        if hasattr(crop, "output"):
+            crop_pos, crop_neg = crop.output[0], crop.output[1]
+        else:
+            crop_pos, crop_neg = crop[0], crop[1]
+
+        # 9. Reconcat AV for stage 2
+        stage2_input = nodes_map["LTXVConcatAVLatent"].execute(
+            video_latent=upscaled_video, audio_latent=audio1
+        )
+        stage2_input_latent = stage2_input.output[0] if hasattr(stage2_input, "output") else stage2_input[0]
+
+        # 10. Stage 2 sampling
+        sampler2 = nodes_map["KSamplerSelect"].execute(sampler_name=sampler_stage2)
+        sampler2_obj = sampler2.output[0] if hasattr(sampler2, "output") else sampler2[0]
+
+        sigmas2_node = nodes_map["ManualSigmas"].execute(sigmas=sigmas2)
+        sigmas2_tensor = sigmas2_node.output[0] if hasattr(sigmas2_node, "output") else sigmas2_node[0]
+
+        noise2 = nodes_map["RandomNoise"].execute(noise_seed=seed_stage2)
+        noise2_obj = noise2.output[0] if hasattr(noise2, "output") else noise2[0]
+
+        guider2 = nodes_map["CFGGuider"].execute(
+            model=diff_model, positive=crop_pos, negative=crop_neg, cfg=cfg_scale
+        )
+        guider2_obj = guider2.output[0] if hasattr(guider2, "output") else guider2[0]
+
+        sampled2 = nodes_map["SamplerCustomAdvanced"].execute(
+            noise=noise2_obj, guider=guider2_obj, sampler=sampler2_obj,
+            sigmas=sigmas2_tensor, latent_image=stage2_input_latent,
+        )
+        sampled2_latent = sampled2.output[0] if hasattr(sampled2, "output") else sampled2[0]
+
+        # 11. Separate AV final
+        sep2 = nodes_map["LTXVSeparateAVLatent"].execute(av_latent=sampled2_latent)
+        if hasattr(sep2, "output"):
+            video2, audio2 = sep2.output[0], sep2.output[1]
+        else:
+            video2, audio2 = sep2[0], sep2[1]
+
+        # 12. Decode video (tiled - non-tiled OOMs at typical durations)
+        dec = nodes_map["VAEDecodeTiled"].execute(
+            samples=video2, vae=video_vae,
+            tile_size=768, overlap=64, temporal_size=4096, temporal_overlap=4,
+        )
+        frames_tensor = dec.output[0] if hasattr(dec, "output") else dec[0]
+
+        # 13. Decode audio (Phase A: always on)
+        adec = nodes_map["LTXVAudioVAEDecode"].execute(samples=audio2, audio_vae=audio_vae)
+        audio_waveform = adec.output[0] if hasattr(adec, "output") else adec[0]
+
+        # 14. Create video container
+        cv = nodes_map["CreateVideo"].execute(
+            fps=frame_rate, images=frames_tensor, audio=audio_waveform
+        )
+        video_obj = cv.output[0] if hasattr(cv, "output") else cv[0]
+
+        # 15. Save mp4
+        if not output_path.lower().endswith(".mp4"):
+            output_path = output_path + ".mp4"
+        out_dir = os.path.dirname(output_path)
+        out_name = os.path.splitext(os.path.basename(output_path))[0]
+        os.makedirs(out_dir, exist_ok=True)
+
+        # SaveVideo's "filename_prefix" can be a path. The node appends a
+        # timestamp/index by default - we control naming so we strip those.
+        # Use a temporary save then rename to enforce our exact filename.
+        nodes_map["SaveVideo"].execute(
+            filename_prefix=os.path.join(out_dir, out_name + "_tmp"),
+            format="mp4",
+            codec="auto",
+            video=video_obj,
+        )
+        # SaveVideo doesn't reliably return the written path in all versions -
+        # find it on disk.
+        import glob
+        candidates = sorted(glob.glob(os.path.join(out_dir, out_name + "_tmp*.mp4")))
+        if not candidates:
+            raise RuntimeError("SaveVideo did not produce an mp4 in " + out_dir)
+        actual = candidates[-1]  # newest if multiple
+        if actual != output_path:
+            try:
+                if os.path.exists(output_path):
+                    os.remove(output_path)
+                os.rename(actual, output_path)
+            except Exception as e:
+                raise RuntimeError("Failed to rename SaveVideo output to " + output_path + ": " + str(e))
+
+    duration = round(time.time() - t0, 2)
+
+    return {
+        "video_path": output_path,
+        "frames": frames,
+        "fps": frame_rate,
+        "duration_seconds": duration_seconds,
+        "width": width,
+        "height": height,
+        "duration": duration,  # gen wall time
+    }
