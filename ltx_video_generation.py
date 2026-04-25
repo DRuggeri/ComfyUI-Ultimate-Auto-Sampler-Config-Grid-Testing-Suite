@@ -55,7 +55,13 @@ def parse_sigmas(sigma_str):
     if not sigma_str or not sigma_str.strip():
         raise ValueError("Sigma string is empty")
 
-    tokens = [t.strip() for t in sigma_str.split(",") if t.strip()]
+    tokens = [t.strip() for t in sigma_str.split(",")]
+    # Reject empty tokens (catches trailing/leading/double commas)
+    for tok in tokens:
+        if not tok:
+            raise ValueError(
+                "Sigma string has an empty token (trailing/leading/double comma): " + repr(sigma_str)
+            )
     if len(tokens) < 2:
         raise ValueError(
             "Sigma string must contain at least 2 comma-separated values, got: " + repr(sigma_str)
