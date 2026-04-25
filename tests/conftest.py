@@ -21,6 +21,7 @@ _COMFY_STUBS = [
     "comfy.utils",
     "comfy.sd",
     "comfy.model_management",
+    "comfy.samplers",
 ]
 
 for _mod_name in _COMFY_STUBS:
@@ -38,7 +39,21 @@ for _mod_name in _COMFY_STUBS:
                 def put(self, *a, **kw):
                     return lambda fn: fn
             _stub.RouteTableDef = _RouteTableDef
+        # comfy.samplers needs KSampler with SCHEDULERS and SAMPLERS lists
+        if _mod_name == "comfy.samplers":
+            class _KSampler:  # noqa: N801
+                SCHEDULERS = ["normal", "karras", "exponential", "sgm_uniform", "simple", "ddim_uniform"]
+                SAMPLERS = ["euler", "euler_ancestral", "heun", "dpm_2", "dpm_2_ancestral",
+                            "lms", "dpm_fast", "dpm_adaptive", "dpmpp_2s_ancestral",
+                            "dpmpp_sde", "dpmpp_2m", "dpmpp_2m_sde", "ddim", "uni_pc",
+                            "uni_pc_bh2"]
+            _stub.KSampler = _KSampler
         sys.modules[_mod_name] = _stub
+
+# Wire comfy.samplers as an attribute of the comfy stub so
+# `import comfy.samplers` and `comfy.samplers.KSampler` both resolve
+if hasattr(sys.modules.get("comfy"), "__name__"):
+    sys.modules["comfy"].samplers = sys.modules["comfy.samplers"]
 
 # Ensure the custom node root is on sys.path so `ltx_video_generation` is importable
 _NODE_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))

@@ -361,6 +361,75 @@ def expand_lora_stack(lora_input):
     return expanded_loras
 
 
+def _normalize_ltx_audio_mode(entry):
+    """Convert audio_mode='both' to ['on', 'off'] for cartesian expansion."""
+    if entry.get("audio_mode") == "both":
+        e = dict(entry)
+        e["audio_mode"] = ["on", "off"]
+        return e
+    return entry
+
+
+def _expand_ltx_entry(entry):
+    """Expand a single ltx_video entry into a list of fully-resolved LTX configs.
+
+    Each LTX field that is a list (except clip_models which has special semantics)
+    contributes a Cartesian axis. Returns a list of dicts ready for the orchestrator.
+    """
+    e = _normalize_ltx_audio_mode(entry)
+
+    def to_list(x):
+        return x if isinstance(x, list) else [x]
+
+    # clip_models special case:
+    # - [str, str] (2 strings) -> single value (a CLIP pair)
+    # - [[str, str], [str, str], ...] -> sweep
+    raw_clip = e.get("clip_models", ["", ""])
+    if isinstance(raw_clip, list) and len(raw_clip) == 2 and all(isinstance(c, str) for c in raw_clip):
+        clip_options = [raw_clip]
+    elif isinstance(raw_clip, list) and all(isinstance(c, list) for c in raw_clip):
+        clip_options = raw_clip
+    else:
+        clip_options = [raw_clip]
+
+    # All other fields: simple to_list
+    field_axes = {
+        "model": to_list(e.get("model", "")),
+        "clip_models": clip_options,
+        "vae_video": to_list(e.get("vae_video", "")),
+        "vae_audio": to_list(e.get("vae_audio", "")),
+        "latent_upscaler": to_list(e.get("latent_upscaler", "")),
+        "duration_seconds": to_list(e.get("duration_seconds", 5)),
+        "frame_rate": to_list(e.get("frame_rate", 25)),
+        "sampler_stage1": to_list(e.get("sampler_stage1", "euler_ancestral_cfg_pp")),
+        "sampler_stage2": to_list(e.get("sampler_stage2", "euler_cfg_pp")),
+        "sigmas_stage1": to_list(e.get("sigmas_stage1", "")),
+        "sigmas_stage2": to_list(e.get("sigmas_stage2", "")),
+        "cfg": to_list(e.get("cfg", 1.0)),
+        "seed": to_list(e.get("seed", 0)),
+        "input_image": to_list(e.get("input_image")) if e.get("input_image") is not None else [None],
+        "image_strength_stage1": to_list(e.get("image_strength_stage1", 0.8)),
+        "image_strength_stage2": to_list(e.get("image_strength_stage2", 1.0)),
+        "img_compression": to_list(e.get("img_compression", 18)),
+        "audio_mode": to_list(e.get("audio_mode", "on")),
+        "lora": to_list(e.get("lora", "None")),
+        "positive": to_list(e.get("positive", "")),
+        "negative": to_list(e.get("negative", "")),
+        "width": to_list(e.get("width", 446)),
+        "height": to_list(e.get("height", 576)),
+    }
+
+    keys = list(field_axes.keys())
+    values = [field_axes[k] for k in keys]
+
+    expanded = []
+    for combo in itertools.product(*values):
+        cfg = dict(zip(keys, combo))
+        cfg["model_type"] = "ltx_video"
+        expanded.append(cfg)
+    return expanded
+
+
 def expand_configs(raw_configs, pos_prompts, neg_prompts, denoise_values, seed, extra_seeds, ckpt_name=None):
     """
     Expand raw config entries into full configuration combinations.
@@ -396,6 +465,11 @@ def expand_configs(raw_configs, pos_prompts, neg_prompts, denoise_values, seed, 
         return x if isinstance(x, list) else [x]
 
     for entry in raw_configs:
+        # Branch early for LTX video — different field shape, separate cartesian
+        if entry.get("model_type") == "ltx_video":
+            expanded.extend(_expand_ltx_entry(entry))
+            continue
+
         # ==== PER-CONFIG PROMPT HANDLING ====
         # If this config defines its own prompts, parse them and use instead of defaults
         if "positive" in entry or "negative" in entry:
