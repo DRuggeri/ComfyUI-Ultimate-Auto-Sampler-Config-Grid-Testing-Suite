@@ -1293,7 +1293,7 @@ export function createModelElement(node, modelEntry, arrayIdx, modelIdx, modelLi
     // Show model type badge
     if (modelType !== "checkpoint") {
         const typeBadge = document.createElement("span");
-        typeBadge.textContent = modelType === "gguf" ? "GGUF" : "DM";
+        typeBadge.textContent = modelType === "gguf" ? "GGUF" : modelType === "ltx_video" ? "LTX" : "DM";
         typeBadge.style.cssText = "background: #553300; color: #ffaa44; padding: 1px 5px; border-radius: 3px; font-size: 9px; font-weight: bold;";
         leftGroup.appendChild(typeBadge);
     }
@@ -1368,7 +1368,10 @@ export function createModelElement(node, modelEntry, arrayIdx, modelIdx, modelLi
     // File/Folder Type Select
     const typeSelect = document.createElement("select");
     typeSelect.className = "cb-select";
-    const fileLabel = modelType === "gguf" ? "GGUF File" : modelType === "diffusion_model" ? "Diffusion File" : "Checkpoint File";
+    const fileLabel = modelType === "gguf" ? "GGUF File"
+        : modelType === "diffusion_model" ? "Diffusion File"
+        : modelType === "ltx_video" ? "LTX Diffusion File"
+        : "Checkpoint File";
     typeSelect.innerHTML = `
         <option value="file" ${!isFolder ? 'selected' : ''}>${fileLabel}</option>
         <option value="folder" ${isFolder ? 'selected' : ''}>Folder</option>
@@ -1390,7 +1393,8 @@ export function createModelElement(node, modelEntry, arrayIdx, modelIdx, modelLi
     if (modelType === 'gguf') {
         fileOptions = modelLists.ggufModels || [];
         folderOptions = modelLists.ggufFolders || ["/"];
-    } else if (modelType === 'diffusion_model') {
+    } else if (modelType === 'diffusion_model' || modelType === 'ltx_video') {
+        // LTX 2.3 ships as diffusion-only safetensors (separate VAEs); same source folder as diffusion_model
         fileOptions = modelLists.diffusionModels || [];
         folderOptions = modelLists.diffusionFolders || ["/"];
     } else {
