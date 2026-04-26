@@ -441,25 +441,55 @@ def ltx_video_generate(config, ltx_models, output_path):
     # Run all node executions inside a single mock V3 context
     with CurrentNodeContext(prompt_id=prompt_id, node_id="uscg_ltx_gen", list_index=0):
         # 1. Empty video latent (dimensions /2 for latent space)
-        empty_video_latent = _unwrap(
-            _call_node(nodes_map["EmptyLTXVLatentVideo"],
-                       width=width // 2, height=height // 2, length=frames, batch_size=1),
-            0,
-        )
+        empty_video_latent = _unwrap(_call_node(
+            nodes_map["EmptyLTXVLatentVideo"],
+            width=width // 2, height=height // 2, length=frames, batch_size=1,
+        ), 0)
 
         # 2. Empty audio latent
-        empty_audio_latent = _unwrap(
-            _call_node(nodes_map["LTXVEmptyLatentAudio"],
-                       frames_number=frames, frame_rate=frame_rate, batch_size=1, audio_vae=audio_vae),
-            0,
-        )
+        empty_audio_latent = _unwrap(_call_node(
+            nodes_map["LTXVEmptyLatentAudio"],
+            frames_number=frames, frame_rate=frame_rate, batch_size=1, audio_vae=audio_vae,
+        ), 0)
 
-        # 3. Concat AV (stage 1 input). For t2v-only Phase A, no img inplace.
-        stage1_input_latent = _unwrap(
-            _call_node(nodes_map["LTXVConcatAVLatent"],
-                       video_latent=empty_video_latent, audio_latent=empty_audio_latent),
-            0,
-        )
+        # 2.5. If i2v: preprocess input image and run LTXVImgToVideoInplace stage 1.
+        # The preprocessed image tensor is reused for stage 2 (post-upscale refinement).
+        input_image_path = config.get("input_image")
+        is_i2v = bool(input_image_path)
+        i2v_preprocessed_image = None
+        if is_i2v:
+            from PIL import Image as PILImage
+            import numpy as np
+            import torch as _torch
+            pil = PILImage.open(input_image_path).convert("RGB")
+            # Resize to target dims (matches reference workflow's ResizeImageMaskNode)
+            pil = pil.resize((width, height), PILImage.LANCZOS)
+            img_np = np.array(pil).astype(np.float32) / 255.0
+            img_tensor = _torch.from_numpy(img_np).unsqueeze(0)  # [1, H, W, 3]
+
+            i2v_preprocessed_image = _unwrap(_call_node(
+                nodes_map["LTXVPreprocess"],
+                image=img_tensor,
+                img_compression=int(config.get("img_compression", 18)),
+            ), 0)
+
+            # Apply ImgToVideoInplace stage 1 (strength_stage1)
+            video_pre = _unwrap(_call_node(
+                nodes_map["LTXVImgToVideoInplace"],
+                strength=float(config.get("image_strength_stage1", 0.8)),
+                bypass=False,
+                vae=video_vae,
+                image=i2v_preprocessed_image,
+                latent=empty_video_latent,
+            ), 0)
+        else:
+            video_pre = empty_video_latent
+
+        # 3. Concat AV (stage 1 input)
+        stage1_input_latent = _unwrap(_call_node(
+            nodes_map["LTXVConcatAVLatent"],
+            video_latent=video_pre, audio_latent=empty_audio_latent,
+        ), 0)
 
         # 4. Stage 1 sampling
         sampler1_obj = _unwrap(_call_node(nodes_map["KSamplerSelect"], sampler_name=sampler_stage1), 0)
@@ -492,9 +522,18 @@ def ltx_video_generate(config, ltx_models, output_path):
             0,
         )
 
-        # 7. Phase A skips LTXVImgToVideoInplace stage 2 (t2v + no upscale-input
-        #    refinement image). The upscaled latent goes straight to crop guides.
-        # 8. Crop guides on the upscaled latent
+        # 7. If i2v: apply LTXVImgToVideoInplace stage 2 to the upscaled latent for refinement
+        if is_i2v and i2v_preprocessed_image is not None:
+            upscaled_video = _unwrap(_call_node(
+                nodes_map["LTXVImgToVideoInplace"],
+                strength=float(config.get("image_strength_stage2", 1.0)),
+                bypass=False,
+                vae=video_vae,
+                image=i2v_preprocessed_image,
+                latent=upscaled_video,
+            ), 0)
+
+        # 8. Crop guides on the (possibly i2v-refined) upscaled latent
         crop = _call_node(nodes_map["LTXVCropGuides"],
                           positive=cond_pos, negative=cond_neg, latent=upscaled_video)
         crop_pos, crop_neg = _unwrap(crop, 0), _unwrap(crop, 1)
@@ -583,10 +622,26 @@ def ltx_video_generate(config, ltx_models, output_path):
             # Older Comfy: positional or differently-named kwargs
             video_obj.save_to(output_path)
 
+    # Preview thumbnail: middle frame as PNG for fast dashboard previews
+    preview_path = None
+    try:
+        from PIL import Image as PILImage
+        import numpy as np
+        # frames_tensor shape: [N_frames, H, W, 3] float32 in [0, 1]
+        n = frames_tensor.shape[0]
+        mid_idx = n // 2
+        mid_np = (frames_tensor[mid_idx].cpu().numpy() * 255).clip(0, 255).astype(np.uint8)
+        preview_path = output_path[:-4] + ".preview.png" if output_path.lower().endswith(".mp4") else output_path + ".preview.png"
+        PILImage.fromarray(mid_np, "RGB").save(preview_path)
+    except Exception as e:
+        print("[GridTester] Preview thumbnail write failed: " + str(e))
+        preview_path = None
+
     duration = round(time.time() - t0, 2)
 
     return {
         "video_path": output_path,
+        "preview_path": preview_path,
         "frames": frames,
         "fps": frame_rate,
         "duration_seconds": duration_seconds,
