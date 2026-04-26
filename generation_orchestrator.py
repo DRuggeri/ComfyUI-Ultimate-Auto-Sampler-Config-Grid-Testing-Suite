@@ -982,7 +982,11 @@ def run_generation_loop(
     # ==== PRE-ENCODING STAGE ====
     unique_model_keys = set(get_model_cache_key(conf) for conf in expanded)
 
-    if not (optional_positive and optional_negative) and expanded and len(unique_model_keys) == 1:
+    # LTX video runs use their own dual-CLIP encoder inside ltx_video_generate(),
+    # so skip the standard image-gen pre-encoding entirely when every config is LTX.
+    all_ltx = expanded and all(c.get("model_type") == "ltx_video" for c in expanded)
+
+    if not all_ltx and not (optional_positive and optional_negative) and expanded and len(unique_model_keys) == 1:
         first_conf = expanded[0]
         target_model_name = first_conf["model"]
 
