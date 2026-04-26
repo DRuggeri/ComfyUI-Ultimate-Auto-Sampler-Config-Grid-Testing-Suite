@@ -550,37 +550,38 @@ def ltx_video_generate(config, ltx_models, output_path):
             0,
         )
 
-        # 15. Save mp4
+        # 15. Save mp4 — call video.save_to() directly instead of going through
+        # the SaveVideo node. SaveVideo accesses cls.hidden.extra_pnginfo/prompt
+        # which the normal Comfy executor populates but we don't (and we don't
+        # need pnginfo metadata for video files anyway). save_to() is what
+        # SaveVideo.execute() calls internally — same code path, no hidden deps.
         if not output_path.lower().endswith(".mp4"):
             output_path = output_path + ".mp4"
         out_dir = os.path.dirname(output_path)
-        out_name = os.path.splitext(os.path.basename(output_path))[0]
         os.makedirs(out_dir, exist_ok=True)
 
-        # SaveVideo's "filename_prefix" can be a path. The node appends a
-        # timestamp/index by default - we control naming so we strip those.
-        # Use a temporary save then rename to enforce our exact filename.
-        _call_node(
-            nodes_map["SaveVideo"],
-            filename_prefix=os.path.join(out_dir, out_name + "_tmp"),
-            format="mp4",
-            codec="auto",
-            video=video_obj,
-        )
-        # SaveVideo doesn't reliably return the written path in all versions -
-        # find it on disk.
-        import glob
-        candidates = sorted(glob.glob(os.path.join(out_dir, out_name + "_tmp*.mp4")))
-        if not candidates:
-            raise RuntimeError("SaveVideo did not produce an mp4 in " + out_dir)
-        actual = candidates[-1]  # newest if multiple
-        if actual != output_path:
+        try:
+            from comfy_api.latest._input_impl import VideoContainer as _VideoContainerEnum
+        except ImportError:
             try:
-                if os.path.exists(output_path):
-                    os.remove(output_path)
-                os.rename(actual, output_path)
-            except Exception as e:
-                raise RuntimeError("Failed to rename SaveVideo output to " + output_path + ": " + str(e))
+                from comfy_api.latest._input.video_types import VideoContainer as _VideoContainerEnum
+            except ImportError:
+                _VideoContainerEnum = None
+
+        save_kwargs = {"codec": "auto", "metadata": None}
+        if _VideoContainerEnum is not None:
+            try:
+                save_kwargs["format"] = _VideoContainerEnum("mp4")
+            except Exception:
+                save_kwargs["format"] = "mp4"
+        else:
+            save_kwargs["format"] = "mp4"
+
+        try:
+            video_obj.save_to(output_path, **save_kwargs)
+        except TypeError:
+            # Older Comfy: positional or differently-named kwargs
+            video_obj.save_to(output_path)
 
     duration = round(time.time() - t0, 2)
 
