@@ -141,7 +141,9 @@ def test_build_ltx_manifest_entry_imports():
     entry = _build_ltx_manifest_entry(conf, gen_result, "myfile_seed42")
     assert entry["media_type"] == "video"
     assert entry["video_path"] == "/tmp/gen.mp4"
-    assert entry["image_path"] is None
+    # image_path mirrors video_path so the dashboard's existing image-loader picks
+    # up video items through the same code path.
+    assert entry["image_path"] == entry["video_path"]
     assert entry["preview_path"] == "/tmp/gen.preview.png"
     assert entry["clip_models"] == ["c1.safetensors", "c2.safetensors"]
     assert entry["sampler_stage2"] == "euler_cfg_pp"
