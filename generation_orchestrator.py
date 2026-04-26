@@ -1255,6 +1255,14 @@ def run_generation_loop(
                         print(f"[GridTester] LTX preflight FAILED: {e}")
                         raise
 
+                # Override conf width/height with the current loop's resolution.
+                # The loop's `w, h` comes from the sampler node's resolutions widget
+                # (or a per-config override). LTX configs don't have width/height in
+                # their builder UI yet, so the cartesian-expansion defaults (446x576)
+                # would otherwise stick.
+                conf["width"] = w
+                conf["height"] = h
+
                 # Filename uses gen index + timestamp suffix to guarantee uniqueness
                 # per run. Skip-on-exists is intentionally NOT enabled for LTX (v1) —
                 # the resume/match logic image-gen uses doesn't yet understand LTX
@@ -1263,7 +1271,7 @@ def run_generation_loop(
                 # seed). Until we have a proper LTX-aware manifest match, every LTX
                 # gen runs fresh. Users can manually delete unwanted mp4s.
                 _ts_suffix = str(int(time.time() * 1000) % 10_000_000)
-                ltx_output_filename = f"{conf_idx:06d}_seed{conf.get('seed', 0)}_dur{conf.get('duration_seconds', 5)}s_{conf.get('frame_rate', 25)}fps_{_ts_suffix}"
+                ltx_output_filename = f"{conf_idx:06d}_seed{conf.get('seed', 0)}_{w}x{h}_dur{conf.get('duration_seconds', 5)}s_{conf.get('frame_rate', 25)}fps_{_ts_suffix}"
                 ltx_output_path = os.path.join(paths["images"], ltx_output_filename + ".mp4")
 
                 progress_pct = int((current_job / total_jobs) * 100)
