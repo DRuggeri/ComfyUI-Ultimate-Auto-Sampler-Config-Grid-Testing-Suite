@@ -3978,6 +3978,44 @@ function renderLTXStage(node, stageNum) {
     return div;
 }
 
+function renderLTXImageInput(node) {
+    const div = document.createElement("div");
+    div.className = "cb-subsection";
+
+    const titleDiv = document.createElement("div");
+    titleDiv.className = "cb-subsection-title";
+    titleDiv.textContent = "── Image-to-Video Input ──";
+    div.appendChild(titleDiv);
+
+    const note = document.createElement("div");
+    note.style.cssText = "font-size: 10px; color: #666; padding: 4px 8px;";
+    note.textContent = "(Phase A: text-to-video only. Image input enabled in Phase B.)";
+    div.appendChild(note);
+
+    return div;
+}
+
+
+function renderLTXAudio(node) {
+    const div = document.createElement("div");
+    div.className = "cb-subsection";
+
+    const titleDiv = document.createElement("div");
+    titleDiv.className = "cb-subsection-title";
+    titleDiv.textContent = "── Audio ──";
+    div.appendChild(titleDiv);
+
+    const note = document.createElement("div");
+    note.style.cssText = "font-size: 10px; color: #666; padding: 4px 8px;";
+
+    const strong = document.createElement("strong");
+    strong.textContent = "On";
+    note.append("Audio: ", strong, " (Phase A: always-on. Toggle added in Phase C.)");
+
+    div.appendChild(note);
+    return div;
+}
+
 function renderLTXSection(node) {
     if (node.state.model_type !== "ltx_video") return null;
 
