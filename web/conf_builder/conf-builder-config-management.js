@@ -15,7 +15,8 @@ import {
     getAvailableVAEs,
     getVAEFolders,
     getAvailableTextEncoders,
-    getAvailableUpscaleModels
+    getAvailableUpscaleModels,
+    getAvailableSamplers
 } from './conf-builder-utilities.js';
 
 import {
@@ -3882,6 +3883,97 @@ function renderLTXModelFiles(node) {
         row.appendChild(dropdown);
         div.appendChild(row);
     }
+
+    return div;
+}
+
+function renderLTXStage(node, stageNum) {
+    const ltx = node.state.ltx_video;
+    const samplerKey = "sampler_stage" + stageNum;
+    const sigmasKey = "sigmas_stage" + stageNum;
+    const titleText = stageNum === 1
+        ? "── Stage 1: Initial Sampling ──"
+        : "── Stage 2: Spatial Upscale + Refinement ──";
+
+    const div = document.createElement("div");
+    div.className = "cb-subsection";
+
+    const titleDiv = document.createElement("div");
+    titleDiv.className = "cb-subsection-title";
+    titleDiv.textContent = titleText;
+    div.appendChild(titleDiv);
+
+    // Sampler dropdown row
+    const samplerRow = document.createElement("div");
+    samplerRow.className = "cb-row";
+
+    const samplerLabel = document.createElement("label");
+    samplerLabel.className = "cb-label";
+    samplerLabel.textContent = "Sampler:";
+    samplerRow.appendChild(samplerLabel);
+
+    // Use getAvailableSamplers() (imported from conf-builder-utilities.js) to get the live
+    // sampler list — same source as the main image-gen sampler dropdown.
+    const currentSampler = ltx[samplerKey] || "";
+    const samplerList = getAvailableSamplers();
+    // Ensure current value is in the list even if not yet cached
+    const samplerOptions = (samplerList.includes(currentSampler) || !currentSampler)
+        ? samplerList
+        : [currentSampler, ...samplerList];
+    const samplerDropdown = createSearchableSelect(
+        samplerOptions,
+        currentSampler,
+        (v) => { ltx[samplerKey] = v; node.saveState(); },
+        "Select sampler..."
+    );
+    samplerRow.appendChild(samplerDropdown);
+    div.appendChild(samplerRow);
+
+    // Sigmas text field with Compare button
+    const sigmasRow = document.createElement("div");
+    sigmasRow.className = "cb-row";
+
+    const sigmasLabel = document.createElement("label");
+    sigmasLabel.className = "cb-label";
+    sigmasLabel.textContent = "Sigmas:";
+    sigmasRow.appendChild(sigmasLabel);
+
+    const sigmasInput = document.createElement("input");
+    sigmasInput.type = "text";
+    sigmasInput.className = "cb-input";
+    sigmasInput.style.cssText = "flex: 1; font-family: monospace; font-size: 10px;";
+    sigmasInput.value = Array.isArray(ltx[sigmasKey]) ? ltx[sigmasKey].join("; ") : (ltx[sigmasKey] || "");
+    sigmasInput.title =
+        "Comma-separated float schedule, e.g. '0.85, 0.7250, 0.4219, 0.0'.\n\n" +
+        "Click '+ Compare' to sweep multiple sigma presets - separate them with semicolons:\n" +
+        "  '1.0,0.5,0.0; 0.9,0.4,0.0' produces 2 runs per config.";
+    sigmasInput.onchange = () => {
+        const v = sigmasInput.value;
+        if (v.includes(";")) {
+            ltx[sigmasKey] = v.split(";").map(s => s.trim()).filter(Boolean);
+        } else {
+            ltx[sigmasKey] = v;
+        }
+        node.saveState();
+    };
+    sigmasRow.appendChild(sigmasInput);
+
+    const compareBtn = document.createElement("button");
+    compareBtn.className = "cb-btn";
+    compareBtn.textContent = "+ Compare Sigmas";
+    compareBtn.title =
+        "Test multiple sigma presets for stage " + stageNum + " in one run.\n\n" +
+        "Separate presets with semicolons. Each preset is a comma-list of floats.\n" +
+        "Example: '1.0, 0.5, 0.0; 0.9, 0.4, 0.0' → 2 runs per config.";
+    compareBtn.onclick = () => {
+        if (!sigmasInput.value.includes(";")) {
+            sigmasInput.value = sigmasInput.value + "; ";
+            sigmasInput.focus();
+            sigmasInput.setSelectionRange(sigmasInput.value.length, sigmasInput.value.length);
+        }
+    };
+    sigmasRow.appendChild(compareBtn);
+    div.appendChild(sigmasRow);
 
     return div;
 }
