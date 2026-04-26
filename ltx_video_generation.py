@@ -168,16 +168,24 @@ def _call_node(node_cls, **kwargs):
 def _unwrap(result, idx=0):
     """Normalize a node's return value to a single positional output by index.
 
-    V3 nodes return objects with .output (a tuple). V1 nodes return tuples directly.
-    Some return a single object; some return a list. Handle all of these.
+    V3 io.NodeOutput stores positional outputs in `.args` (a tuple) and supports
+    `result[idx]` via __getitem__. V1 nodes return plain tuples/lists. A few helpers
+    return a single object directly.
     """
+    # V3 io.NodeOutput
+    if hasattr(result, "args") and isinstance(getattr(result, "args"), tuple):
+        return result.args[idx]
+    # Some legacy helpers used a `.output` attribute (e.g. SeedVR2-style returns)
     if hasattr(result, "output"):
         out = result.output
-    else:
-        out = result
-    if isinstance(out, (tuple, list)):
-        return out[idx]
-    return out
+        if isinstance(out, (tuple, list)):
+            return out[idx]
+        return out
+    # V1 plain tuple/list
+    if isinstance(result, (tuple, list)):
+        return result[idx]
+    # Single bare value (unusual but possible)
+    return result
 
 
 def preflight_ltx(config):
