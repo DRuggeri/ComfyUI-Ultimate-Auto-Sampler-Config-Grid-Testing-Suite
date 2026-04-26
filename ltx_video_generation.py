@@ -133,6 +133,53 @@ def get_ltx_node_classes():
     return found
 
 
+def _call_node(node_cls, **kwargs):
+    """Call a Comfy node regardless of V1/V3 API. Returns whatever the node returns
+    (typically a tuple, but V3 nodes return an object with .output).
+
+    V3 (io.ComfyNode subclass): class-level .execute() classmethod — must be inside
+        a CurrentNodeContext block.
+    V1 (legacy): node has a FUNCTION attribute naming an instance method; instantiate
+        the class then call that method on the instance. KJ nodes and most core ComfyUI
+        nodes work this way.
+    """
+    # Try V3 first via subclass check (avoids triggering AttributeError noise on V1 nodes
+    # that may also happen to have an unrelated `execute` attribute somewhere).
+    try:
+        from comfy_api.latest import io
+        if isinstance(node_cls, type) and issubclass(node_cls, io.ComfyNode):
+            return node_cls.execute(**kwargs)
+    except (ImportError, TypeError):
+        pass
+
+    # V1 path: FUNCTION attribute names the instance method to invoke
+    fn_name = getattr(node_cls, "FUNCTION", None)
+    if fn_name:
+        inst = node_cls()
+        return getattr(inst, fn_name)(**kwargs)
+
+    # Last-resort fallback: try class-level .execute()
+    if hasattr(node_cls, "execute"):
+        return node_cls.execute(**kwargs)
+
+    raise RuntimeError("Cannot determine entry method for node " + repr(node_cls))
+
+
+def _unwrap(result, idx=0):
+    """Normalize a node's return value to a single positional output by index.
+
+    V3 nodes return objects with .output (a tuple). V1 nodes return tuples directly.
+    Some return a single object; some return a list. Handle all of these.
+    """
+    if hasattr(result, "output"):
+        out = result.output
+    else:
+        out = result
+    if isinstance(out, (tuple, list)):
+        return out[idx]
+    return out
+
+
 def preflight_ltx(config):
     """Validate that LTX gen can run for this config. Raises RuntimeError on any
     missing node, missing model file, or missing ffmpeg.
@@ -220,12 +267,13 @@ def load_ltx_models(config):
 
     out = {}
 
-    # --- Diffusion model (V3 API: DiffusionModelLoaderKJ.execute) ---
+    # --- Diffusion model (V1 API: DiffusionModelLoaderKJ.patch_and_load) ---
     if diff_key in model_cache.ltx_diffusion_model_cache:
         out["diffusion_model"] = model_cache.ltx_diffusion_model_cache[diff_key]
     else:
         with CurrentNodeContext(prompt_id=dummy_prompt_id, node_id="uscg_ltx_diff", list_index=0):
-            r = nodes_map["DiffusionModelLoaderKJ"].execute(
+            r = _call_node(
+                nodes_map["DiffusionModelLoaderKJ"],
                 model_name=config["model"],
                 weight_dtype=weight_dtype,
                 compute_dtype=compute_dtype,
@@ -233,7 +281,7 @@ def load_ltx_models(config):
                 sage_attention="disabled",
                 enable_fp16_accumulation=False,
             )
-        m = r.output[0] if hasattr(r, "output") else r[0]
+        m = _unwrap(r, 0)
         model_cache.ltx_diffusion_model_cache[diff_key] = m
         model_cache._evict_to_max(model_cache.ltx_diffusion_model_cache, 1)
         out["diffusion_model"] = m
@@ -242,63 +290,46 @@ def load_ltx_models(config):
     if clip_key in model_cache.ltx_dual_clip_cache:
         out["dual_clip"] = model_cache.ltx_dual_clip_cache[clip_key]
     else:
-        clip_loader_cls = nodes_map["DualCLIPLoader"]
-        clip_loader = clip_loader_cls()
-        # Verify load_clip is the right method name; if not, find it by introspection.
-        if hasattr(clip_loader, "load_clip"):
-            r = clip_loader.load_clip(
-                clip_name1=config["clip_models"][0],
-                clip_name2=config["clip_models"][1],
-                type="ltxv",
-                device="default",
-            )
-        else:
-            # Fallback: find the first non-dunder callable method that's not from object
-            method_name = next(
-                (n for n in dir(clip_loader)
-                 if not n.startswith("_") and callable(getattr(clip_loader, n))
-                 and n not in ("INPUT_TYPES",)),
-                None
-            )
-            if method_name is None:
-                raise RuntimeError("Could not find DualCLIPLoader entry method")
-            r = getattr(clip_loader, method_name)(
-                clip_name1=config["clip_models"][0],
-                clip_name2=config["clip_models"][1],
-                type="ltxv",
-                device="default",
-            )
-        c = r[0] if isinstance(r, tuple) else r
+        r = _call_node(
+            nodes_map["DualCLIPLoader"],
+            clip_name1=config["clip_models"][0],
+            clip_name2=config["clip_models"][1],
+            type="ltxv",
+            device="default",
+        )
+        c = _unwrap(r, 0)
         model_cache.ltx_dual_clip_cache[clip_key] = c
         model_cache._evict_to_max(model_cache.ltx_dual_clip_cache, 2)
         out["dual_clip"] = c
 
-    # --- Video VAE (V3 API: VAELoaderKJ.execute) ---
+    # --- Video VAE (V1 API: VAELoaderKJ.load_vae) ---
     if vvae_key in model_cache.ltx_video_vae_cache:
         out["video_vae"] = model_cache.ltx_video_vae_cache[vvae_key]
     else:
         with CurrentNodeContext(prompt_id=dummy_prompt_id, node_id="uscg_ltx_vvae", list_index=0):
-            r = nodes_map["VAELoaderKJ"].execute(
+            r = _call_node(
+                nodes_map["VAELoaderKJ"],
                 vae_name=config["vae_video"],
                 device=device,
                 weight_dtype="bf16",
             )
-        v = r.output[0] if hasattr(r, "output") else r[0]
+        v = _unwrap(r, 0)
         model_cache.ltx_video_vae_cache[vvae_key] = v
         model_cache._evict_to_max(model_cache.ltx_video_vae_cache, 1)
         out["video_vae"] = v
 
-    # --- Audio VAE (V3 API: VAELoaderKJ.execute) ---
+    # --- Audio VAE (V1 API: VAELoaderKJ.load_vae) ---
     if avae_key in model_cache.ltx_audio_vae_cache:
         out["audio_vae"] = model_cache.ltx_audio_vae_cache[avae_key]
     else:
         with CurrentNodeContext(prompt_id=dummy_prompt_id, node_id="uscg_ltx_avae", list_index=0):
-            r = nodes_map["VAELoaderKJ"].execute(
+            r = _call_node(
+                nodes_map["VAELoaderKJ"],
                 vae_name=config["vae_audio"],
                 device=device,
                 weight_dtype="bf16",
             )
-        v = r.output[0] if hasattr(r, "output") else r[0]
+        v = _unwrap(r, 0)
         model_cache.ltx_audio_vae_cache[avae_key] = v
         model_cache._evict_to_max(model_cache.ltx_audio_vae_cache, 1)
         out["audio_vae"] = v
@@ -307,21 +338,8 @@ def load_ltx_models(config):
     if upsc_key in model_cache.ltx_latent_upscaler_cache:
         out["latent_upscaler"] = model_cache.ltx_latent_upscaler_cache[upsc_key]
     else:
-        ld_cls = nodes_map["LatentUpscaleModelLoader"]
-        ld = ld_cls()
-        if hasattr(ld, "load_model"):
-            r = ld.load_model(model_name=config["latent_upscaler"])
-        else:
-            method_name = next(
-                (n for n in dir(ld)
-                 if not n.startswith("_") and callable(getattr(ld, n))
-                 and n not in ("INPUT_TYPES",)),
-                None
-            )
-            if method_name is None:
-                raise RuntimeError("Could not find LatentUpscaleModelLoader entry method")
-            r = getattr(ld, method_name)(model_name=config["latent_upscaler"])
-        u = r[0] if isinstance(r, tuple) else r
+        r = _call_node(nodes_map["LatentUpscaleModelLoader"], model_name=config["latent_upscaler"])
+        u = _unwrap(r, 0)
         model_cache.ltx_latent_upscaler_cache[upsc_key] = u
         model_cache._evict_to_max(model_cache.ltx_latent_upscaler_cache, 1)
         out["latent_upscaler"] = u
@@ -343,25 +361,16 @@ def encode_ltx_prompts(dual_clip, positive_text, negative_text, frame_rate):
     if encoder is None:
         import nodes
         encoder = nodes.NODE_CLASS_MAPPINGS["CLIPTextEncode"]
-    enc = encoder()
 
-    pos = enc.encode(clip=dual_clip, text=positive_text)[0]
-    neg = enc.encode(clip=dual_clip, text=negative_text)[0]
+    pos = _unwrap(_call_node(encoder, clip=dual_clip, text=positive_text), 0)
+    neg = _unwrap(_call_node(encoder, clip=dual_clip, text=negative_text), 0)
 
-    # LTXVConditioning wraps with frame_rate
-    cond_node = nodes_map["LTXVConditioning"]()
-    if hasattr(cond_node, "execute"):
-        # V3 API
-        from comfy_execution.utils import CurrentNodeContext
-        with CurrentNodeContext(prompt_id=str(uuid.uuid4()), node_id="uscg_ltx_cond", list_index=0):
-            r = cond_node.execute(positive=pos, negative=neg, frame_rate=int(frame_rate))
-        out = r.output if hasattr(r, "output") else r
-    else:
-        # V1 API - find the actual method (may be `apply` or similar)
-        method_name = next(n for n in dir(cond_node) if not n.startswith("_") and callable(getattr(cond_node, n)))
-        out = getattr(cond_node, method_name)(positive=pos, negative=neg, frame_rate=int(frame_rate))
+    # LTXVConditioning wraps with frame_rate (V3 API: ComfyNode subclass)
+    from comfy_execution.utils import CurrentNodeContext
+    with CurrentNodeContext(prompt_id=str(uuid.uuid4()), node_id="uscg_ltx_cond", list_index=0):
+        r = _call_node(nodes_map["LTXVConditioning"], positive=pos, negative=neg, frame_rate=int(frame_rate))
 
-    return out[0], out[1]
+    return _unwrap(r, 0), _unwrap(r, 1)
 
 
 def ltx_video_generate(config, ltx_models, output_path):
@@ -424,118 +433,114 @@ def ltx_video_generate(config, ltx_models, output_path):
     # Run all node executions inside a single mock V3 context
     with CurrentNodeContext(prompt_id=prompt_id, node_id="uscg_ltx_gen", list_index=0):
         # 1. Empty video latent (dimensions /2 for latent space)
-        empty_video = nodes_map["EmptyLTXVLatentVideo"].execute(
-            width=width // 2, height=height // 2, length=frames, batch_size=1
+        empty_video_latent = _unwrap(
+            _call_node(nodes_map["EmptyLTXVLatentVideo"],
+                       width=width // 2, height=height // 2, length=frames, batch_size=1),
+            0,
         )
-        empty_video_latent = empty_video.output[0] if hasattr(empty_video, "output") else empty_video[0]
 
         # 2. Empty audio latent
-        empty_audio = nodes_map["LTXVEmptyLatentAudio"].execute(
-            frames_number=frames, frame_rate=frame_rate, batch_size=1, audio_vae=audio_vae
+        empty_audio_latent = _unwrap(
+            _call_node(nodes_map["LTXVEmptyLatentAudio"],
+                       frames_number=frames, frame_rate=frame_rate, batch_size=1, audio_vae=audio_vae),
+            0,
         )
-        empty_audio_latent = empty_audio.output[0] if hasattr(empty_audio, "output") else empty_audio[0]
 
         # 3. Concat AV (stage 1 input). For t2v-only Phase A, no img inplace.
-        stage1_input = nodes_map["LTXVConcatAVLatent"].execute(
-            video_latent=empty_video_latent, audio_latent=empty_audio_latent
+        stage1_input_latent = _unwrap(
+            _call_node(nodes_map["LTXVConcatAVLatent"],
+                       video_latent=empty_video_latent, audio_latent=empty_audio_latent),
+            0,
         )
-        stage1_input_latent = stage1_input.output[0] if hasattr(stage1_input, "output") else stage1_input[0]
 
         # 4. Stage 1 sampling
-        sampler1 = nodes_map["KSamplerSelect"].execute(sampler_name=sampler_stage1)
-        sampler1_obj = sampler1.output[0] if hasattr(sampler1, "output") else sampler1[0]
+        sampler1_obj = _unwrap(_call_node(nodes_map["KSamplerSelect"], sampler_name=sampler_stage1), 0)
 
-        sigmas1_node = nodes_map["ManualSigmas"].execute(sigmas=sigmas1)
-        sigmas1_tensor = sigmas1_node.output[0] if hasattr(sigmas1_node, "output") else sigmas1_node[0]
+        sigmas1_tensor = _unwrap(_call_node(nodes_map["ManualSigmas"], sigmas=sigmas1), 0)
 
-        noise1 = nodes_map["RandomNoise"].execute(noise_seed=seed_stage1)
-        noise1_obj = noise1.output[0] if hasattr(noise1, "output") else noise1[0]
+        noise1_obj = _unwrap(_call_node(nodes_map["RandomNoise"], noise_seed=seed_stage1), 0)
 
-        guider1 = nodes_map["CFGGuider"].execute(
-            model=diff_model, positive=cond_pos, negative=cond_neg, cfg=cfg_scale
+        guider1_obj = _unwrap(
+            _call_node(nodes_map["CFGGuider"],
+                       model=diff_model, positive=cond_pos, negative=cond_neg, cfg=cfg_scale),
+            0,
         )
-        guider1_obj = guider1.output[0] if hasattr(guider1, "output") else guider1[0]
 
-        sampled1 = nodes_map["SamplerCustomAdvanced"].execute(
-            noise=noise1_obj, guider=guider1_obj, sampler=sampler1_obj,
-            sigmas=sigmas1_tensor, latent_image=stage1_input_latent,
+        sampled1_latent = _unwrap(
+            _call_node(nodes_map["SamplerCustomAdvanced"],
+                       noise=noise1_obj, guider=guider1_obj, sampler=sampler1_obj,
+                       sigmas=sigmas1_tensor, latent_image=stage1_input_latent),
+            0,
         )
-        sampled1_latent = sampled1.output[0] if hasattr(sampled1, "output") else sampled1[0]
 
         # 5. Separate AV
-        sep1 = nodes_map["LTXVSeparateAVLatent"].execute(av_latent=sampled1_latent)
-        if hasattr(sep1, "output"):
-            video1, audio1 = sep1.output[0], sep1.output[1]
-        else:
-            video1, audio1 = sep1[0], sep1[1]
+        sep1 = _call_node(nodes_map["LTXVSeparateAVLatent"], av_latent=sampled1_latent)
+        video1, audio1 = _unwrap(sep1, 0), _unwrap(sep1, 1)
 
         # 6. Spatial upscale of video latent
-        ups = nodes_map["LTXVLatentUpsampler"].execute(
-            samples=video1, upscale_model=upscaler, vae=video_vae
+        upscaled_video = _unwrap(
+            _call_node(nodes_map["LTXVLatentUpsampler"],
+                       samples=video1, upscale_model=upscaler, vae=video_vae),
+            0,
         )
-        upscaled_video = ups.output[0] if hasattr(ups, "output") else ups[0]
 
         # 7. Phase A skips LTXVImgToVideoInplace stage 2 (t2v + no upscale-input
         #    refinement image). The upscaled latent goes straight to crop guides.
         # 8. Crop guides on the upscaled latent
-        crop = nodes_map["LTXVCropGuides"].execute(
-            positive=cond_pos, negative=cond_neg, latent=upscaled_video
-        )
-        if hasattr(crop, "output"):
-            crop_pos, crop_neg = crop.output[0], crop.output[1]
-        else:
-            crop_pos, crop_neg = crop[0], crop[1]
+        crop = _call_node(nodes_map["LTXVCropGuides"],
+                          positive=cond_pos, negative=cond_neg, latent=upscaled_video)
+        crop_pos, crop_neg = _unwrap(crop, 0), _unwrap(crop, 1)
 
         # 9. Reconcat AV for stage 2
-        stage2_input = nodes_map["LTXVConcatAVLatent"].execute(
-            video_latent=upscaled_video, audio_latent=audio1
+        stage2_input_latent = _unwrap(
+            _call_node(nodes_map["LTXVConcatAVLatent"],
+                       video_latent=upscaled_video, audio_latent=audio1),
+            0,
         )
-        stage2_input_latent = stage2_input.output[0] if hasattr(stage2_input, "output") else stage2_input[0]
 
         # 10. Stage 2 sampling
-        sampler2 = nodes_map["KSamplerSelect"].execute(sampler_name=sampler_stage2)
-        sampler2_obj = sampler2.output[0] if hasattr(sampler2, "output") else sampler2[0]
+        sampler2_obj = _unwrap(_call_node(nodes_map["KSamplerSelect"], sampler_name=sampler_stage2), 0)
 
-        sigmas2_node = nodes_map["ManualSigmas"].execute(sigmas=sigmas2)
-        sigmas2_tensor = sigmas2_node.output[0] if hasattr(sigmas2_node, "output") else sigmas2_node[0]
+        sigmas2_tensor = _unwrap(_call_node(nodes_map["ManualSigmas"], sigmas=sigmas2), 0)
 
-        noise2 = nodes_map["RandomNoise"].execute(noise_seed=seed_stage2)
-        noise2_obj = noise2.output[0] if hasattr(noise2, "output") else noise2[0]
+        noise2_obj = _unwrap(_call_node(nodes_map["RandomNoise"], noise_seed=seed_stage2), 0)
 
-        guider2 = nodes_map["CFGGuider"].execute(
-            model=diff_model, positive=crop_pos, negative=crop_neg, cfg=cfg_scale
+        guider2_obj = _unwrap(
+            _call_node(nodes_map["CFGGuider"],
+                       model=diff_model, positive=crop_pos, negative=crop_neg, cfg=cfg_scale),
+            0,
         )
-        guider2_obj = guider2.output[0] if hasattr(guider2, "output") else guider2[0]
 
-        sampled2 = nodes_map["SamplerCustomAdvanced"].execute(
-            noise=noise2_obj, guider=guider2_obj, sampler=sampler2_obj,
-            sigmas=sigmas2_tensor, latent_image=stage2_input_latent,
+        sampled2_latent = _unwrap(
+            _call_node(nodes_map["SamplerCustomAdvanced"],
+                       noise=noise2_obj, guider=guider2_obj, sampler=sampler2_obj,
+                       sigmas=sigmas2_tensor, latent_image=stage2_input_latent),
+            0,
         )
-        sampled2_latent = sampled2.output[0] if hasattr(sampled2, "output") else sampled2[0]
 
         # 11. Separate AV final
-        sep2 = nodes_map["LTXVSeparateAVLatent"].execute(av_latent=sampled2_latent)
-        if hasattr(sep2, "output"):
-            video2, audio2 = sep2.output[0], sep2.output[1]
-        else:
-            video2, audio2 = sep2[0], sep2[1]
+        sep2 = _call_node(nodes_map["LTXVSeparateAVLatent"], av_latent=sampled2_latent)
+        video2, audio2 = _unwrap(sep2, 0), _unwrap(sep2, 1)
 
         # 12. Decode video (tiled - non-tiled OOMs at typical durations)
-        dec = nodes_map["VAEDecodeTiled"].execute(
-            samples=video2, vae=video_vae,
-            tile_size=768, overlap=64, temporal_size=4096, temporal_overlap=4,
+        frames_tensor = _unwrap(
+            _call_node(nodes_map["VAEDecodeTiled"],
+                       samples=video2, vae=video_vae,
+                       tile_size=768, overlap=64, temporal_size=4096, temporal_overlap=4),
+            0,
         )
-        frames_tensor = dec.output[0] if hasattr(dec, "output") else dec[0]
 
         # 13. Decode audio (Phase A: always on)
-        adec = nodes_map["LTXVAudioVAEDecode"].execute(samples=audio2, audio_vae=audio_vae)
-        audio_waveform = adec.output[0] if hasattr(adec, "output") else adec[0]
+        audio_waveform = _unwrap(
+            _call_node(nodes_map["LTXVAudioVAEDecode"], samples=audio2, audio_vae=audio_vae),
+            0,
+        )
 
         # 14. Create video container
-        cv = nodes_map["CreateVideo"].execute(
-            fps=frame_rate, images=frames_tensor, audio=audio_waveform
+        video_obj = _unwrap(
+            _call_node(nodes_map["CreateVideo"], fps=frame_rate, images=frames_tensor, audio=audio_waveform),
+            0,
         )
-        video_obj = cv.output[0] if hasattr(cv, "output") else cv[0]
 
         # 15. Save mp4
         if not output_path.lower().endswith(".mp4"):
@@ -547,7 +552,8 @@ def ltx_video_generate(config, ltx_models, output_path):
         # SaveVideo's "filename_prefix" can be a path. The node appends a
         # timestamp/index by default - we control naming so we strip those.
         # Use a temporary save then rename to enforce our exact filename.
-        nodes_map["SaveVideo"].execute(
+        _call_node(
+            nodes_map["SaveVideo"],
             filename_prefix=os.path.join(out_dir, out_name + "_tmp"),
             format="mp4",
             codec="auto",
