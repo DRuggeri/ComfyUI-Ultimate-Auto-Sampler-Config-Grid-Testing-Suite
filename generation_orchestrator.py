@@ -831,10 +831,12 @@ def run_generation_loop(
     print(f"[GridTester] ✅ LoRA expansion complete")
 
     # ==== VAE VALIDATION FOR NON-CHECKPOINT MODELS ====
-    # Only error if non-checkpoint model has no VAE source (no optional_vae AND no per-config VAE)
+    # Only error if non-checkpoint model has no VAE source (no optional_vae AND no per-config VAE).
+    # LTX video configs are exempt — they declare vae_video and vae_audio in their own LTX
+    # block, validated separately by preflight_ltx() at gen time.
     use_remote_vae = remote_vae_endpoint and remote_vae_endpoint != "None"
     needs_vae = any(
-        c.get("model_type", "checkpoint") != "checkpoint"
+        c.get("model_type", "checkpoint") not in ("checkpoint", "ltx_video")
         and c.get("vae", "Default") == "Default"
         for c in expanded
     )
