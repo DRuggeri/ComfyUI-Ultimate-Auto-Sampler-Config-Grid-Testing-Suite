@@ -263,6 +263,48 @@ def get_model_cache_key(conf):
         return f"{conf['model']}::{model_type}::{te_key}"
 
 
+def _build_ltx_manifest_entry(conf, gen_result, output_filename, gen_index=None):
+    """Build a manifest entry for an LTX video. Mirrors image-gen entry shape
+    but with media_type='video' and LTX-specific fields."""
+    return {
+        "id": gen_result.get("id"),  # may be None - assigned downstream
+        "gen_index": gen_index,
+        "media_type": "video",
+        "image_path": None,
+        "video_path": gen_result["video_path"],
+        "preview_path": gen_result.get("preview_path"),
+        "width": gen_result["width"],
+        "height": gen_result["height"],
+        "duration_seconds": gen_result["duration_seconds"],
+        "frame_rate": gen_result["fps"],
+        "frames": gen_result["frames"],
+        "model_type": "ltx_video",
+        "model": conf["model"],
+        "clip_models": conf.get("clip_models", []),
+        "vae_video": conf.get("vae_video", ""),
+        "vae_audio": conf.get("vae_audio", ""),
+        "latent_upscaler": conf.get("latent_upscaler", ""),
+        "sampler_stage1": conf.get("sampler_stage1", ""),
+        "sigmas_stage1": conf.get("sigmas_stage1", ""),
+        "sampler_stage2": conf.get("sampler_stage2", ""),
+        "sigmas_stage2": conf.get("sigmas_stage2", ""),
+        "image_strength_stage1": conf.get("image_strength_stage1", 0.8),
+        "image_strength_stage2": conf.get("image_strength_stage2", 1.0),
+        "img_compression": conf.get("img_compression", 18),
+        "input_image": conf.get("input_image"),
+        "audio_mode": conf.get("audio_mode", "on"),
+        "cfg": conf.get("cfg", 1.0),
+        "seed": conf.get("seed"),
+        "positive": conf.get("positive", ""),
+        "negative": conf.get("negative", ""),
+        "lora": conf.get("lora", "None"),
+        "duration": gen_result.get("duration", 0),
+        "favorited": False,
+        "rejected": False,
+        "note": "",
+    }
+
+
 def load_model_by_type(conf, ckpt_name, use_remote_vae, optional_model, optional_clip, optional_vae,
                        optional_positive, optional_negative, loaded_clip, loaded_vae, model_cache):
     """Dispatch to correct loader based on model_type in config."""

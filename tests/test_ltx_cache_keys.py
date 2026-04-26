@@ -104,3 +104,48 @@ def test_ltx_sort_components_imports():
         "latent_upscaler": "lup",
     }
     assert _ltx_sort_components(ltx) == (("c1", "c2"), "vv", "va", "lup")
+
+
+def test_build_ltx_manifest_entry_imports():
+    """Smoke test: _build_ltx_manifest_entry produces a valid manifest dict."""
+    from generation_orchestrator import _build_ltx_manifest_entry
+
+    conf = {
+        "model_type": "ltx_video",
+        "model": "ltx.safetensors",
+        "clip_models": ["c1.safetensors", "c2.safetensors"],
+        "vae_video": "vv.safetensors",
+        "vae_audio": "va.safetensors",
+        "latent_upscaler": "lup.safetensors",
+        "sampler_stage1": "euler_ancestral_cfg_pp",
+        "sigmas_stage1": "1.0, 0.5, 0.0",
+        "sampler_stage2": "euler_cfg_pp",
+        "sigmas_stage2": "0.85, 0.4, 0.0",
+        "cfg": 1.0,
+        "seed": 42,
+        "positive": "a video",
+        "negative": "ugly",
+        "lora": "None",
+        "audio_mode": "on",
+    }
+    gen_result = {
+        "video_path": "/tmp/gen.mp4",
+        "preview_path": "/tmp/gen.preview.png",
+        "frames": 126,
+        "fps": 25,
+        "duration_seconds": 5,
+        "width": 446,
+        "height": 576,
+        "duration": 47.3,
+    }
+    entry = _build_ltx_manifest_entry(conf, gen_result, "myfile_seed42")
+    assert entry["media_type"] == "video"
+    assert entry["video_path"] == "/tmp/gen.mp4"
+    assert entry["image_path"] is None
+    assert entry["preview_path"] == "/tmp/gen.preview.png"
+    assert entry["clip_models"] == ["c1.safetensors", "c2.safetensors"]
+    assert entry["sampler_stage2"] == "euler_cfg_pp"
+    assert entry["audio_mode"] == "on"
+    assert entry["favorited"] is False
+    assert entry["rejected"] is False
+    assert entry["note"] == ""
