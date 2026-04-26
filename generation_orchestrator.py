@@ -263,16 +263,23 @@ def get_model_cache_key(conf):
         return f"{conf['model']}::{model_type}::{te_key}"
 
 
-def _build_ltx_manifest_entry(conf, gen_result, output_filename, gen_index=None):
+def _build_ltx_manifest_entry(conf, gen_result, output_filename, gen_index=None, session_name=""):
     """Build a manifest entry for an LTX video. Mirrors image-gen entry shape
-    but with media_type='video' and LTX-specific fields."""
+    but with media_type='video' and LTX-specific fields.
+
+    The `file` key is the ComfyUI /view? URL the dashboard uses to fetch the mp4
+    via Comfy's standard view endpoint — same format the image-gen path uses
+    (see image_generation.py:844)."""
+    mp4_filename = output_filename + ".mp4"
+    file_url = f"/view?filename={mp4_filename}&type=output&subfolder=benchmarks/{session_name}/images"
     return {
         "id": gen_result.get("id"),  # may be None - assigned downstream
         "gen_index": gen_index,
         "media_type": "video",
-        # The dashboard's loader reads image_path for the file URL — store the mp4 path
-        # there so video items load through the existing pipeline. video_path kept as a
-        # duplicate for any future video-aware code that wants the explicit field.
+        # The dashboard's loader reads `file` (ComfyUI /view? URL) for the actual
+        # video src. image_path/video_path stored as duplicates for any code that
+        # needs the absolute disk path.
+        "file": file_url,
         "image_path": gen_result["video_path"],
         "video_path": gen_result["video_path"],
         "preview_path": gen_result.get("preview_path"),
@@ -1283,7 +1290,7 @@ def run_generation_loop(
                     raise
 
                 # Build manifest entry and persist
-                item = _build_ltx_manifest_entry(conf, gen_result, ltx_output_filename, gen_index=conf_idx)
+                item = _build_ltx_manifest_entry(conf, gen_result, ltx_output_filename, gen_index=conf_idx, session_name=session_name)
                 existing_data["items"].insert(0, item)
                 save_manifest(paths["manifest"], existing_data)
 
