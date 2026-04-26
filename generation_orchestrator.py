@@ -231,6 +231,19 @@ def check_if_job_completed(existing_items, conf, seed, width, height, batch_idx,
     return -1
 
 
+def _ltx_sort_components(x):
+    """Return tuple of LTX-specific sort components (None for non-LTX entries)."""
+    if x.get('model_type') != 'ltx_video':
+        return (None, None, None, None)
+    cm = x.get('clip_models') or []
+    return (
+        tuple(cm),
+        x.get('vae_video', ''),
+        x.get('vae_audio', ''),
+        x.get('latent_upscaler', ''),
+    )
+
+
 def get_model_cache_key(conf):
     """Generate a cache key that uniquely identifies the model+clip combination."""
     model_type = conf.get("model_type", "checkpoint")
@@ -736,7 +749,17 @@ def run_generation_loop(
         extra_seeds = [random.randint(0, 2**32 - 1) for _ in range(add_random_seeds_to_gens)]
     
     expanded = expand_configs(raw_configs, pos_prompts, neg_prompts, denoise_values, seed, extra_seeds, ckpt_name)
-    expanded.sort(key=lambda x: (x.get('model_type', 'checkpoint'), x['model'], tuple(x.get('text_encoders', [])), x.get('vae', 'Default'), x['lora'], x.get('attention_mode', 'default'), x['positive'], x['negative']))
+    expanded.sort(key=lambda x: (
+        x.get('model_type', 'checkpoint'),
+        x['model'],
+        *_ltx_sort_components(x),
+        tuple(x.get('text_encoders', [])),
+        x.get('vae', 'Default'),
+        x['lora'],
+        x.get('attention_mode', 'default'),
+        x['positive'],
+        x['negative'],
+    ))
     
     # ==== EXPAND LORA WEIGHT ARRAYS (Cartesian product) ====
     # Format: "lora:[0.5, 0.8]:1.0" → expand into separate configs per strength combo

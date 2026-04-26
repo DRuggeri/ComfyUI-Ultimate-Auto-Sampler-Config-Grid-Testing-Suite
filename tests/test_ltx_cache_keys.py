@@ -4,7 +4,7 @@ import sys
 import os
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from generation_orchestrator import get_model_cache_key
+from generation_orchestrator import get_model_cache_key, _ltx_sort_components
 
 
 def _ltx_conf():
@@ -92,3 +92,15 @@ def test_diffusion_model_key_unchanged():
     assert "diffusion_model" in key
     assert "t5.safetensors" in key
     assert "clip_l.safetensors" in key
+
+
+def test_ltx_sort_components_imports():
+    assert _ltx_sort_components({"model_type": "checkpoint"}) == (None, None, None, None)
+    ltx = {
+        "model_type": "ltx_video",
+        "clip_models": ["c1", "c2"],
+        "vae_video": "vv",
+        "vae_audio": "va",
+        "latent_upscaler": "lup",
+    }
+    assert _ltx_sort_components(ltx) == (("c1", "c2"), "vv", "va", "lup")
