@@ -270,10 +270,14 @@ def _build_ltx_manifest_entry(conf, gen_result, output_filename, gen_index=None,
     The `file` key is the ComfyUI /view? URL the dashboard uses to fetch the mp4
     via Comfy's standard view endpoint — same format the image-gen path uses
     (see image_generation.py:844)."""
+    import random
     mp4_filename = output_filename + ".mp4"
     file_url = f"/view?filename={mp4_filename}&type=output&subfolder=benchmarks/{session_name}/images"
+    # Unique timestamp-based id (matches image_generation.py:828 pattern). Used by
+    # the dashboard for sorting, position tracking, and DOM identity.
+    item_id = int(time.time() * 100000) + random.randint(0, 1000)
     return {
-        "id": gen_result.get("id"),  # may be None - assigned downstream
+        "id": item_id,
         "gen_index": gen_index,
         "media_type": "video",
         # The dashboard's loader reads `file` (ComfyUI /view? URL) for the actual
