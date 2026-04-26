@@ -716,6 +716,25 @@ export function convertStateToConfigs(state) {
             if (modelType === "gguf" && configArray.gguf_options) {
                 config.gguf_options = configArray.gguf_options;
             }
+            if (modelType === "ltx_video" && configArray.ltx_video) {
+                // Flatten LTX-specific fields into the top-level config so the orchestrator gets them.
+                const ltx = configArray.ltx_video;
+                if (ltx.clip_models) config.clip_models = ltx.clip_models;
+                if (ltx.vae_video) config.vae_video = ltx.vae_video;
+                if (ltx.vae_audio) config.vae_audio = ltx.vae_audio;
+                if (ltx.latent_upscaler) config.latent_upscaler = ltx.latent_upscaler;
+                if (ltx.duration_seconds != null) config.duration_seconds = ltx.duration_seconds;
+                if (ltx.frame_rate != null) config.frame_rate = ltx.frame_rate;
+                if (ltx.sampler_stage1) config.sampler_stage1 = ltx.sampler_stage1;
+                if (ltx.sampler_stage2) config.sampler_stage2 = ltx.sampler_stage2;
+                if (ltx.sigmas_stage1) config.sigmas_stage1 = ltx.sigmas_stage1;
+                if (ltx.sigmas_stage2) config.sigmas_stage2 = ltx.sigmas_stage2;
+                if (ltx.input_image != null) config.input_image = ltx.input_image;
+                if (ltx.image_strength_stage1 != null) config.image_strength_stage1 = ltx.image_strength_stage1;
+                if (ltx.image_strength_stage2 != null) config.image_strength_stage2 = ltx.image_strength_stage2;
+                if (ltx.img_compression != null) config.img_compression = ltx.img_compression;
+                if (ltx.audio_mode) config.audio_mode = ltx.audio_mode;
+            }
         }
 
         // Add lora_omit_triggers if present

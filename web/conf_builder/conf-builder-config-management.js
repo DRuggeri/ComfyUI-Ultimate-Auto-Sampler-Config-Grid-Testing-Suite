@@ -1059,7 +1059,7 @@ export function createConfigArrayElement(node, configArray, arrayIdx, modelLists
     settingsGrid.appendChild(createInputGroup("Samplers", samplersBuilder));
 
     // Schedulers - dropdown + chips list builder
-    if (node.state.model_type !== "ltx_video") {
+    if (!isLTXConfigArray(configArray)) {
         const schedulersBuilder = createChipListBuilder({
             label: "Schedulers", stateKey: "schedulers", options: (modelLists && modelLists.schedulers) || [],
             node, arrayIdx, configArray, accentColor: "#00aa66", placeholder: "No schedulers selected"
@@ -1082,7 +1082,7 @@ export function createConfigArrayElement(node, configArray, arrayIdx, modelLists
     const resolutionBuilder = createResolutionBuilder({ node, arrayIdx, configArray });
     settingsGrid.appendChild(createInputGroup("Resolutions", resolutionBuilder));
 
-    if (node.state.model_type !== "ltx_video") {
+    if (!isLTXConfigArray(configArray)) {
         addInput("Steps", "steps");
     }
     addInput("CFG", "cfg");
@@ -3300,7 +3300,7 @@ export function renderExtraModelSamplingSection(node, div, configArray, arrayIdx
             row.appendChild(hint);
             paramsContainer.appendChild(row);
         } else if (override === "flux") {
-            if (node.state.model_type !== "ltx_video") {
+            if (!isLTXConfigArray(configArray)) {
                 // Max shift
                 const row1 = document.createElement("div");
                 row1.style.cssText = "display: flex; gap: 6px; align-items: center; margin-bottom: 4px;";
@@ -3525,7 +3525,7 @@ export function renderExtraModelSamplingSection(node, div, configArray, arrayIdx
     };
 
     group3.appendChild(fluxOpts);
-    if (node.state.model_type !== "ltx_video") {
+    if (!isLTXConfigArray(configArray)) {
         innerWrapper.appendChild(group3);
     }
 
@@ -3786,8 +3786,24 @@ function createVAEElement(node, vaeName, arrayIdx, vaeIdx, vaeList, vFolders) {
 
 // --- LTX VIDEO SETTINGS SECTION ---
 
-function renderLTXVideoShape(node) {
-    const ltx = node.state.ltx_video;
+// Derive model_type from a configArray's models[] (matches the convention in
+// conf-builder-utilities.js:convertStateToConfigs). Returns "checkpoint" by default.
+function getConfigArrayModelType(configArray) {
+    let modelType = "checkpoint";
+    for (const m of (configArray?.models || [])) {
+        if (typeof m === 'object' && m !== null && m.type) {
+            modelType = m.type;
+        }
+    }
+    return modelType;
+}
+
+function isLTXConfigArray(configArray) {
+    return getConfigArrayModelType(configArray) === "ltx_video";
+}
+
+function renderLTXVideoShape(node, configArray) {
+    const ltx = configArray.ltx_video;
     const div = document.createElement("div");
     div.className = "cb-subsection";
 
@@ -3826,8 +3842,8 @@ function renderLTXVideoShape(node) {
     return div;
 }
 
-function renderLTXModelFiles(node) {
-    const ltx = node.state.ltx_video;
+function renderLTXModelFiles(node, configArray) {
+    const ltx = configArray.ltx_video;
     const div = document.createElement("div");
     div.className = "cb-subsection";
 
@@ -3899,8 +3915,8 @@ function renderLTXModelFiles(node) {
     return div;
 }
 
-function renderLTXStage(node, stageNum) {
-    const ltx = node.state.ltx_video;
+function renderLTXStage(node, configArray, stageNum) {
+    const ltx = configArray.ltx_video;
     const samplerKey = "sampler_stage" + stageNum;
     const sigmasKey = "sigmas_stage" + stageNum;
     const titleText = stageNum === 1
@@ -3990,7 +4006,7 @@ function renderLTXStage(node, stageNum) {
     return div;
 }
 
-function renderLTXImageInput(node) {
+function renderLTXImageInput(node, configArray) {
     const div = document.createElement("div");
     div.className = "cb-subsection";
 
@@ -4008,7 +4024,7 @@ function renderLTXImageInput(node) {
 }
 
 
-function renderLTXAudio(node) {
+function renderLTXAudio(node, configArray) {
     const div = document.createElement("div");
     div.className = "cb-subsection";
 
@@ -4028,12 +4044,12 @@ function renderLTXAudio(node) {
     return div;
 }
 
-function renderLTXSection(node) {
-    if (node.state.model_type !== "ltx_video") return null;
+function renderLTXSection(node, configArray, arrayIdx) {
+    if (!isLTXConfigArray(configArray)) return null;
 
-    // Initialize defaults on first render
-    if (!node.state.ltx_video) {
-        node.state.ltx_video = {
+    // Initialize defaults on first render (state lives per-configArray, not on node.state)
+    if (!configArray.ltx_video) {
+        configArray.ltx_video = {
             clip_models: ["", ""],
             vae_video: "",
             vae_audio: "",
@@ -4055,7 +4071,7 @@ function renderLTXSection(node) {
 
     const section = document.createElement("div");
     section.className = "cb-section";
-    section.id = "ltx-section";
+    section.id = "ltx-section-" + arrayIdx;
 
     const header = document.createElement("div");
     header.className = "cb-section-header";
@@ -4075,14 +4091,14 @@ function renderLTXSection(node) {
     // Sub-sections — defined in subsequent tasks (A13-A16). For now, stub them
     // as no-op functions so this skeleton renders without errors. The real
     // implementations will replace these stubs.
-    if (typeof renderLTXModelFiles === "function") section.appendChild(renderLTXModelFiles(node));
-    if (typeof renderLTXVideoShape === "function") section.appendChild(renderLTXVideoShape(node));
+    if (typeof renderLTXModelFiles === "function") section.appendChild(renderLTXModelFiles(node, configArray));
+    if (typeof renderLTXVideoShape === "function") section.appendChild(renderLTXVideoShape(node, configArray));
     if (typeof renderLTXStage === "function") {
-        section.appendChild(renderLTXStage(node, 1));
-        section.appendChild(renderLTXStage(node, 2));
+        section.appendChild(renderLTXStage(node, configArray, 1));
+        section.appendChild(renderLTXStage(node, configArray, 2));
     }
-    if (typeof renderLTXImageInput === "function") section.appendChild(renderLTXImageInput(node));
-    if (typeof renderLTXAudio === "function") section.appendChild(renderLTXAudio(node));
+    if (typeof renderLTXImageInput === "function") section.appendChild(renderLTXImageInput(node, configArray));
+    if (typeof renderLTXAudio === "function") section.appendChild(renderLTXAudio(node, configArray));
 
     return section;
 }
@@ -5609,6 +5625,8 @@ export function renderUpscalingSection(node, container, modelLists) {
                     ratiosInput.onchange = () => { ucfg.upscale_ratios = ratiosInput.value; node.saveState(); };
                     grid.appendChild(createInputGroup("Upscale Ratios", ratiosInput));
 
+                    // NOTE: renderUpscalingSection is a session-level section (no configArray param).
+                    // Cannot use isLTXConfigArray() here — left as node.state.model_type guard intentionally.
                     if (node.state.model_type !== "ltx_video") {
                         const denoiseInput = document.createElement("input");
                         denoiseInput.type = "text";
@@ -6462,8 +6480,8 @@ export async function renderUI(node, availableLoras, modelLists, loraFolders, av
         const arrayElement = createConfigArrayElement(node, configArray, arrayIdx, modelLists);
         renderConfigPromptsSection(node, arrayElement, configArray, arrayIdx);
         renderModelsSection(node, arrayElement, configArray, arrayIdx, modelLists);
-        // LTX Video Settings — only renders when model_type === 'ltx_video'
-        const ltxSection = renderLTXSection(node);
+        // LTX Video Settings — only renders when this configArray's models[] contain an ltx_video model
+        const ltxSection = renderLTXSection(node, configArray, arrayIdx);
         if (ltxSection) arrayElement.appendChild(ltxSection);
         renderVAEsSection(node, arrayElement, configArray, arrayIdx, modelLists);
         renderLorasSection(node, arrayElement, configArray, arrayIdx, availableLoras, loraFolders);
