@@ -1,4 +1,5 @@
 import json
+import os
 import re
 import copy
 import itertools
@@ -392,6 +393,25 @@ def _expand_ltx_entry(entry):
     else:
         clip_options = [raw_clip]
 
+    # input_image: special-case folder expansion before to_list
+    raw_input_image = e.get("input_image")
+    if isinstance(raw_input_image, str) and raw_input_image and (raw_input_image.endswith("/") or raw_input_image.endswith("\\")):
+        folder_path = raw_input_image.rstrip("/\\")
+        if os.path.isdir(folder_path):
+            exts = (".png", ".jpg", ".jpeg", ".webp")
+            input_image_axis = sorted(
+                os.path.join(folder_path, f)
+                for f in os.listdir(folder_path)
+                if f.lower().endswith(exts)
+            )
+            if not input_image_axis:
+                input_image_axis = [None]  # empty folder → text-to-video
+        else:
+            # Folder doesn't exist on disk — leave as-is, preflight will surface the error
+            input_image_axis = [raw_input_image]
+    else:
+        input_image_axis = to_list(raw_input_image) if raw_input_image is not None else [None]
+
     # All other fields: simple to_list
     field_axes = {
         "model": to_list(e.get("model", "")),
@@ -407,7 +427,7 @@ def _expand_ltx_entry(entry):
         "sigmas_stage2": to_list(e.get("sigmas_stage2", "")),
         "cfg": to_list(e.get("cfg", 1.0)),
         "seed": to_list(e.get("seed", 0)),
-        "input_image": to_list(e.get("input_image")) if e.get("input_image") is not None else [None],
+        "input_image": input_image_axis,
         "image_strength_stage1": to_list(e.get("image_strength_stage1", 0.8)),
         "image_strength_stage2": to_list(e.get("image_strength_stage2", 1.0)),
         "img_compression": to_list(e.get("img_compression", 18)),

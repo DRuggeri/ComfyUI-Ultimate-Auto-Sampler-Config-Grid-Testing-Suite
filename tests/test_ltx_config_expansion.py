@@ -118,3 +118,68 @@ def test_clip_models_list_of_lists_expands():
     base["clip_models"] = [["g.safetensors", "tp1.safetensors"], ["g.safetensors", "tp2.safetensors"]]
     result = _call(base)
     assert len(result) == 2
+
+
+def test_input_image_folder_expands_to_images(tmp_path):
+    """Folder-form input_image expands to one config per image file in the folder."""
+    folder = tmp_path / "imgs"
+    folder.mkdir()
+    (folder / "a.png").write_text("dummy")
+    (folder / "b.png").write_text("dummy")
+    (folder / "c.png").write_text("dummy")
+
+    base = _ltx_base()
+    base["input_image"] = str(folder) + "/"
+    result = _call(base)
+    assert len(result) == 3
+    paths = sorted(c["input_image"] for c in result)
+    assert all(p.endswith((".png", ".jpg", ".jpeg", ".webp")) for p in paths)
+    assert all(os.path.basename(p) in ("a.png", "b.png", "c.png") for p in paths)
+
+
+def test_input_image_folder_filters_non_images(tmp_path):
+    """Non-image files in the folder are skipped."""
+    folder = tmp_path / "imgs"
+    folder.mkdir()
+    (folder / "a.png").write_text("dummy")
+    (folder / "notes.txt").write_text("dummy")
+    (folder / "b.jpg").write_text("dummy")
+
+    base = _ltx_base()
+    base["input_image"] = str(folder) + "/"
+    result = _call(base)
+    assert len(result) == 2
+    extensions = sorted(os.path.splitext(c["input_image"])[1] for c in result)
+    assert extensions == [".jpg", ".png"]
+
+
+def test_input_image_folder_with_backslash(tmp_path):
+    """Windows-style backslash separator also triggers folder expansion."""
+    folder = tmp_path / "imgs"
+    folder.mkdir()
+    (folder / "a.png").write_text("dummy")
+
+    base = _ltx_base()
+    # Windows path with trailing backslash
+    base["input_image"] = str(folder) + "\\"
+    result = _call(base)
+    assert len(result) == 1
+
+
+def test_input_image_folder_nonexistent_passes_through(tmp_path):
+    """Non-existent folder path is left as a single string (preflight will catch it later)."""
+    base = _ltx_base()
+    base["input_image"] = str(tmp_path / "does_not_exist") + "/"
+    result = _call(base)
+    # Treated as single string since the folder doesn't exist; not expanded
+    assert len(result) == 1
+    assert result[0]["input_image"].endswith("/")
+
+
+def test_input_image_string_no_trailing_slash_unchanged(tmp_path):
+    """A regular file path (no trailing slash) is NOT folder-expanded."""
+    base = _ltx_base()
+    base["input_image"] = "/tmp/single.png"
+    result = _call(base)
+    assert len(result) == 1
+    assert result[0]["input_image"] == "/tmp/single.png"
