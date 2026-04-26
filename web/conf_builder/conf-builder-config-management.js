@@ -1059,11 +1059,13 @@ export function createConfigArrayElement(node, configArray, arrayIdx, modelLists
     settingsGrid.appendChild(createInputGroup("Samplers", samplersBuilder));
 
     // Schedulers - dropdown + chips list builder
-    const schedulersBuilder = createChipListBuilder({
-        label: "Schedulers", stateKey: "schedulers", options: (modelLists && modelLists.schedulers) || [],
-        node, arrayIdx, configArray, accentColor: "#00aa66", placeholder: "No schedulers selected"
-    });
-    settingsGrid.appendChild(createInputGroup("Schedulers", schedulersBuilder));
+    if (node.state.model_type !== "ltx_video") {
+        const schedulersBuilder = createChipListBuilder({
+            label: "Schedulers", stateKey: "schedulers", options: (modelLists && modelLists.schedulers) || [],
+            node, arrayIdx, configArray, accentColor: "#00aa66", placeholder: "No schedulers selected"
+        });
+        settingsGrid.appendChild(createInputGroup("Schedulers", schedulersBuilder));
+    }
 
     // Attention Mode - dropdown + chips list builder
     const ATTENTION_MODES = ["default", "xformers", "pytorch", "flash", "sage", "sage3", "sub_quad", "split"];
@@ -1080,7 +1082,9 @@ export function createConfigArrayElement(node, configArray, arrayIdx, modelLists
     const resolutionBuilder = createResolutionBuilder({ node, arrayIdx, configArray });
     settingsGrid.appendChild(createInputGroup("Resolutions", resolutionBuilder));
 
-    addInput("Steps", "steps");
+    if (node.state.model_type !== "ltx_video") {
+        addInput("Steps", "steps");
+    }
     addInput("CFG", "cfg");
 
     // Seed Behavior Select
@@ -3292,52 +3296,54 @@ export function renderExtraModelSamplingSection(node, div, configArray, arrayIdx
             row.appendChild(hint);
             paramsContainer.appendChild(row);
         } else if (override === "flux") {
-            // Max shift
-            const row1 = document.createElement("div");
-            row1.style.cssText = "display: flex; gap: 6px; align-items: center; margin-bottom: 4px;";
-            const lbl1 = document.createElement("label");
-            lbl1.textContent = "Max Shift:";
-            lbl1.style.cssText = "color: #aaa; font-size: 11px; white-space: nowrap; min-width: 55px;";
-            row1.appendChild(lbl1);
-            const inp1 = document.createElement("input");
-            inp1.type = "text";
-            inp1.className = "cb-input";
-            inp1.style.cssText = "width: 120px;";
-            inp1.value = configArray.model_sampling_flux_max_shift || "1.15";
-            inp1.placeholder = "1.15";
-            inp1.title = "Comma-separated values for grid testing";
-            inp1.onchange = () => {
-                configArray.model_sampling_flux_max_shift = inp1.value;
-                node.saveState();
-            };
-            row1.appendChild(inp1);
-            paramsContainer.appendChild(row1);
+            if (node.state.model_type !== "ltx_video") {
+                // Max shift
+                const row1 = document.createElement("div");
+                row1.style.cssText = "display: flex; gap: 6px; align-items: center; margin-bottom: 4px;";
+                const lbl1 = document.createElement("label");
+                lbl1.textContent = "Max Shift:";
+                lbl1.style.cssText = "color: #aaa; font-size: 11px; white-space: nowrap; min-width: 55px;";
+                row1.appendChild(lbl1);
+                const inp1 = document.createElement("input");
+                inp1.type = "text";
+                inp1.className = "cb-input";
+                inp1.style.cssText = "width: 120px;";
+                inp1.value = configArray.model_sampling_flux_max_shift || "1.15";
+                inp1.placeholder = "1.15";
+                inp1.title = "Comma-separated values for grid testing";
+                inp1.onchange = () => {
+                    configArray.model_sampling_flux_max_shift = inp1.value;
+                    node.saveState();
+                };
+                row1.appendChild(inp1);
+                paramsContainer.appendChild(row1);
 
-            // Base shift
-            const row2 = document.createElement("div");
-            row2.style.cssText = "display: flex; gap: 6px; align-items: center; margin-bottom: 4px;";
-            const lbl2 = document.createElement("label");
-            lbl2.textContent = "Base Shift:";
-            lbl2.style.cssText = "color: #aaa; font-size: 11px; white-space: nowrap; min-width: 55px;";
-            row2.appendChild(lbl2);
-            const inp2 = document.createElement("input");
-            inp2.type = "text";
-            inp2.className = "cb-input";
-            inp2.style.cssText = "width: 120px;";
-            inp2.value = configArray.model_sampling_flux_base_shift || "0.5";
-            inp2.placeholder = "0.5";
-            inp2.title = "Comma-separated values for grid testing";
-            inp2.onchange = () => {
-                configArray.model_sampling_flux_base_shift = inp2.value;
-                node.saveState();
-            };
-            row2.appendChild(inp2);
-            paramsContainer.appendChild(row2);
+                // Base shift
+                const row2 = document.createElement("div");
+                row2.style.cssText = "display: flex; gap: 6px; align-items: center; margin-bottom: 4px;";
+                const lbl2 = document.createElement("label");
+                lbl2.textContent = "Base Shift:";
+                lbl2.style.cssText = "color: #aaa; font-size: 11px; white-space: nowrap; min-width: 55px;";
+                row2.appendChild(lbl2);
+                const inp2 = document.createElement("input");
+                inp2.type = "text";
+                inp2.className = "cb-input";
+                inp2.style.cssText = "width: 120px;";
+                inp2.value = configArray.model_sampling_flux_base_shift || "0.5";
+                inp2.placeholder = "0.5";
+                inp2.title = "Comma-separated values for grid testing";
+                inp2.onchange = () => {
+                    configArray.model_sampling_flux_base_shift = inp2.value;
+                    node.saveState();
+                };
+                row2.appendChild(inp2);
+                paramsContainer.appendChild(row2);
 
-            const hint = document.createElement("div");
-            hint.style.cssText = "font-size: 10px; color: #666;";
-            hint.textContent = "Dynamic shift computed from image dimensions";
-            paramsContainer.appendChild(hint);
+                const hint = document.createElement("div");
+                hint.style.cssText = "font-size: 10px; color: #666;";
+                hint.textContent = "Dynamic shift computed from image dimensions";
+                paramsContainer.appendChild(hint);
+            }
         }
     }
 
@@ -3515,7 +3521,9 @@ export function renderExtraModelSamplingSection(node, div, configArray, arrayIdx
     };
 
     group3.appendChild(fluxOpts);
-    innerWrapper.appendChild(group3);
+    if (node.state.model_type !== "ltx_video") {
+        innerWrapper.appendChild(group3);
+    }
 
     contentContainer.appendChild(innerWrapper);
     sectionGrid.appendChild(contentContainer);
@@ -5597,13 +5605,15 @@ export function renderUpscalingSection(node, container, modelLists) {
                     ratiosInput.onchange = () => { ucfg.upscale_ratios = ratiosInput.value; node.saveState(); };
                     grid.appendChild(createInputGroup("Upscale Ratios", ratiosInput));
 
-                    const denoiseInput = document.createElement("input");
-                    denoiseInput.type = "text";
-                    denoiseInput.className = "cb-input";
-                    denoiseInput.value = ucfg.hires_denoise || "0.3";
-                    denoiseInput.placeholder = "0.2, 0.3, 0.5";
-                    denoiseInput.onchange = () => { ucfg.hires_denoise = denoiseInput.value; node.saveState(); };
-                    grid.appendChild(createInputGroup("HiRes Denoise", denoiseInput));
+                    if (node.state.model_type !== "ltx_video") {
+                        const denoiseInput = document.createElement("input");
+                        denoiseInput.type = "text";
+                        denoiseInput.className = "cb-input";
+                        denoiseInput.value = ucfg.hires_denoise || "0.3";
+                        denoiseInput.placeholder = "0.2, 0.3, 0.5";
+                        denoiseInput.onchange = () => { ucfg.hires_denoise = denoiseInput.value; node.saveState(); };
+                        grid.appendChild(createInputGroup("HiRes Denoise", denoiseInput));
+                    }
 
                     const stepsInput = document.createElement("input");
                     stepsInput.type = "number";
