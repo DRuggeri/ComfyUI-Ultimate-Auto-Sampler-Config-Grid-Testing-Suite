@@ -3769,6 +3769,67 @@ function createVAEElement(node, vaeName, arrayIdx, vaeIdx, vaeList, vFolders) {
     return div;
 }
 
+// --- LTX VIDEO SETTINGS SECTION ---
+
+function renderLTXSection(node) {
+    if (node.state.model_type !== "ltx_video") return null;
+
+    // Initialize defaults on first render
+    if (!node.state.ltx_video) {
+        node.state.ltx_video = {
+            clip_models: ["", ""],
+            vae_video: "",
+            vae_audio: "",
+            latent_upscaler: "ltx-2.3-spatial-upscaler-x2-1.1.safetensors",
+            duration_seconds: 5,
+            frame_rate: 25,
+            sampler_stage1: "euler_ancestral_cfg_pp",
+            sigmas_stage1: "1.0, 0.99375, 0.9875, 0.98125, 0.975, 0.909375, 0.725, 0.421875, 0.0",
+            sampler_stage2: "euler_cfg_pp",
+            sigmas_stage2: "0.85, 0.7250, 0.4219, 0.0",
+            image_strength_stage1: 0.8,
+            image_strength_stage2: 1.0,
+            img_compression: 18,
+            input_image: null,
+            audio_mode: "on",
+        };
+        node.saveState();
+    }
+
+    const section = document.createElement("div");
+    section.className = "cb-section";
+    section.id = "ltx-section";
+
+    const header = document.createElement("div");
+    header.className = "cb-section-header";
+
+    const title = document.createElement("span");
+    title.textContent = "⚙️ LTX Video Settings";
+    header.appendChild(title);
+
+    const helpBtn = document.createElement("button");
+    helpBtn.className = "cb-help-btn";
+    helpBtn.textContent = "?";
+    helpBtn.title = "LTX 2.3 two-stage pipeline help";
+    header.appendChild(helpBtn);
+
+    section.appendChild(header);
+
+    // Sub-sections — defined in subsequent tasks (A13-A16). For now, stub them
+    // as no-op functions so this skeleton renders without errors. The real
+    // implementations will replace these stubs.
+    if (typeof renderLTXModelFiles === "function") section.appendChild(renderLTXModelFiles(node));
+    if (typeof renderLTXVideoShape === "function") section.appendChild(renderLTXVideoShape(node));
+    if (typeof renderLTXStage === "function") {
+        section.appendChild(renderLTXStage(node, 1));
+        section.appendChild(renderLTXStage(node, 2));
+    }
+    if (typeof renderLTXImageInput === "function") section.appendChild(renderLTXImageInput(node));
+    if (typeof renderLTXAudio === "function") section.appendChild(renderLTXAudio(node));
+
+    return section;
+}
+
 export function renderLorasSection(node, div, configArray, arrayIdx, availableLoras, loraFolders) {
     if (!configArray.loras || configArray.loras.length === 0) configArray.loras = ["None"];
 
@@ -6142,6 +6203,9 @@ export async function renderUI(node, availableLoras, modelLists, loraFolders, av
         const arrayElement = createConfigArrayElement(node, configArray, arrayIdx, modelLists);
         renderConfigPromptsSection(node, arrayElement, configArray, arrayIdx);
         renderModelsSection(node, arrayElement, configArray, arrayIdx, modelLists);
+        // LTX Video Settings — only renders when model_type === 'ltx_video'
+        const ltxSection = renderLTXSection(node);
+        if (ltxSection) arrayElement.appendChild(ltxSection);
         renderVAEsSection(node, arrayElement, configArray, arrayIdx, modelLists);
         renderLorasSection(node, arrayElement, configArray, arrayIdx, availableLoras, loraFolders);
         arraysContainer.appendChild(arrayElement);
