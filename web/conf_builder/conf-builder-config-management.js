@@ -4008,6 +4008,8 @@ function renderLTXStage(node, configArray, stageNum) {
 }
 
 function renderLTXImageInput(node, configArray) {
+    const ltx = configArray.ltx_video;
+
     const div = document.createElement("div");
     div.className = "cb-subsection";
 
@@ -4016,10 +4018,75 @@ function renderLTXImageInput(node, configArray) {
     titleDiv.textContent = "── Image-to-Video Input ──";
     div.appendChild(titleDiv);
 
-    const note = document.createElement("div");
-    note.style.cssText = "font-size: 10px; color: #666; padding: 4px 8px;";
-    note.textContent = "(Phase A: text-to-video only. Image input enabled in Phase B.)";
-    div.appendChild(note);
+    const hint = document.createElement("div");
+    hint.style.cssText = "font-size: 10px; color: #999; padding: 2px 8px 6px;";
+    hint.textContent = "(leave blank for text-to-video)";
+    div.appendChild(hint);
+
+    // Image picker — text input that accepts: single path, folder ending in /, or JSON array
+    const imgRow = document.createElement("div");
+    imgRow.className = "cb-row";
+    imgRow.style.cssText = "display: flex; align-items: center; gap: 6px; padding: 4px 8px;";
+
+    const imgLabel = document.createElement("label");
+    imgLabel.className = "cb-label";
+    imgLabel.textContent = "Image:";
+    imgLabel.style.minWidth = "80px";
+    imgRow.appendChild(imgLabel);
+
+    const imgInput = document.createElement("input");
+    imgInput.type = "text";
+    imgInput.className = "cb-input";
+    imgInput.style.flex = "1";
+    imgInput.placeholder = "path/to/img.png  |  MyImages/  |  [\"a.png\", \"b.png\"]";
+    imgInput.value = ltx.input_image == null
+        ? ""
+        : (Array.isArray(ltx.input_image) ? JSON.stringify(ltx.input_image) : ltx.input_image);
+    imgInput.title =
+        "Image-to-video input. Leave blank for text-to-video.\n\n" +
+        "Accepts:\n" +
+        "  • Single file path (e.g. C:/imgs/cat.png)\n" +
+        "  • Folder ending in / (expands to all .png/.jpg/.jpeg/.webp inside)\n" +
+        "  • JSON array of paths (e.g. [\"a.png\", \"b.png\"])\n\n" +
+        "Folders/arrays sweep — one config per image.";
+    imgInput.onchange = () => {
+        const v = imgInput.value.trim();
+        if (!v) {
+            ltx.input_image = null;
+        } else if (v.startsWith("[")) {
+            try { ltx.input_image = JSON.parse(v); }
+            catch { ltx.input_image = v; }
+        } else {
+            ltx.input_image = v;
+        }
+        node.saveState();
+    };
+    imgRow.appendChild(imgInput);
+    div.appendChild(imgRow);
+
+    // Stage 1 strength slider (0-1, step 0.05)
+    div.appendChild(createSlider(
+        "Stage 1 Strength",
+        ltx.image_strength_stage1 != null ? ltx.image_strength_stage1 : 0.8,
+        0, 1, 0.05,
+        (v) => { ltx.image_strength_stage1 = v; node.saveState(); }
+    ));
+
+    // Stage 2 strength slider (0-1, step 0.05)
+    div.appendChild(createSlider(
+        "Stage 2 Strength",
+        ltx.image_strength_stage2 != null ? ltx.image_strength_stage2 : 1.0,
+        0, 1, 0.05,
+        (v) => { ltx.image_strength_stage2 = v; node.saveState(); }
+    ));
+
+    // Image compression slider (0-100, step 1)
+    div.appendChild(createSlider(
+        "Image Compression",
+        ltx.img_compression != null ? ltx.img_compression : 18,
+        0, 100, 1,
+        (v) => { ltx.img_compression = v; node.saveState(); }
+    ));
 
     return div;
 }
