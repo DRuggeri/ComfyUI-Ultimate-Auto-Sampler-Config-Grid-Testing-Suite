@@ -270,7 +270,10 @@ def _build_ltx_manifest_entry(conf, gen_result, output_filename, gen_index=None)
         "id": gen_result.get("id"),  # may be None - assigned downstream
         "gen_index": gen_index,
         "media_type": "video",
-        "image_path": None,
+        # The dashboard's loader reads image_path for the file URL — store the mp4 path
+        # there so video items load through the existing pipeline. video_path kept as a
+        # duplicate for any future video-aware code that wants the explicit field.
+        "image_path": gen_result["video_path"],
         "video_path": gen_result["video_path"],
         "preview_path": gen_result.get("preview_path"),
         "width": gen_result["width"],
@@ -1242,7 +1245,7 @@ def run_generation_loop(
                         raise
 
                 ltx_output_filename = f"{conf_idx:06d}_seed{conf.get('seed', 0)}_dur{conf.get('duration_seconds', 5)}s_{conf.get('frame_rate', 25)}fps"
-                ltx_output_path = os.path.join(paths["base"], ltx_output_filename + ".mp4")
+                ltx_output_path = os.path.join(paths["images"], ltx_output_filename + ".mp4")
 
                 # Simple LTX resume: skip if mp4 already exists (and overwrite is off)
                 if not overwrite_existing and os.path.exists(ltx_output_path):
