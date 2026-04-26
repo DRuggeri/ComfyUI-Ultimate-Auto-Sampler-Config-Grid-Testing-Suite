@@ -647,9 +647,12 @@ export function convertStateToConfigs(state) {
         let finalModels = [];
         (configArray.models || []).forEach(m => {
             if (typeof m === 'object' && m !== null) {
+                // Trust the user's type selection even if no file is picked yet
+                // (otherwise switching to LTX/diffusion_model type without yet
+                // selecting a file silently falls back to checkpoint).
+                if (m.type) modelType = m.type;
                 if (m.path && m.path !== "None" && !configArray.model_bypass_states?.[m.path]) {
                     finalModels.push(m.path);
-                    modelType = m.type || "checkpoint";
                 }
             } else if (typeof m === 'string' && m && m !== "None" && !configArray.model_bypass_states?.[m]) {
                 finalModels.push(m);

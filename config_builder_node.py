@@ -574,10 +574,14 @@ class UltimateConfigBuilder:
             model_bypass_states = config_array.get("model_bypass_states", {})
             for m in models_raw:
                 if isinstance(m, dict):
+                    # Trust the user's type selection even if no file is picked yet
+                    # (otherwise switching to LTX/diffusion_model type without yet
+                    # selecting a file silently falls back to checkpoint).
+                    if m.get("type"):
+                        model_type = m.get("type", "checkpoint")
                     path = m.get("path", "")
                     if path and path != "None" and not model_bypass_states.get(path, False):
                         model_strings.append(str(path))
-                        model_type = m.get("type", "checkpoint")
                 elif isinstance(m, str) and m and m != "None" and not model_bypass_states.get(m, False):
                     model_strings.append(str(m))
             
@@ -629,6 +633,40 @@ class UltimateConfigBuilder:
                     gguf_options = config_array.get("gguf_options", {})
                     if gguf_options:
                         config["gguf_options"] = gguf_options
+                if model_type == "ltx_video":
+                    # Flatten configArray.ltx_video into top-level fields for the orchestrator.
+                    # Mirrors the JS-side flattening in conf-builder-utilities.convertStateToConfigs.
+                    ltx = config_array.get("ltx_video") or {}
+                    if ltx.get("clip_models"):
+                        config["clip_models"] = ltx["clip_models"]
+                    if ltx.get("vae_video"):
+                        config["vae_video"] = ltx["vae_video"]
+                    if ltx.get("vae_audio"):
+                        config["vae_audio"] = ltx["vae_audio"]
+                    if ltx.get("latent_upscaler"):
+                        config["latent_upscaler"] = ltx["latent_upscaler"]
+                    if ltx.get("duration_seconds") is not None:
+                        config["duration_seconds"] = ltx["duration_seconds"]
+                    if ltx.get("frame_rate") is not None:
+                        config["frame_rate"] = ltx["frame_rate"]
+                    if ltx.get("sampler_stage1"):
+                        config["sampler_stage1"] = ltx["sampler_stage1"]
+                    if ltx.get("sampler_stage2"):
+                        config["sampler_stage2"] = ltx["sampler_stage2"]
+                    if ltx.get("sigmas_stage1"):
+                        config["sigmas_stage1"] = ltx["sigmas_stage1"]
+                    if ltx.get("sigmas_stage2"):
+                        config["sigmas_stage2"] = ltx["sigmas_stage2"]
+                    if ltx.get("input_image") is not None:
+                        config["input_image"] = ltx["input_image"]
+                    if ltx.get("image_strength_stage1") is not None:
+                        config["image_strength_stage1"] = ltx["image_strength_stage1"]
+                    if ltx.get("image_strength_stage2") is not None:
+                        config["image_strength_stage2"] = ltx["image_strength_stage2"]
+                    if ltx.get("img_compression") is not None:
+                        config["img_compression"] = ltx["img_compression"]
+                    if ltx.get("audio_mode"):
+                        config["audio_mode"] = ltx["audio_mode"]
 
             # Always include omit triggers (empty list if none)
             config["lora_omit_triggers"] = omit_triggers if omit_triggers else []
