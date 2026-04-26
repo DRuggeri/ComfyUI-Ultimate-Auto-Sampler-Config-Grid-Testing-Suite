@@ -1343,6 +1343,11 @@ export function createModelElement(node, modelEntry, arrayIdx, modelIdx, modelLi
         <option value="diffusion_model" ${modelType === 'diffusion_model' ? 'selected' : ''}>Diffusion Model</option>
         <option value="gguf" ${modelType === 'gguf' ? 'selected' : ''}>GGUF</option>
     `;
+    const ltxVideoOpt = document.createElement("option");
+    ltxVideoOpt.value = "ltx_video";
+    ltxVideoOpt.textContent = "LTX Video";
+    if (modelType === "ltx_video") ltxVideoOpt.selected = true;
+    modelTypeSelect.appendChild(ltxVideoOpt);
     modelTypeSelect.onchange = () => {
         const newType = modelTypeSelect.value;
         node.state.config_arrays[arrayIdx].models[modelIdx] = newType === "checkpoint"
