@@ -1219,7 +1219,56 @@ def run_generation_loop(
                     pbar.update_absolute(current_job, total_jobs)
                 except:
                     pass
-            
+
+            # LTX Video dispatch — must run BEFORE any image-gen-specific code that
+            # accesses conf['sampler']/conf['steps'] (LTX configs use sampler_stage1/2).
+            if conf.get("model_type") == "ltx_video":
+                from .ltx_video_generation import preflight_ltx, load_ltx_models, ltx_video_generate
+
+                # Pre-flight on first LTX config of this run (idempotent — cached check internally)
+                if not _ltx_preflight_done[0]:
+                    try:
+                        preflight_ltx(conf)
+                        _ltx_preflight_done[0] = True
+                        # Free image-gen caches to make room for LTX VRAM
+                        try:
+                            from . import model_cache as mc
+                            if hasattr(mc, "clear_image_caches"):
+                                mc.clear_image_caches()
+                        except Exception:
+                            pass
+                    except RuntimeError as e:
+                        print(f"[GridTester] LTX preflight FAILED: {e}")
+                        raise
+
+                ltx_output_filename = f"{conf_idx:06d}_seed{conf.get('seed', 0)}_dur{conf.get('duration_seconds', 5)}s_{conf.get('frame_rate', 25)}fps"
+                ltx_output_path = os.path.join(paths["base"], ltx_output_filename + ".mp4")
+
+                # Simple LTX resume: skip if mp4 already exists (and overwrite is off)
+                if not overwrite_existing and os.path.exists(ltx_output_path):
+                    print(f"[GridTester] ⏭️  LTX skip (exists): {ltx_output_filename}.mp4")
+                    skipped_count += 1
+                    continue
+
+                progress_pct = int((current_job / total_jobs) * 100)
+                print(f"[GridTester] 📊 {current_job}/{total_jobs} ({progress_pct}%) | "
+                      f"LTX {conf.get('duration_seconds', 5)}s @ {conf.get('frame_rate', 25)}fps | {conf.get('width')}x{conf.get('height')}")
+
+                try:
+                    ltx_models = load_ltx_models(conf)
+                    gen_result = ltx_video_generate(conf, ltx_models, ltx_output_path)
+                except Exception as e:
+                    print(f"[GridTester] LTX gen FAILED for config {conf_idx}: {e}")
+                    raise
+
+                # Build manifest entry and persist
+                item = _build_ltx_manifest_entry(conf, gen_result, ltx_output_filename, gen_index=conf_idx)
+                existing_data["items"].insert(0, item)
+                save_manifest(paths["manifest"], existing_data)
+
+                # Skip the standard image-gen path
+                continue
+
             progress_pct = int((current_job / total_jobs) * 100)
             print(f"[GridTester] 📊 {current_job}/{total_jobs} ({progress_pct}%) | "
                   f"{conf['sampler']} @ {conf['steps']} steps | {w}x{h}")
@@ -1263,48 +1312,6 @@ def run_generation_loop(
                     
                     existing_data["items"].pop(match_index)
             
-            # LTX Video dispatch — branches the entire per-config flow when model_type is ltx_video
-            if conf.get("model_type") == "ltx_video":
-                from .ltx_video_generation import preflight_ltx, load_ltx_models, ltx_video_generate
-
-                # Pre-flight on first LTX config of this run (idempotent — cached check internally)
-                if not _ltx_preflight_done[0]:
-                    try:
-                        preflight_ltx(conf)
-                        _ltx_preflight_done[0] = True
-                        # Free image-gen caches to make room for LTX VRAM
-                        try:
-                            from . import model_cache as mc
-                            if hasattr(mc, "clear_image_caches"):
-                                mc.clear_image_caches()
-                        except Exception:
-                            pass
-                    except RuntimeError as e:
-                        print(f"[GridTester] LTX preflight FAILED: {e}")
-                        raise
-
-                # Build the output filename (mirror existing image-gen naming convention).
-                # Use whatever the existing image-gen path uses for output_filename — there
-                # is likely a variable named output_filename or filename_base around here.
-                # If no obvious convention, build one from idx + seed.
-                ltx_output_filename = f"{conf_idx:06d}_seed{conf.get('seed', 0)}_dur{conf.get('duration_seconds', 5)}s_{conf.get('frame_rate', 25)}fps"
-                ltx_output_path = os.path.join(paths["base"], ltx_output_filename + ".mp4")
-
-                try:
-                    ltx_models = load_ltx_models(conf)
-                    gen_result = ltx_video_generate(conf, ltx_models, ltx_output_path)
-                except Exception as e:
-                    print(f"[GridTester] LTX gen FAILED for config {conf_idx}: {e}")
-                    raise
-
-                # Build manifest entry and persist
-                item = _build_ltx_manifest_entry(conf, gen_result, ltx_output_filename, gen_index=conf_idx)
-                existing_data["items"].insert(0, item)
-                save_manifest(paths["manifest"], existing_data)
-
-                # Skip the standard image-gen path
-                continue
-
             # ==== MODEL SWITCHING ====
             target_model_name = conf["model"]
             target_model_key = get_model_cache_key(conf)
