@@ -1255,32 +1255,16 @@ def run_generation_loop(
                         print(f"[GridTester] LTX preflight FAILED: {e}")
                         raise
 
-                # Filename includes a short hash of the config-defining fields so that
-                # any meaningful change (different prompt, image, sigmas, strengths, etc.)
-                # produces a different filename — preventing the resume-skip from masking
-                # actual regenerations. Seed/duration/fps are kept in the human-readable
-                # part for at-a-glance scanning of session folders.
-                import hashlib
-                _hash_input = json.dumps({
-                    k: conf.get(k) for k in [
-                        "model", "clip_models", "vae_video", "vae_audio", "latent_upscaler",
-                        "positive", "negative", "width", "height", "cfg",
-                        "sampler_stage1", "sampler_stage2", "sigmas_stage1", "sigmas_stage2",
-                        "input_image", "image_strength_stage1", "image_strength_stage2",
-                        "img_compression", "audio_mode", "lora",
-                    ]
-                }, sort_keys=True, default=str)
-                _short_hash = hashlib.md5(_hash_input.encode("utf-8")).hexdigest()[:8]
-
-                ltx_output_filename = f"{conf_idx:06d}_seed{conf.get('seed', 0)}_dur{conf.get('duration_seconds', 5)}s_{conf.get('frame_rate', 25)}fps_{_short_hash}"
+                # Filename uses gen index + timestamp suffix to guarantee uniqueness
+                # per run. Skip-on-exists is intentionally NOT enabled for LTX (v1) —
+                # the resume/match logic image-gen uses doesn't yet understand LTX
+                # config fields (sigmas, strengths, audio_mode, etc.) so it produced
+                # false-positive skips on real config changes (e.g., LoRA strength,
+                # seed). Until we have a proper LTX-aware manifest match, every LTX
+                # gen runs fresh. Users can manually delete unwanted mp4s.
+                _ts_suffix = str(int(time.time() * 1000) % 10_000_000)
+                ltx_output_filename = f"{conf_idx:06d}_seed{conf.get('seed', 0)}_dur{conf.get('duration_seconds', 5)}s_{conf.get('frame_rate', 25)}fps_{_ts_suffix}"
                 ltx_output_path = os.path.join(paths["images"], ltx_output_filename + ".mp4")
-
-                # Skip if mp4 already exists for THIS exact config (and overwrite is off).
-                # The hash in the filename guarantees only an identical config triggers skip.
-                if not overwrite_existing and os.path.exists(ltx_output_path):
-                    print(f"[GridTester] ⏭️  LTX skip (exists): {ltx_output_filename}.mp4")
-                    skipped_count += 1
-                    continue
 
                 progress_pct = int((current_job / total_jobs) * 100)
                 print(f"[GridTester] 📊 {current_job}/{total_jobs} ({progress_pct}%) | "
