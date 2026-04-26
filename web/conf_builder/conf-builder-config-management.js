@@ -4061,6 +4061,100 @@ function renderLTXImageInput(node, configArray) {
         }
         node.saveState();
     };
+
+    // Drag-and-drop + clipboard paste support
+    const _uploadImageBlob = async (blob, filenameHint) => {
+        const formData = new FormData();
+        const file = blob instanceof File
+            ? blob
+            : new File([blob], filenameHint || ("clipboard_" + Date.now() + ".png"), { type: blob.type || "image/png" });
+        formData.append("image", file);
+        try {
+            const resp = await fetch("/upload/image", { method: "POST", body: formData });
+            if (!resp.ok) {
+                console.error("[LTX] /upload/image failed:", resp.status, await resp.text());
+                return null;
+            }
+            const data = await resp.json();
+            return data && data.name ? data.name : null;
+        } catch (e) {
+            console.error("[LTX] /upload/image error:", e);
+            return null;
+        }
+    };
+
+    const _setImageValue = (val) => {
+        if (!val) return;
+        if (Array.isArray(val)) {
+            ltx.input_image = val.length === 1 ? val[0] : val;
+            imgInput.value = val.length === 1 ? val[0] : JSON.stringify(val);
+        } else {
+            ltx.input_image = val;
+            imgInput.value = val;
+        }
+        node.saveState();
+    };
+
+    // Drag visual feedback — apply to the imgRow so the highlight is visible across label+input
+    const _origBorder = imgInput.style.border;
+    const _highlightOn = () => {
+        imgInput.style.border = "2px dashed #0af";
+        imgInput.style.background = "rgba(0, 170, 255, 0.05)";
+    };
+    const _highlightOff = () => {
+        imgInput.style.border = _origBorder;
+        imgInput.style.background = "";
+    };
+
+    // Drop zone — listen on both the row and the input
+    for (const target of [imgRow, imgInput]) {
+        target.addEventListener("dragover", (e) => {
+            // Only highlight if dragged item contains files
+            if (e.dataTransfer && e.dataTransfer.types && e.dataTransfer.types.indexOf("Files") !== -1) {
+                e.preventDefault();
+                e.stopPropagation();
+                _highlightOn();
+            }
+        });
+        target.addEventListener("dragleave", (e) => {
+            // Only un-highlight when leaving the actual zone (not entering child element)
+            if (e.target === target) _highlightOff();
+        });
+        target.addEventListener("drop", async (e) => {
+            if (!e.dataTransfer || !e.dataTransfer.files || e.dataTransfer.files.length === 0) return;
+            e.preventDefault();
+            e.stopPropagation();
+            _highlightOff();
+            const files = Array.from(e.dataTransfer.files).filter(f => f.type.startsWith("image/"));
+            if (files.length === 0) return;
+            imgInput.placeholder = "Uploading " + files.length + " image" + (files.length > 1 ? "s" : "") + "...";
+            const uploaded = [];
+            for (const f of files) {
+                const name = await _uploadImageBlob(f, f.name);
+                if (name) uploaded.push(name);
+            }
+            imgInput.placeholder = "path/to/img.png  |  MyImages/  |  [\"a.png\", \"b.png\"]";
+            if (uploaded.length > 0) _setImageValue(uploaded);
+        });
+    }
+
+    // Clipboard paste — when focused in the input
+    imgInput.addEventListener("paste", async (e) => {
+        if (!e.clipboardData) return;
+        // Look for image/* item
+        const items = Array.from(e.clipboardData.items || []);
+        const imgItem = items.find(it => it.type && it.type.startsWith("image/"));
+        if (!imgItem) return;  // Not an image paste — let default text paste happen
+        e.preventDefault();
+        const blob = imgItem.getAsFile();
+        if (!blob) return;
+        imgInput.placeholder = "Uploading pasted image...";
+        const ext = (blob.type.split("/")[1] || "png").split(";")[0];
+        const name = await _uploadImageBlob(blob, "clipboard_" + Date.now() + "." + ext);
+        imgInput.placeholder = "path/to/img.png  |  MyImages/  |  [\"a.png\", \"b.png\"]";
+        if (name) _setImageValue(name);
+    });
+
     imgRow.appendChild(imgInput);
     div.appendChild(imgRow);
 

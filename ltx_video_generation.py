@@ -235,7 +235,18 @@ def preflight_ltx(config):
     # 5. i2v image exists if set?
     img = config.get("input_image")
     if img:
-        if not os.path.isfile(img):
+        # Resolve via ComfyUI's input-dir lookup if it's not an absolute path
+        # (drag-drop and clipboard-paste uploads land there as bare filenames).
+        resolved = img
+        if not os.path.isabs(img) and not os.path.isfile(img):
+            try:
+                import folder_paths as _fp
+                candidate = _fp.get_annotated_filepath(img)
+                if candidate and os.path.isfile(candidate):
+                    resolved = candidate
+            except Exception:
+                pass
+        if not os.path.isfile(resolved):
             raise RuntimeError("Input image not found: " + img)
 
     # 6. Even dimensions (LTX divides by 2 for latent space)?
@@ -461,7 +472,22 @@ def ltx_video_generate(config, ltx_models, output_path):
             from PIL import Image as PILImage
             import numpy as np
             import torch as _torch
-            pil = PILImage.open(input_image_path).convert("RGB")
+            import os as _os
+
+            # Resolve the input_image. If it's an absolute path, use as-is. Otherwise
+            # try resolving via ComfyUI's standard input-dir lookup (drag-drop and
+            # clipboard-paste uploads land there as bare filenames).
+            resolved_image_path = input_image_path
+            if not _os.path.isabs(input_image_path) and not _os.path.isfile(input_image_path):
+                try:
+                    import folder_paths
+                    candidate = folder_paths.get_annotated_filepath(input_image_path)
+                    if candidate and _os.path.isfile(candidate):
+                        resolved_image_path = candidate
+                except Exception:
+                    pass  # fall back to original; PIL will raise if truly missing
+
+            pil = PILImage.open(resolved_image_path).convert("RGB")
             # Resize to target dims (matches reference workflow's ResizeImageMaskNode)
             pil = pil.resize((width, height), PILImage.LANCZOS)
             img_np = np.array(pil).astype(np.float32) / 255.0
