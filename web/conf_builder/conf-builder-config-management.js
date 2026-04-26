@@ -3773,6 +3773,46 @@ function createVAEElement(node, vaeName, arrayIdx, vaeIdx, vaeList, vFolders) {
 
 // --- LTX VIDEO SETTINGS SECTION ---
 
+function renderLTXVideoShape(node) {
+    const ltx = node.state.ltx_video;
+    const div = document.createElement("div");
+    div.className = "cb-subsection";
+
+    const titleDiv = document.createElement("div");
+    titleDiv.className = "cb-subsection-title";
+    titleDiv.textContent = "── Video Shape ──";
+    div.appendChild(titleDiv);
+
+    // Frame readout — declared up front so the slider onChange handlers can reference it
+    const readout = document.createElement("div");
+    readout.className = "cb-readout";
+    readout.style.cssText = "font-size: 11px; color: #888; padding: 4px 8px;";
+
+    const updateFrameReadout = () => {
+        const f = (ltx.duration_seconds * ltx.frame_rate) + 1;
+        readout.textContent = "→ Will generate " + f + " frames per video";
+    };
+
+    // Duration slider (1–60 sec, step 1)
+    div.appendChild(createSlider("Duration (sec)", ltx.duration_seconds, 1, 60, 1, (v) => {
+        ltx.duration_seconds = v;
+        node.saveState();
+        updateFrameReadout();
+    }));
+
+    // Frame rate slider (8–60 fps, step 1)
+    div.appendChild(createSlider("Frame Rate (fps)", ltx.frame_rate, 8, 60, 1, (v) => {
+        ltx.frame_rate = v;
+        node.saveState();
+        updateFrameReadout();
+    }));
+
+    div.appendChild(readout);
+    updateFrameReadout();
+
+    return div;
+}
+
 function renderLTXModelFiles(node) {
     const ltx = node.state.ltx_video;
     const div = document.createElement("div");
