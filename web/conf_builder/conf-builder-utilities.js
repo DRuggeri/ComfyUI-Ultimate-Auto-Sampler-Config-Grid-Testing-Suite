@@ -18,6 +18,8 @@ let availableVAEs = null;
 let vaeFolders = null;
 let availableUpscaleModels = [];
 let upscaleModelFolders = ["/"];
+let availableLatentUpscaleModels = [];
+let latentUpscaleModelFolders = ["/"];
 let clipTypes = [];
 let dualClipTypes = [];
 let availableSamplers = [];
@@ -311,6 +313,10 @@ export async function getModelLists() {
         availableUpscaleModels = (data.upscale_models || []).map(normalizePath);
         upscaleModelFolders = extractFolders(availableUpscaleModels);
 
+        // Latent upscale model list (separate folder; LTX 2.3 spatial upscaler etc.)
+        availableLatentUpscaleModels = (data.latent_upscale_models || []).map(normalizePath);
+        latentUpscaleModelFolders = extractFolders(availableLatentUpscaleModels);
+
         console.log(`[ConfigBuilder] Model lists loaded: ${availableModels?.length || 0} checkpoints, ` +
             `${availableDiffusionModels.length} diffusion models, ${availableGGUFModels.length} GGUFs, ` +
             `${availableTextEncoders.length} text encoders, ${availableVAEs.length} VAEs, ` +
@@ -346,6 +352,8 @@ export function getAvailableSamplers() { return availableSamplers || []; }
 export function getAvailableSchedulers() { return availableSchedulers || []; }
 export function getAvailableUpscaleModels() { return availableUpscaleModels || []; }
 export function getUpscaleModelFolders() { return upscaleModelFolders || ["/"]; }
+export function getAvailableLatentUpscaleModels() { return availableLatentUpscaleModels || []; }
+export function getLatentUpscaleModelFolders() { return latentUpscaleModelFolders || ["/"]; }
 
 export async function getAvailableSessions() {
     // Return cached sessions if already loaded (cleared by clearAllCaches on explicit refresh)

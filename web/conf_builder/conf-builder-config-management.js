@@ -16,6 +16,7 @@ import {
     getVAEFolders,
     getAvailableTextEncoders,
     getAvailableUpscaleModels,
+    getAvailableLatentUpscaleModels,
     getAvailableSamplers
 } from './conf-builder-utilities.js';
 
@@ -3854,7 +3855,7 @@ function renderLTXModelFiles(node, configArray) {
 
     const textEncoders = getAvailableTextEncoders();
     const vaeList = getAvailableVAEs();
-    const upscaleModels = getAvailableUpscaleModels();
+    const latentUpscaleModels = getAvailableLatentUpscaleModels();
 
     const fields = [
         {label: "Dual CLIP 1 (gemma):", optionsList: textEncoders,
@@ -3881,8 +3882,8 @@ function renderLTXModelFiles(node, configArray) {
             placeholder: "Search VAEs...",
             getter: () => ltx.vae_audio || "",
             setter: (v) => { ltx.vae_audio = v; node.saveState(); }},
-        {label: "Latent Upscaler:", optionsList: upscaleModels,
-            placeholder: "Search upscale models...",
+        {label: "Latent Upscaler:", optionsList: latentUpscaleModels,
+            placeholder: "Search latent upscalers...",
             getter: () => ltx.latent_upscaler || "",
             setter: (v) => { ltx.latent_upscaler = v; node.saveState(); }},
     ];

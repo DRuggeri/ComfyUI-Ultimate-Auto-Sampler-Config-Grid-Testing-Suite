@@ -1173,6 +1173,13 @@ async def get_model_lists_endpoint(request):
         except (KeyError, Exception):
             upscale_models = []
 
+        # Latent upscale model list (separate folder; used by LatentUpscaleModelLoader,
+        # e.g. LTX 2.3 spatial upscaler)
+        try:
+            latent_upscale_models = folder_paths.get_filename_list("latent_upscale_models")
+        except (KeyError, Exception):
+            latent_upscale_models = []
+
         # VAE list
         vae_list = folder_paths.get_filename_list("vae")
 
@@ -1191,6 +1198,7 @@ async def get_model_lists_endpoint(request):
             "dual_clip_types": dual_clip_types,
             "vae": vae_list,
             "upscale_models": upscale_models,
+            "latent_upscale_models": latent_upscale_models,
             "samplers": sampler_names,
             "schedulers": scheduler_names
         })

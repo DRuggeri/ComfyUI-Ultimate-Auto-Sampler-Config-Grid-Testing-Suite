@@ -153,13 +153,15 @@ def preflight_ltx(config):
         )
 
     # 3. Model files exist?
+    # Note: latent_upscaler lives in `latent_upscale_models/` (consumed by
+    # LatentUpscaleModelLoader), NOT `upscale_models/` (which is for image upscalers).
     checks = [
         ("diffusion_models", config["model"]),
         ("text_encoders", config["clip_models"][0]),
         ("text_encoders", config["clip_models"][1]),
         ("vae", config["vae_video"]),
         ("vae", config["vae_audio"]),
-        ("upscale_models", config["latent_upscaler"]),
+        ("latent_upscale_models", config["latent_upscaler"]),
     ]
     missing_files = []
     for folder_key, name in checks:
