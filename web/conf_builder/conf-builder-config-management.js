@@ -4083,14 +4083,38 @@ function renderLTXImageInput(node, configArray) {
         }
     };
 
+    // Append uploaded image(s) to whatever is already in the input. If the field
+    // is empty, the new value(s) become the value. If non-empty, existing value
+    // gets merged into a JSON array with the new image(s) appended. Folders
+    // (strings ending in /) get appended too — user can clean up manually if
+    // they want pure folder-expansion mode back.
     const _setImageValue = (val) => {
         if (!val) return;
-        if (Array.isArray(val)) {
-            ltx.input_image = val.length === 1 ? val[0] : val;
-            imgInput.value = val.length === 1 ? val[0] : JSON.stringify(val);
+        const incoming = Array.isArray(val) ? val.slice() : [val];
+
+        // Read the current input value and parse what's already there
+        const current = imgInput.value.trim();
+        let existing = [];
+        if (current) {
+            if (current.startsWith("[")) {
+                try {
+                    const parsed = JSON.parse(current);
+                    existing = Array.isArray(parsed) ? parsed : [current];
+                } catch {
+                    existing = [current];
+                }
+            } else {
+                existing = [current];
+            }
+        }
+
+        const merged = [...existing, ...incoming];
+        if (merged.length === 1) {
+            ltx.input_image = merged[0];
+            imgInput.value = merged[0];
         } else {
-            ltx.input_image = val;
-            imgInput.value = val;
+            ltx.input_image = merged;
+            imgInput.value = JSON.stringify(merged);
         }
         node.saveState();
     };
