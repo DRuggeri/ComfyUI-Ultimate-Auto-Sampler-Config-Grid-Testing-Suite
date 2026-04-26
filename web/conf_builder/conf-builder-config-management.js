@@ -13,7 +13,9 @@ import {
     countPromptCombinations,
     expandPromptPreview,
     getAvailableVAEs,
-    getVAEFolders
+    getVAEFolders,
+    getAvailableTextEncoders,
+    getAvailableUpscaleModels
 } from './conf-builder-utilities.js';
 
 import {
@@ -3770,6 +3772,79 @@ function createVAEElement(node, vaeName, arrayIdx, vaeIdx, vaeList, vFolders) {
 }
 
 // --- LTX VIDEO SETTINGS SECTION ---
+
+function renderLTXModelFiles(node) {
+    const ltx = node.state.ltx_video;
+    const div = document.createElement("div");
+    div.className = "cb-subsection";
+
+    const titleDiv = document.createElement("div");
+    titleDiv.className = "cb-subsection-title";
+    titleDiv.textContent = "── Model Files ──";
+    div.appendChild(titleDiv);
+
+    const textEncoders = getAvailableTextEncoders();
+    const vaeList = getAvailableVAEs();
+    const upscaleModels = getAvailableUpscaleModels();
+
+    const fields = [
+        {label: "Dual CLIP 1 (gemma):", optionsList: textEncoders,
+            placeholder: "Search text encoders...",
+            getter: () => (ltx.clip_models && ltx.clip_models[0]) || "",
+            setter: (v) => {
+                if (!ltx.clip_models) ltx.clip_models = ["", ""];
+                ltx.clip_models[0] = v;
+                node.saveState();
+            }},
+        {label: "Dual CLIP 2 (projection):", optionsList: textEncoders,
+            placeholder: "Search text encoders...",
+            getter: () => (ltx.clip_models && ltx.clip_models[1]) || "",
+            setter: (v) => {
+                if (!ltx.clip_models) ltx.clip_models = ["", ""];
+                ltx.clip_models[1] = v;
+                node.saveState();
+            }},
+        {label: "Video VAE:", optionsList: vaeList,
+            placeholder: "Search VAEs...",
+            getter: () => ltx.vae_video || "",
+            setter: (v) => { ltx.vae_video = v; node.saveState(); }},
+        {label: "Audio VAE:", optionsList: vaeList,
+            placeholder: "Search VAEs...",
+            getter: () => ltx.vae_audio || "",
+            setter: (v) => { ltx.vae_audio = v; node.saveState(); }},
+        {label: "Latent Upscaler:", optionsList: upscaleModels,
+            placeholder: "Search upscale models...",
+            getter: () => ltx.latent_upscaler || "",
+            setter: (v) => { ltx.latent_upscaler = v; node.saveState(); }},
+    ];
+
+    for (const f of fields) {
+        const row = document.createElement("div");
+        row.className = "cb-row";
+
+        const lbl = document.createElement("label");
+        lbl.textContent = f.label;
+        lbl.className = "cb-label";
+        row.appendChild(lbl);
+
+        const currentVal = f.getter();
+        // Ensure the current value is included in the list even if not present in the cached options
+        const optionsList = (f.optionsList && f.optionsList.includes(currentVal)) || !currentVal
+            ? (f.optionsList || [])
+            : [currentVal, ...(f.optionsList || [])];
+
+        const dropdown = createSearchableSelect(
+            optionsList,
+            currentVal,
+            f.setter,
+            f.placeholder
+        );
+        row.appendChild(dropdown);
+        div.appendChild(row);
+    }
+
+    return div;
+}
 
 function renderLTXSection(node) {
     if (node.state.model_type !== "ltx_video") return null;
