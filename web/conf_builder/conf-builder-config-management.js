@@ -114,7 +114,10 @@ function rerenderConfigSection(node, arrayIdx) {
             textEncoderFolders: utilities.getTextEncoderFolders(),
             vae: utilities.getAvailableVAEs(),
             vaeFolders: utilities.getVAEFolders(),
+            vaeModels: utilities.getAvailableVAEs(),  // Alias used by LTX picker
             upscaleModels: utilities.getAvailableUpscaleModels ? utilities.getAvailableUpscaleModels() : [],
+            latentUpscaleModels: utilities.getAvailableLatentUpscaleModels ? utilities.getAvailableLatentUpscaleModels() : [],
+            latentUpscaleModelFolders: utilities.getLatentUpscaleModelFolders ? utilities.getLatentUpscaleModelFolders() : ["/"],
             samplers: utilities.getAvailableSamplers(),
             schedulers: utilities.getAvailableSchedulers(),
             clipTypes: utilities.getClipTypes(),
@@ -3843,7 +3846,7 @@ function renderLTXVideoShape(node, configArray) {
     return div;
 }
 
-function renderLTXModelFiles(node, configArray) {
+function renderLTXModelFiles(node, configArray, modelLists) {
     const ltx = configArray.ltx_video;
     const div = document.createElement("div");
     div.className = "cb-subsection";
@@ -3853,9 +3856,12 @@ function renderLTXModelFiles(node, configArray) {
     titleDiv.textContent = "── Model Files ──";
     div.appendChild(titleDiv);
 
-    const textEncoders = getAvailableTextEncoders();
-    const vaeList = getAvailableVAEs();
-    const latentUpscaleModels = getAvailableLatentUpscaleModels();
+    // Pull from modelLists (same source the existing image-gen pickers use, so the
+    // refresh-models button updates everything). Fall back to direct getters if
+    // modelLists wasn't provided (defensive — older call sites).
+    const textEncoders = (modelLists && modelLists.textEncoders) || getAvailableTextEncoders() || [];
+    const vaeList = (modelLists && (modelLists.vaeModels || modelLists.vae)) || getAvailableVAEs() || [];
+    const latentUpscaleModels = (modelLists && modelLists.latentUpscaleModels) || getAvailableLatentUpscaleModels() || [];
 
     const fields = [
         {label: "Dual CLIP 1 (gemma):", optionsList: textEncoders,
@@ -4230,7 +4236,7 @@ function renderLTXAudio(node, configArray) {
     return div;
 }
 
-function renderLTXSection(node, configArray, arrayIdx) {
+function renderLTXSection(node, configArray, arrayIdx, modelLists) {
     if (!isLTXConfigArray(configArray)) return null;
 
     // Initialize defaults on first render (state lives per-configArray, not on node.state)
@@ -4277,7 +4283,7 @@ function renderLTXSection(node, configArray, arrayIdx) {
     // Sub-sections — defined in subsequent tasks (A13-A16). For now, stub them
     // as no-op functions so this skeleton renders without errors. The real
     // implementations will replace these stubs.
-    if (typeof renderLTXModelFiles === "function") section.appendChild(renderLTXModelFiles(node, configArray));
+    if (typeof renderLTXModelFiles === "function") section.appendChild(renderLTXModelFiles(node, configArray, modelLists));
     if (typeof renderLTXVideoShape === "function") section.appendChild(renderLTXVideoShape(node, configArray));
     if (typeof renderLTXStage === "function") {
         section.appendChild(renderLTXStage(node, configArray, 1));
@@ -6667,7 +6673,7 @@ export async function renderUI(node, availableLoras, modelLists, loraFolders, av
         renderConfigPromptsSection(node, arrayElement, configArray, arrayIdx);
         renderModelsSection(node, arrayElement, configArray, arrayIdx, modelLists);
         // LTX Video Settings — only renders when this configArray's models[] contain an ltx_video model
-        const ltxSection = renderLTXSection(node, configArray, arrayIdx);
+        const ltxSection = renderLTXSection(node, configArray, arrayIdx, modelLists);
         if (ltxSection) arrayElement.appendChild(ltxSection);
         renderVAEsSection(node, arrayElement, configArray, arrayIdx, modelLists);
         renderLorasSection(node, arrayElement, configArray, arrayIdx, availableLoras, loraFolders);

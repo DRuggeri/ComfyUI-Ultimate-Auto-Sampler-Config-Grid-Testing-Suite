@@ -281,7 +281,9 @@ app.registerExtension({
                         samplers: utilities.getAvailableSamplers(),
                         schedulers: utilities.getAvailableSchedulers(),
                         upscaleModels: utilities.getAvailableUpscaleModels(),
-                        upscaleModelFolders: utilities.getUpscaleModelFolders()
+                        upscaleModelFolders: utilities.getUpscaleModelFolders(),
+                        latentUpscaleModels: utilities.getAvailableLatentUpscaleModels ? utilities.getAvailableLatentUpscaleModels() : [],
+                        latentUpscaleModelFolders: utilities.getLatentUpscaleModelFolders ? utilities.getLatentUpscaleModelFolders() : ["/"]
                     };
 
                     await configManagement.renderUI(
