@@ -39,16 +39,21 @@ let activeConfigBuilderNodes = new Set();
 // --- localStorage PERSISTENT CACHE ---
 const LS_CACHE_KEY = "uscg_model_cache";
 const LS_COUNTS_KEY = "uscg_model_counts";
+// Bump this whenever the cache shape changes (new field added, structure tweaked).
+// Mismatched versions force a fresh fetch instead of restoring incomplete data.
+const LS_CACHE_VERSION = 2;
 
 function _saveToLocalStorage() {
     try {
         const data = {
+            v: LS_CACHE_VERSION,
             ts: Date.now(),
             availableLoras, loraFolders, availableModels, modelFolders,
             availableDiffusionModels, diffusionModelFolders,
             availableGGUFModels, ggufModelFolders,
             availableTextEncoders, textEncoderFolders,
             availableVAEs, vaeFolders, availableUpscaleModels, upscaleModelFolders,
+            availableLatentUpscaleModels, latentUpscaleModelFolders,
             clipTypes, dualClipTypes, availableSamplers, availableSchedulers
         };
         localStorage.setItem(LS_CACHE_KEY, JSON.stringify(data));
@@ -60,6 +65,8 @@ function _loadFromLocalStorage() {
         const raw = localStorage.getItem(LS_CACHE_KEY);
         if (!raw) return false;
         const data = JSON.parse(raw);
+        // Reject caches saved with an older schema version (avoids stale incomplete data).
+        if (data.v !== LS_CACHE_VERSION) return false;
         // Only use cache from last 24 hours
         if (Date.now() - data.ts > 86400000) return false;
         availableLoras = data.availableLoras;
@@ -76,6 +83,8 @@ function _loadFromLocalStorage() {
         vaeFolders = data.vaeFolders || ["/"];
         availableUpscaleModels = data.availableUpscaleModels || [];
         upscaleModelFolders = data.upscaleModelFolders || ["/"];
+        availableLatentUpscaleModels = data.availableLatentUpscaleModels || [];
+        latentUpscaleModelFolders = data.latentUpscaleModelFolders || ["/"];
         clipTypes = data.clipTypes || [];
         dualClipTypes = data.dualClipTypes || [];
         availableSamplers = data.availableSamplers || [];
@@ -133,6 +142,10 @@ export function clearAllCaches() {
     textEncoderFolders = null;
     availableVAEs = null;
     vaeFolders = null;
+    availableUpscaleModels = [];
+    upscaleModelFolders = ["/"];
+    availableLatentUpscaleModels = [];
+    latentUpscaleModelFolders = ["/"];
     clipTypes = [];
     dualClipTypes = [];
     availableSamplers = [];
