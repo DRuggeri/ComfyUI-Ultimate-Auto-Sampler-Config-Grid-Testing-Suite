@@ -1314,8 +1314,8 @@ function createCard(d) {
     const isVideo = d.media_type === 'video';
     const mediaElement = isVideo
         ? `<video ondblclick="toggleFavorite(this)" data-src="${d.file}" muted loop playsinline preload="metadata" draggable="false"></video>`
-        : `<img ondblclick="toggleFavorite(this)" data-src="${d.file}" alt="Image ${d.id}" draggable="false">`;
-    const reviseBtn = isVideo ? '' : `<button class="revise-btn" onclick="openM(${d.id})">REVISE</button>`;
+        : `<img ondblclick="toggleFavorite(this)" onclick="event.stopPropagation(); openM(${d.id})" data-src="${d.file}" alt="Image ${d.id}" draggable="false" style="cursor:pointer;" title="Click to open lightbox">`;
+    const reviseBtn = isVideo ? '' : `<button class="revise-btn" onclick="event.stopPropagation(); openM(${d.id})">REVISE</button>`;
     const upscaleBtn = isVideo ? '' : `<button class="upscale-btn" onclick="openUpscaleModal(${d.id})" title="Upscale this image">\u2B06</button>`;
     const videoBadge = isVideo ? '<div class="video-badge">\u25B6 VIDEO</div>' : '';
 
@@ -1421,10 +1421,110 @@ function openM(id) {
     });
 
     document.getElementById('modal').style.display = 'flex';
+
+    // Mark modal as open so grid keyboard shortcuts are suppressed
+    window._modalOpen = true;
+
+    // Attach modal keyboard handler (capture phase so it fires before grid handler)
+    if (window._modalKeyHandler) {
+        document.removeEventListener('keydown', window._modalKeyHandler, true);
+    }
+    window._modalKeyHandler = function(e) {
+        if (!window._modalOpen) return;
+
+        // Don't intercept typing in form inputs
+        if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
+
+        const currentId = window.currentModalId;
+        if (currentId == null || !processedData || processedData.length === 0) return;
+
+        // Navigate to next/prev item in the current filtered/sorted set (processedData)
+        const currentIndex = processedData.findIndex(x => x.id === currentId);
+
+        const goNext = () => {
+            if (currentIndex < processedData.length - 1) {
+                openM(processedData[currentIndex + 1].id);
+            }
+        };
+        const goPrev = () => {
+            if (currentIndex > 0) {
+                openM(processedData[currentIndex - 1].id);
+            }
+        };
+
+        switch (e.key) {
+            case 'ArrowRight':
+                e.preventDefault();
+                e.stopPropagation();
+                goNext();
+                break;
+            case 'ArrowLeft':
+                e.preventDefault();
+                e.stopPropagation();
+                goPrev();
+                break;
+            case ' ':
+                e.preventDefault();
+                e.stopPropagation();
+                if (e.shiftKey) { goPrev(); } else { goNext(); }
+                break;
+            case 'Escape':
+                e.preventDefault();
+                e.stopPropagation();
+                closeM();
+                break;
+            default:
+                // 1-9 keys (no shift/ctrl/alt): quick favorite current modal item
+                if (!e.shiftKey && !e.ctrlKey && !e.altKey && !e.metaKey &&
+                    e.code >= 'Digit1' && e.code <= 'Digit9') {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    const item = activeData ? activeData.find(x => x.id === currentId) : null;
+                    if (item) {
+                        item.favorited = !item.favorited;
+                        if (typeof markItemChanged === 'function') markItemChanged(item);
+                        if (typeof scheduleJSONUpdate === 'function') scheduleJSONUpdate();
+                        // Visual feedback on the modal image
+                        const mImg = document.getElementById('m-img');
+                        if (mImg) {
+                            const color = item.favorited ? '#00cc44' : '#cc4444';
+                            mImg.style.transition = 'box-shadow 0.3s';
+                            mImg.style.boxShadow = `0 0 30px ${color}`;
+                            setTimeout(() => { mImg.style.boxShadow = ''; }, 400);
+                        }
+                        // Update the navigation counter if displayed
+                        const counterEl = document.getElementById('modal-nav-counter');
+                        if (counterEl) {
+                            const favIcon = item.favorited ? '★' : '☆';
+                            counterEl.title = item.favorited ? 'Favorited' : 'Not favorited';
+                        }
+                    }
+                }
+                break;
+        }
+    };
+    document.addEventListener('keydown', window._modalKeyHandler, true);
+
+    // Update navigation counter
+    _updateModalCounter();
+}
+
+// Update the modal nav counter display
+function _updateModalCounter() {
+    const counterEl = document.getElementById('modal-nav-counter');
+    if (!counterEl || !processedData) return;
+    const idx = processedData.findIndex(x => x.id === window.currentModalId);
+    if (idx === -1) { counterEl.textContent = ''; return; }
+    counterEl.textContent = `${idx + 1} / ${processedData.length}`;
 }
 
 function closeM() {
     document.getElementById('modal').style.display = 'none';
+    window._modalOpen = false;
+    if (window._modalKeyHandler) {
+        document.removeEventListener('keydown', window._modalKeyHandler, true);
+        window._modalKeyHandler = null;
+    }
 }
 
 // THROTTLED JSON Updates

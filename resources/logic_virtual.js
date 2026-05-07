@@ -852,6 +852,9 @@ if (viewport) {
 function setupKeyboardShortcuts() {
     document.addEventListener('keydown', (e) => {
         if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
+        // Suppress grid shortcuts when the lightbox/revise modal is open
+        // (modal installs its own capture-phase handler that handles navigation)
+        if (window._modalOpen) return;
 
         switch (e.key) {
             case '+':
