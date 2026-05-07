@@ -5,7 +5,6 @@ the preview endpoint (/configbuilder/preview) call. Drift between preview
 and runtime is impossible by construction because both call this function.
 """
 import json
-import pytest
 from config_builder_node import UltimateConfigBuilder
 
 
@@ -69,6 +68,106 @@ def test_lora_strength_arrays_render_as_brackets():
     json_str = UltimateConfigBuilder.state_to_configs_json(state)
     parsed = json.loads(json_str)
     loras = [c["lora"] for c in parsed["configs"]]
-    bracketed = [l for l in loras if isinstance(l, str) and "[0, 1, 2, 5, 10]" in l]
-    assert bracketed, f"No bracketed lora strings in output. Got: {loras}"
-    assert "Sexy-IL-v11/" in bracketed[0]
+    expected = "Sexy-IL-v11/:[0, 1, 2, 5, 10]:[0, 1, 2, 5, 10]"
+    assert any(l == expected for l in loras), \
+        f"Expected exact lora string {expected!r} in output. Got: {loras}"
+
+
+def test_single_lora_passes_through_verbatim():
+    """A single LoRA with scalar strengths shows up unchanged in configs_json."""
+    state = make_state(loras=["myLora:0.80:0.50"])
+    json_str = UltimateConfigBuilder.state_to_configs_json(state)
+    parsed = json.loads(json_str)
+    assert len(parsed["configs"]) == 1, parsed["configs"]
+    assert parsed["configs"][0]["lora"] == "myLora:0.80:0.50"
+
+
+def test_multiple_loras_combine_with_plus_separator():
+    """combine: True (forced) joins multiple stackable loras with ' + '.
+
+    Note: process_lora_array forces combine=True regardless of the field's
+    value in the config_array (see config_builder_node.py 'combine = True').
+    """
+    state = make_state(loras=["lora1:0.5:1.00", "lora2:0.7:1.00"])
+    json_str = UltimateConfigBuilder.state_to_configs_json(state)
+    parsed = json.loads(json_str)
+    assert parsed["configs"][0]["lora"] == "lora1:0.5:1.00 + lora2:0.7:1.00"
+
+
+def test_folder_reference_left_unexpanded():
+    """Folder refs ('myFolder/') stay literal — orchestrator expands at runtime."""
+    state = make_state(loras=["myFolder/"])
+    json_str = UltimateConfigBuilder.state_to_configs_json(state)
+    parsed = json.loads(json_str)
+    lora = parsed["configs"][0]["lora"]
+    assert lora == "myFolder/", f"Folder ref should not be expanded here, got: {lora}"
+
+
+def test_folder_with_strength_array_not_combined_with_other_loras():
+    """A folder ref with strength arrays must keep its trailing '/' AND
+    bracket form, AND must NOT be combined with stackable loras (the combine
+    block uses 'name part ends with /' to detect folder refs)."""
+    state = make_state(
+        loras=["myFolder/", "actualLora:0.5:1.00"],
+        lora_weight_arrays={
+            "myFolder/_model": [0.5, 0.8, 1.0],
+            "myFolder/_clip": [1.0],
+        },
+    )
+    json_str = UltimateConfigBuilder.state_to_configs_json(state)
+    parsed = json.loads(json_str)
+    # Multiple loras (one folder, one stackable, no stacking happens
+    # because there's only one stackable), so the per-config "lora" field
+    # is a LIST — not a combined string.
+    lora = parsed["configs"][0]["lora"]
+    assert isinstance(lora, list), f"Expected list of separate loras, got: {lora!r}"
+    folder_entry = [s for s in lora if s.startswith("myFolder/")]
+    assert folder_entry, f"Folder ref missing: {lora}"
+    assert "[0.5, 0.8, 1.0]" in folder_entry[0], f"Bracket form missing: {folder_entry[0]}"
+    assert "actualLora:0.5:1.00" in lora, f"Stackable lora missing: {lora}"
+
+
+def test_bypassed_lora_is_excluded():
+    """A LoRA listed in lora_bypass_states with True is filtered out."""
+    state = make_state(
+        loras=["lora1:0.5:1.00", "lora2:0.7:1.00"],
+        lora_bypass_states={"lora1": True},
+    )
+    json_str = UltimateConfigBuilder.state_to_configs_json(state)
+    parsed = json.loads(json_str)
+    lora = parsed["configs"][0]["lora"]
+    # Only lora2 survives the bypass filter.
+    assert lora == "lora2:0.7:1.00", f"Expected only lora2 to survive bypass, got: {lora}"
+
+
+def test_ltx_video_config_model_type_propagates():
+    """An LTX video config_array (model with type='ltx_video') reaches
+    configs_json with model_type=='ltx_video'.
+    See project memory: model_type lives PER-MODEL inside config_array.models[i].
+    """
+    state = make_state(
+        models=[{"path": "ltx-2.3.safetensors", "type": "ltx_video"}],
+        extra_array_fields={
+            "ltx_video": {
+                "clip_models": ["gemma_3_12B.safetensors", "ltx-2.3_text_projection.safetensors"],
+                "vae_video": "ltx_video_vae.safetensors",
+                "vae_audio": "ltx_audio_vae.safetensors",
+                "latent_upscaler": "ltx_latent_upscaler.safetensors",
+                "duration_seconds": 4,
+                "frame_rate": 24,
+                "sampler_stage1": "euler",
+                "sigmas_stage1": "1.0,0.5,0.0",
+                "image_strength_stage1": 0.0,
+                "sampler_stage2": "euler",
+                "sigmas_stage2": "0.5,0.25,0.0",
+                "image_strength_stage2": 0.0,
+                "img_compression": 75,
+                "input_image": "",
+                "audio_mode": "on",
+            },
+        },
+    )
+    json_str = UltimateConfigBuilder.state_to_configs_json(state)
+    parsed = json.loads(json_str)
+    cfg = parsed["configs"][0]
+    assert cfg["model_type"] == "ltx_video", f"Expected model_type=ltx_video, got: {cfg.get('model_type')!r}"
