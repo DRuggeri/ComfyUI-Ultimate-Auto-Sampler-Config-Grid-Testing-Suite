@@ -20,6 +20,8 @@ function setupKeyReloadFullscreen() {
                 toggleFullscreen()
                 break;
             case 'r':
+                // Reset all filters visually before reloading so the UI is consistent
+                if (typeof resetAllFilters === 'function') resetAllFilters();
                 loadSession()
         }
     })

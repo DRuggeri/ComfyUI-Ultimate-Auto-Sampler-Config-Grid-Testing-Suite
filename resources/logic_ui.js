@@ -694,6 +694,66 @@ function initFilters() {
     });
 }
 
+// Reset all button-filters to "all selected" and update the pipeline.
+// Also clears searchFilters and logicFilters so the full dataset is visible.
+function resetAllFilters() {
+    if (!activeData || activeData.length === 0) return;
+
+    const filterKeys = ['model', 'sampler', 'scheduler', 'denoise', 'lora', 'positive', 'negative', 'size', 'seed', 'steps', 'cfg', 'upscaleMethod', 'mediaType'];
+
+    // Re-populate every filter Set with all unique values from activeData
+    filterKeys.forEach(key => {
+        if (!filters[key]) filters[key] = new Set();
+        filters[key].clear();
+        activeData.forEach(d => {
+            let val;
+            if (key === 'model') val = d.model || meta.model || "Default";
+            else if (key === 'positive') val = d.positive || meta.positive || "";
+            else if (key === 'negative') val = d.negative || meta.negative || "";
+            else if (key === 'size') val = `${d.width}x${d.height}`;
+            else if (key === 'steps') val = String(d.steps);
+            else if (key === 'cfg') val = String(d.cfg);
+            else if (key === 'upscaleMethod') {
+                if (!d.upscaled) { val = 'No Upscale'; }
+                else {
+                    const mode = d.upscale_mode || '';
+                    const model = d.upscale_model;
+                    const shortModel = model ? String(model).replace(/\\/g, '/').split('/').pop().replace(/\.[^.]+$/, '') : '';
+                    val = shortModel ? `${mode} + ${shortModel}` : mode || 'Upscaled';
+                }
+            } else if (key === 'mediaType') val = d.media_type || 'image';
+            else val = d[key];
+            if (val !== undefined && val !== null) filters[key].add(val);
+        });
+    });
+
+    // Mark all filter buttons as active
+    const filterButtonContainers = document.querySelectorAll('.filter-buttons-container');
+    filterButtonContainers.forEach(container => {
+        container.querySelectorAll('.filter-btn').forEach(btn => btn.classList.add('active'));
+    });
+
+    // Clear search filters
+    if (typeof searchFilters !== 'undefined') {
+        searchFilters = [];
+        if (typeof renderSearchFilters === 'function') renderSearchFilters();
+    }
+
+    // Clear logic filters
+    if (typeof logicFilters !== 'undefined') {
+        logicFilters = [];
+        if (typeof renderLogicFilters === 'function') renderLogicFilters();
+    }
+
+    // Clear the filter button cache so initFilters rebuilds on next call
+    if (typeof filterButtonCache !== 'undefined') {
+        for (const key in filterButtonCache) delete filterButtonCache[key];
+    }
+
+    updateDataPipeline();
+    console.log('[Reset Filters] All filters reset to default (show all)');
+}
+
 // Toggle trigger word visibility in prompts
 function toggleTriggerWords(showTriggers) {
     // Rebuild filters with new prompt mode
