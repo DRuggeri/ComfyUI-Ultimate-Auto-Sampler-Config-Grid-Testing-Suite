@@ -9,7 +9,7 @@ import {
     parseLoraString,
     buildLoraString,
     getIterationCount,
-    convertStateToConfigs,
+
     countPromptCombinations,
     expandPromptPreview,
     getAvailableVAEs,
@@ -3790,8 +3790,8 @@ function createVAEElement(node, vaeName, arrayIdx, vaeIdx, vaeList, vFolders) {
 
 // --- LTX VIDEO SETTINGS SECTION ---
 
-// Derive model_type from a configArray's models[] (matches the convention in
-// conf-builder-utilities.js:convertStateToConfigs). Returns "checkpoint" by default.
+// Derive model_type from a configArray's models[] (matches the Python-side
+// state_to_configs_json convention in config_builder_node.py). Returns "checkpoint" by default.
 function getConfigArrayModelType(configArray) {
     let modelType = "checkpoint";
     for (const m of (configArray?.models || [])) {
@@ -6403,43 +6403,115 @@ export function renderRunSettingsSection(node, container) {
     container.appendChild(section);
 }
 
-export function renderPreviewSection(container) {
-    const section = document.createElement("div");
-    section.className = "cb-section full-width";
-    section.id = "cb-sec-preview";
+// Persisted preview panel height per node (keyed by node.id, so each node
+// remembers its own ratio across renderUI() rebuilds within a session).
+const _previewHeights = new Map();
 
-    // Uniform section header
-    const header = createSectionHeader("📄", "JSON Preview", "preview");
-    section.appendChild(header);
+export function renderPreviewSection(container, node) {
+    const panel = document.createElement("div");
+    panel.className = "cb-preview-panel";
+    panel.id = "cb-sec-preview";
 
-    const preview = document.createElement("pre");
-    preview.className = "cb-preview";
-    preview.id = "json-preview";
-    section.appendChild(preview);
-    container.appendChild(section);
+    // Restore prior height if user dragged it during this session
+    const savedH = node && _previewHeights.get(node.id);
+    if (savedH) panel.style.flexBasis = savedH + "px";
+
+    // Drag handle (top edge) — drag UP to grow the panel, DOWN to shrink it
+    const handle = document.createElement("div");
+    handle.className = "cb-preview-resize-handle";
+    handle.title = "Drag to resize preview panel";
+    panel.appendChild(handle);
+
+    const header = document.createElement("div");
+    header.className = "cb-preview-panel-header";
+    const title = document.createElement("span");
+    title.className = "cb-preview-panel-title";
+    title.textContent = "📄 Output Preview (configs_json)";
+    const meta = document.createElement("span");
+    meta.className = "cb-preview-panel-meta";
+    meta.id = "json-preview-meta";
+    header.appendChild(title);
+    header.appendChild(meta);
+    panel.appendChild(header);
+
+    const pre = document.createElement("pre");
+    pre.className = "cb-preview-panel-content";
+    pre.id = "json-preview";
+    pre.textContent = "Loading preview…";
+    panel.appendChild(pre);
+
+    container.appendChild(panel);
+
+    // Wire resize handle
+    handle.addEventListener("mousedown", (e) => {
+        e.preventDefault();
+        const startY = e.clientY;
+        const startH = panel.getBoundingClientRect().height;
+        handle.classList.add("dragging");
+        const onMove = (ev) => {
+            const dy = startY - ev.clientY; // up = larger
+            const newH = Math.max(120, Math.min(2000, startH + dy));
+            panel.style.flexBasis = newH + "px";
+            if (node) _previewHeights.set(node.id, newH);
+        };
+        const onUp = () => {
+            handle.classList.remove("dragging");
+            document.removeEventListener("mousemove", onMove);
+            document.removeEventListener("mouseup", onUp);
+        };
+        document.addEventListener("mousemove", onMove);
+        document.addEventListener("mouseup", onUp);
+    });
+}
+
+function _setPreviewStale(node, errMsg) {
+    const meta = node.htmlContainer?.querySelector("#json-preview-meta");
+    if (meta) {
+        meta.textContent = "⚠ stale: " + (errMsg || "").slice(0, 60);
+        meta.style.color = "#c33";
+    }
+}
+
+function _setPreviewMeta(node, data) {
+    const meta = node.htmlContainer?.querySelector("#json-preview-meta");
+    if (!meta) return;
+    let n = 0;
+    try {
+        const parsed = JSON.parse(data.configs_json);
+        n = (parsed.configs || []).length;
+    } catch (_) { /* ignore — server returned non-JSON; stale handler covers it */ }
+    meta.textContent = `${n} config${n === 1 ? '' : 's'}`;
+    meta.style.color = "";
 }
 
 export function updatePreview(node) {
-    const preview = node.htmlContainer.querySelector("#json-preview");
+    const preview = node.htmlContainer?.querySelector("#json-preview");
     if (!preview) return;
-    const configs = convertStateToConfigs(node.state);
 
-    // NOTE: This preview shows what convertStateToConfigs() produces (JS-side).
-    // The ACTUAL configs_json output comes from generate_config() in config_builder_node.py.
-    // Both must output the same fields — see SYNC WARNING in each file.
-    // Build the full output object matching what configs_json will contain
-    const output = { configs };
-    if (node.state.distribution_enabled) {
-        output._distribution = {
-            enabled: true,
-            worker_urls: (node.state.worker_urls || []).filter(u => u && u.trim()),
-            claim_timeout: node.state.claim_timeout || 600,
-            use_master_encoding: node.state.use_master_encoding || false,
-            sync_models_to_workers: node.state.sync_models_to_workers || false
-        };
-    }
+    if (node._previewTimer) clearTimeout(node._previewTimer);
+    node._previewSeq = (node._previewSeq || 0) + 1;
+    const seq = node._previewSeq;
 
-    preview.textContent = JSON.stringify(output, null, 2);
+    node._previewTimer = setTimeout(async () => {
+        try {
+            const resp = await fetch("/configbuilder/preview", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ state: node.state }),
+            });
+            if (seq !== node._previewSeq) return; // newer request superseded us
+            if (!resp.ok) {
+                const errText = await resp.text();
+                throw new Error(errText || `HTTP ${resp.status}`);
+            }
+            const data = await resp.json();
+            preview.textContent = data.configs_json;
+            _setPreviewMeta(node, data);
+        } catch (e) {
+            if (seq !== node._previewSeq) return;
+            _setPreviewStale(node, e.message || String(e));
+        }
+    }, 800);
 }
 
 export async function renderUI(node, availableLoras, modelLists, loraFolders, availableSessions, availableConfigs, refreshAllConfigBuilders) {
@@ -6688,8 +6760,10 @@ export async function renderUI(node, availableLoras, modelLists, loraFolders, av
     renderCooldownSection(node, mainContent);
     renderRunSettingsSection(node, mainContent);
 
-    // JSON Preview Section
-    renderPreviewSection(mainContent);
+    // Output Preview — rendered as a SIBLING of layoutWrapper (not inside
+    // mainContent), so it sits as a fixed/resizable panel at the bottom of
+    // the node, always visible regardless of scroll position.
+    renderPreviewSection(root, node);
     updatePreview(node);
 
     // Restore scroll position on main content
