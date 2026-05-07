@@ -1,0 +1,153 @@
+# Contributing
+
+PRs are welcome and encouraged. This project is actively developed — if you have a bug fix, new feature, or quality improvement in mind, open an issue to discuss it first (for larger changes) or just submit a PR directly (for clear-cut fixes). The maintainer responds promptly.
+
+---
+
+## Quick orientation
+
+Before diving in, read these files in the repo root:
+
+| File | What it covers |
+|---|---|
+| `README.md` | What the project does, how the three nodes connect, and user-facing features |
+| `ProjectStructure.md` | Every file's purpose, all API routes with line numbers, data shapes, communication patterns, dependency graph, and 28 development gotchas |
+| `AI-CONTEXT.md` | Internal dev notes: architecture layers, critical codepaths, field naming rules, config data flow, common tasks |
+
+---
+
+## Dev setup
+
+**Requirements:**
+- ComfyUI 0.12.3 or newer
+- Python 3.10+ (whatever version your ComfyUI install uses)
+
+**Install:**
+
+```
+ComfyUI/custom_nodes/
+└── ComfyUI-Ultimate-Auto-Sampler-Config-Grid-Testing-Suite/  ← clone here
+```
+
+Clone into `ComfyUI/custom_nodes/` and restart ComfyUI. The node will register itself automatically.
+
+**Python dependencies:**
+
+```bash
+pip install -r requirements.txt
+```
+
+`requirements.txt` currently pulls in `diffusers` and `piexif`. ComfyUI itself provides PyTorch, numpy, and Pillow.
+
+---
+
+## Running tests
+
+```bash
+python -m pytest tests/ -v
+```
+
+There are currently 46 tests covering:
+- LTX video config expansion and cache key logic
+- Sigma parser
+- Config expansion (Cartesian products)
+- `state_to_configs_json` transformer
+
+PRs that change Python logic should add tests where it's reasonable to do so.
+
+---
+
+## JS syntax check
+
+The Builder UI and Dashboard are plain JavaScript (no build step). You can catch syntax errors quickly with Node:
+
+```bash
+cd web/conf_builder
+node --check conf-builder-main.js
+node --check conf-builder-config-management.js
+node --check conf-builder-utilities.js
+node --check conf-builder-ui-components.js
+node --check conf-builder-distribution.js
+```
+
+The dashboard JS files can also be checked the same way:
+
+```bash
+cd resources
+node --check logic_utils.js
+node --check logic_ui.js
+node --check logic_virtual.js
+node --check logic_pipeline.js
+node --check logic_events.js
+node --check logic_init.js
+node --check logic_state.js
+```
+
+---
+
+## Architecture notes worth knowing before editing
+
+**The Builder UI is a DOM widget on the Python node.** Its entire state is serialized to a single `lora_config` STRING widget as JSON. Python's `generate_config()` reads only that widget — all other `INPUT_TYPES` entries are vestigial.
+
+**Single source of truth for config transformation: `generate_config()` in `config_builder_node.py`.** Both the runtime path and the preview endpoint (`POST /configbuilder/preview`) call the same function. Do not add a parallel JS-side transformer that replicates this logic — that pattern was an active bug source and was intentionally eliminated.
+
+**However, `convertStateToConfigs()` in `conf-builder-utilities.js` also exists and must stay in sync.** It is used for the live iteration count preview in the Builder UI. When you add a new config field, update both:
+1. `generate_config()` in `config_builder_node.py` (line ~465)
+2. `convertStateToConfigs()` in `conf-builder-utilities.js` (line ~497)
+
+Also add the new field to:
+- The default state in `conf-builder-main.js` (line ~80)
+- The migration check in the `onConfigure` handler (`conf-builder-main.js` line ~363), so existing saved workflows backfill the default
+
+**Manifest field names — check before touching favorite/reject logic:**
+- `favorited` (not `favorite`) — used in `__init__.py` routes
+- `note` (not `notes`) — per-item annotation
+- `file` — full `/view?...` URL, not a filename
+- `rejected` — required boolean for dashboard display
+- `id` — timestamp-based integer: `int(time.time() * 100000) + random.randint(0, 1000)`
+
+**Manifest items are inserted at index 0** (newest-first order).
+
+**ComfyUI V3 vs V1 nodes:** Use the `_call_node` and `_unwrap` helpers when calling V3 nodes outside the executor pipeline. See `ltx_video_generation.py` for the established pattern.
+
+**Windows print safety:** This project shadows the built-in `print` with `safe_print` at module level (`print = safe_print`) to avoid colorama `OSError [Errno 22]`. Don't add bare `print()` calls that bypass this — use the module-level name.
+
+**Distributed mode exists.** Workers consume the already-rendered `configs_json` over the wire. Don't assume single-machine execution in generation orchestrator code.
+
+**ComfyUI Registry security constraints** (violations get the version flagged and hidden from Manager):
+- No `import requests` — use `urllib.request` (stdlib)
+- No `subprocess`, `os.system`, `eval()`, or `exec()`
+- No runtime `pip install`
+- No custom file-serving endpoints — use ComfyUI's `/view` endpoint for images and `WEB_DIRECTORY` for JS
+- All filesystem endpoints must validate paths with `_is_path_within()` and sanitize user-supplied names
+
+**Dashboard JS changes require HTML regeneration.** The `resources/` files are inlined into a single HTML string by `html_generator.py`. After editing dashboard JS/CSS, you must re-run the sampler node or call `POST /config_tester/get_session_html` to see the changes. Browser refresh alone is not enough.
+
+---
+
+## PR checklist
+
+Before submitting:
+
+- [ ] `python -m pytest tests/ -v` passes
+- [ ] JS syntax checks pass (`node --check` on changed files)
+- [ ] No regressions in existing features
+- [ ] For new config fields: both `generate_config()` (Python) and `convertStateToConfigs()` (JS) updated, plus default state and migration added in `conf-builder-main.js`
+- [ ] For user-facing features: `README.md` updated
+- [ ] For Builder UI or Dashboard changes: smoke-tested in real ComfyUI (unit tests alone are not sufficient here)
+- [ ] No new `import requests`, `subprocess`, `os.system`, `eval`, or `exec` calls (Registry security)
+
+---
+
+## Where to discuss
+
+- **Bugs and feature requests:** GitHub Issues
+- **Code changes:** GitHub Pull Requests
+
+The maintainer (Jason Hoku) actively monitors both.
+
+---
+
+## License
+
+This project is open source. See the `LICENSE` file in the repo root for the full terms.
