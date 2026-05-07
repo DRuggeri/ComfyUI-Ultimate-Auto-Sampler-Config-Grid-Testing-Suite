@@ -1267,6 +1267,30 @@ function copyConfigsAsComfyNodes(id) {
 }
 
 
+// Click-delay helper: distinguishes single-click (open lightbox) from double-click
+// (toggle favorite) on card <img> elements.  Browsers fire two click events before
+// dblclick, so a plain onclick+ondblclick causes the modal to open twice and the
+// favorite to flip on every double-click.  On mobile, tap-to-scroll also fired the
+// onclick accidentally.  Solution: first click arms a 250ms timer; a second click
+// within that window cancels the timer and calls toggleFavorite instead.
+const _imgClickTimers = new WeakMap();
+window._cardImgClick = function(imgEl, itemId) {
+    const pending = _imgClickTimers.get(imgEl);
+    if (pending) {
+        // Second click arrived within 250ms → treat as double-click → favorite
+        clearTimeout(pending);
+        _imgClickTimers.delete(imgEl);
+        if (typeof toggleFavorite === 'function') toggleFavorite(imgEl);
+        return;
+    }
+    // First click → schedule lightbox open after 250ms
+    const t = setTimeout(() => {
+        _imgClickTimers.delete(imgEl);
+        if (typeof openM === 'function') openM(itemId);
+    }, 250);
+    _imgClickTimers.set(imgEl, t);
+};
+
 // Create card - FIXED UI LAYOUT WITH FAVORITE BUTTON
 function createCard(d) {
     const totalIndex = idToIndexMap.get(d.id) || 0;
@@ -1314,7 +1338,7 @@ function createCard(d) {
     const isVideo = d.media_type === 'video';
     const mediaElement = isVideo
         ? `<video ondblclick="toggleFavorite(this)" data-src="${d.file}" muted loop playsinline preload="metadata" draggable="false"></video>`
-        : `<img ondblclick="toggleFavorite(this)" onclick="event.stopPropagation(); openM(${d.id})" data-src="${d.file}" alt="Image ${d.id}" draggable="false" style="cursor:pointer;" title="Click to open lightbox">`;
+        : `<img onclick="event.stopPropagation(); _cardImgClick(this, ${d.id})" data-src="${d.file}" alt="Image ${d.id}" draggable="false" style="cursor:pointer;" title="Click to open lightbox · Double-click to favorite">`;
     const reviseBtn = isVideo ? '' : `<button class="revise-btn" onclick="event.stopPropagation(); openM(${d.id})">REVISE</button>`;
     const upscaleBtn = isVideo ? '' : `<button class="upscale-btn" onclick="openUpscaleModal(${d.id})" title="Upscale this image">\u2B06</button>`;
     const videoBadge = isVideo ? '<div class="video-badge">\u25B6 VIDEO</div>' : '';
@@ -1346,7 +1370,7 @@ function createCard(d) {
         </div>`;
 
     // For videos: autoplay is handled by the virtual scroll lifecycle in logic_virtual.js.
-    // Double-click still toggles favorite (inherited from the ondblclick attribute).
+    // Double-click on video still toggles favorite via the ondblclick attribute.
     // loadedmetadata updates per-card aspect ratio as a safety net for unprobed videos.
     if (isVideo) {
         const videoEl = card.querySelector('video');
@@ -1492,10 +1516,9 @@ function openM(id) {
                             mImg.style.boxShadow = `0 0 30px ${color}`;
                             setTimeout(() => { mImg.style.boxShadow = ''; }, 400);
                         }
-                        // Update the navigation counter if displayed
+                        // Update the navigation counter tooltip if displayed
                         const counterEl = document.getElementById('modal-nav-counter');
                         if (counterEl) {
-                            const favIcon = item.favorited ? '★' : '☆';
                             counterEl.title = item.favorited ? 'Favorited' : 'Not favorited';
                         }
                     }
