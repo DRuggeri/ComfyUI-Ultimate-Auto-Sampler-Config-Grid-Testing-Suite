@@ -431,28 +431,35 @@ body {
     font-weight: 700;
 }
 
+/* NOTE: Changes to report.css require dashboard HTML regeneration to take effect
+   (run a sampler pass or reload the session to trigger html_generator.py). */
+
 .filter-btn.active.steps {
     background: var(--accent-steps);
     color: #fff;
     font-weight: 700;
+    box-shadow: inset 0 0 0 2px rgba(255,255,255,0.3);
 }
 
 .filter-btn.active.cfg {
     background: var(--accent-cfg);
     color: #000;
     font-weight: 700;
+    box-shadow: inset 0 0 0 2px rgba(0,0,0,0.15);
 }
 
 .filter-btn.active.upscaleMethod {
     background: var(--accent-upscale);
     color: #fff;
     font-weight: 700;
+    box-shadow: inset 0 0 0 2px rgba(255,255,255,0.3);
 }
 
 .filter-btn.active.mediaType {
     background: var(--accent-media);
     color: #000;
     font-weight: 700;
+    box-shadow: inset 0 0 0 2px rgba(0,0,0,0.15);
 }
 
 /* VIEWPORT - Pure pan mode (no scrollbars) */
