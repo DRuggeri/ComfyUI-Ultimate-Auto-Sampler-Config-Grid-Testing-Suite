@@ -42,8 +42,8 @@ The refactoring splits the original monolithic `config_builder.js` into four mod
 
 
 * **Config Conversion**:
-* `convertStateToConfigs(state)`: Transforms the internal UI state into the final JSON format required for generation.
-* `convertConfigsToConfigArrays(configs)`: The inverse; parses a loaded JSON file back into the internal state format for the UI.
+* The state→configs_json transformation has moved to Python (`UltimateConfigBuilder.state_to_configs_json` in `config_builder_node.py`). The Builder UI's preview panel POSTs the state to `/configbuilder/preview` and renders the response. There is no JS-side equivalent of the old `convertStateToConfigs()` — see `docs/superpowers/specs/2026-04-28-builder-ui-sync-elimination-design.md`.
+* `convertConfigsToConfigArrays(configs)`: Parses a loaded JSON file back into the internal state format for the UI (used by the "Load Session" path).
 
 
 
