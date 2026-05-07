@@ -115,6 +115,11 @@ async function loadSession() {
             renderSearchFilters();
         }
 
+        // Initialize logic filter UI
+        if (typeof renderLogicFilters === 'function') {
+            renderLogicFilters();
+        }
+
         // 8. CRITICAL FIX: Force pipeline and render
         // Wait a tick for the DOM to update, then process
         await new Promise(resolve => setTimeout(resolve, 10));

@@ -16,6 +16,69 @@ function refreshIndices() {
     idToIndexMap = new Map(sorted.map((item, index) => [item.id, index + 1]));
 }
 
+// ============================================================
+// LOGIC FILTER HELPERS (numeric field extraction + comparison)
+// ============================================================
+
+/**
+ * Extract a numeric field value from a manifest item.
+ * Returns null if the field is missing or not parseable as a number.
+ */
+function _extractFieldValue(item, field) {
+    if (field === 'lora_strength') {
+        // Parse first lora's model strength from "name:0.5:0.7" format
+        const lora = item.lora;
+        if (!lora || lora === 'None') return null;
+        const firstPart = String(lora).split(' + ')[0];
+        const parts = firstPart.split(':');
+        if (parts.length < 2) return null;
+        const v = parseFloat(parts[1]);
+        return isNaN(v) ? null : v;
+    }
+    // Simple top-level numeric fields
+    const v = item[field];
+    if (typeof v === 'number') return v;
+    if (typeof v === 'string') {
+        const n = parseFloat(v);
+        return isNaN(n) ? null : n;
+    }
+    return null;
+}
+
+/**
+ * Evaluate a comparison: itemValue op filterValue.
+ * Returns true if the item passes the comparison, false otherwise.
+ */
+function _evalOp(itemValue, op, filterValue) {
+    const a = parseFloat(itemValue);
+    const b = parseFloat(filterValue);
+    if (isNaN(a) || isNaN(b)) return false;
+    switch (op) {
+        case '>':  return a > b;
+        case '<':  return a < b;
+        case '>=': return a >= b;
+        case '<=': return a <= b;
+        case '=':  return a === b;
+        case '!=': return a !== b;
+        default:   return true;
+    }
+}
+
+/**
+ * Check if an item passes all active logic filters (AND logic).
+ * Returns true if no logic filters are active or all pass.
+ */
+function matchesLogicFilters(item) {
+    if (typeof logicFilters === 'undefined' || logicFilters.length === 0) return true;
+    for (const f of logicFilters) {
+        const itemValue = _extractFieldValue(item, f.field);
+        // If field is missing/null on the item, skip this filter (don't exclude)
+        if (itemValue === null || itemValue === undefined) continue;
+        if (!_evalOp(itemValue, f.op, f.value)) return false;
+    }
+    return true;
+}
+
 // Generate cache key from current filters
 function getFilterKey() {
     const parts = [
@@ -37,7 +100,8 @@ function getFilterKey() {
         [...filters.cfg].sort().join(','),
         [...filters.upscaleMethod].sort().join(','),
         [...filters.mediaType].sort().join(','),
-        searchFilters.map(f => `${f.type}:${f.term}`).join('|')
+        searchFilters.map(f => `${f.type}:${f.term}`).join('|'),
+        (typeof logicFilters !== 'undefined' ? logicFilters.map(f => `${f.field}${f.op}${f.value}`).join('|') : '')
     ];
     return parts.join('|');
 }
@@ -280,6 +344,9 @@ function incrementalFilter(newItems) {
             if (!matchesSearchFilters(d)) return false;
         }
 
+        // Apply logic filters (numeric comparisons)
+        if (!matchesLogicFilters(d)) return false;
+
         return true;
     });
 }
@@ -370,6 +437,9 @@ function executePipeline() {
         }
 
         if (hasSearchFilters && !matchesSearchFilters(d)) return false;
+
+        // Apply logic filters (numeric comparisons)
+        if (!matchesLogicFilters(d)) return false;
 
         return true;
     });

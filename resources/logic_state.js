@@ -60,6 +60,11 @@ const sortOptionsList = [
 // --- SEARCH FILTER STATE ---
 // Array of search filter objects: { type: 'model', term: 'mountain' }
 
+// --- LOGIC FILTER STATE ---
+// Array of numeric comparison filter objects: { field: 'cfg', op: '>', value: 7 }
+// Multiple filters are applied with AND logic. OR is a future extension.
+var logicFilters = logicFilters || [];
+
 
 // --- VIRTUALIZATION & PIPELINE ---
 let visibleSlice = { start: -1, end: -1 };

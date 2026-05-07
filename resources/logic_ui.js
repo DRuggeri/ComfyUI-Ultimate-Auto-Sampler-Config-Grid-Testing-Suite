@@ -1767,6 +1767,108 @@ function matchesSearchFilters(item) {
 
 
 // ============================================================
+// LOGIC FILTER FUNCTIONS (numeric comparison filters)
+// ============================================================
+
+// Add a logic filter
+function addLogicFilter() {
+    const fieldSelect = document.getElementById('logic-filter-field');
+    const opSelect = document.getElementById('logic-filter-op');
+    const valueInput = document.getElementById('logic-filter-value');
+
+    if (!fieldSelect || !opSelect || !valueInput) return;
+
+    const field = fieldSelect.value;
+    const op = opSelect.value;
+    const rawValue = valueInput.value.trim();
+
+    if (!field) { alert('Please select a field'); return; }
+    if (rawValue === '') { alert('Please enter a value'); return; }
+
+    const value = parseFloat(rawValue);
+    if (isNaN(value)) { alert('Value must be a number'); return; }
+
+    // Add to logicFilters array
+    logicFilters.push({ field, op, value });
+
+    // Clear inputs
+    fieldSelect.value = '';
+    valueInput.value = '';
+
+    renderLogicFilters();
+    updateDataPipeline();
+
+    console.log(`[Logic Filter] Added: ${field} ${op} ${value}`);
+}
+
+// Remove a logic filter by index
+function removeLogicFilter(index) {
+    if (index >= 0 && index < logicFilters.length) {
+        const removed = logicFilters.splice(index, 1)[0];
+        console.log(`[Logic Filter] Removed: ${removed.field} ${removed.op} ${removed.value}`);
+        renderLogicFilters();
+        updateDataPipeline();
+    }
+}
+
+// Clear all logic filters
+function clearAllLogicFilters() {
+    if (logicFilters.length === 0) return;
+    logicFilters = [];
+    renderLogicFilters();
+    updateDataPipeline();
+    console.log('[Logic Filter] All logic filters cleared');
+}
+
+// Render logic filter chips
+function renderLogicFilters() {
+    const container = document.getElementById('active-logic-filters');
+    if (!container) return;
+
+    container.innerHTML = '';
+
+    if (logicFilters.length === 0) {
+        container.innerHTML = '<div style="color: #555; font-size: 10px; padding: 4px 0;">No active logic filters</div>';
+        return;
+    }
+
+    const fieldLabels = {
+        'lora_strength': 'LoRA Str',
+        'cfg': 'CFG',
+        'steps': 'Steps',
+        'denoise': 'Denoise',
+        'width': 'Width',
+        'height': 'Height',
+        'seed': 'Seed'
+    };
+
+    logicFilters.forEach((filter, index) => {
+        const tag = document.createElement('div');
+        tag.className = 'search-filter-tag';
+
+        const label = fieldLabels[filter.field] || filter.field;
+        tag.innerHTML = `
+            <span class="filter-type" style="background: #1a4a2a; color: #4ecf7a;">${label}</span>
+            <span class="filter-term">${filter.op} ${filter.value}</span>
+            <button class="remove-btn" onclick="removeLogicFilter(${index})" title="Remove filter">✕</button>
+        `;
+
+        container.appendChild(tag);
+    });
+
+    // Add clear all button if there are multiple filters
+    if (logicFilters.length > 1) {
+        const clearBtn = document.createElement('button');
+        clearBtn.className = 'search-filter-add-btn';
+        clearBtn.style.background = '#ff3860';
+        clearBtn.style.padding = '4px 10px';
+        clearBtn.innerText = 'CLEAR ALL';
+        clearBtn.onclick = clearAllLogicFilters;
+        container.appendChild(clearBtn);
+    }
+}
+
+// ============================================================
 // MANIFEST ANALYTICS
 // ============================================================
 

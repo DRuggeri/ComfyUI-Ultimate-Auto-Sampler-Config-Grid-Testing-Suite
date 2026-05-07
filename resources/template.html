@@ -502,6 +502,37 @@
                 </div>
             </div>
 
+            <!-- LOGIC FILTER SECTION -->
+            <div class="popup-section">
+                <div class="popup-section-title">LOGIC FILTER <span style="font-size: 9px; color: #555; font-weight: normal;">(numeric comparisons, AND logic)</span></div>
+                <div class="search-filter-container">
+                    <div class="search-filter-row">
+                        <select id="logic-filter-field" class="search-filter-select">
+                            <option value="">Field...</option>
+                            <option value="lora_strength">LoRA Strength</option>
+                            <option value="cfg">CFG</option>
+                            <option value="steps">Steps</option>
+                            <option value="denoise">Denoise</option>
+                            <option value="width">Width</option>
+                            <option value="height">Height</option>
+                            <option value="seed">Seed</option>
+                        </select>
+                        <select id="logic-filter-op" class="search-filter-select" style="min-width: 52px; flex: 0 0 52px;">
+                            <option value=">">&gt;</option>
+                            <option value="<">&lt;</option>
+                            <option value=">=">&gt;=</option>
+                            <option value="<=">&lt;=</option>
+                            <option value="=">=</option>
+                            <option value="!=">!=</option>
+                        </select>
+                        <input type="number" id="logic-filter-value" class="search-filter-input" step="0.01"
+                            placeholder="Value..." onkeypress="if(event.key==='Enter') addLogicFilter()" style="min-width: 70px;">
+                        <button class="search-filter-add-btn" onclick="addLogicFilter()">ADD</button>
+                    </div>
+                    <div id="active-logic-filters" class="active-search-filters"></div>
+                </div>
+            </div>
+
             <!-- Meta Info Section -->
 
 

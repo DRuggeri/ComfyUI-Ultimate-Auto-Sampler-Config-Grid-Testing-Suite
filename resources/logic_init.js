@@ -58,6 +58,9 @@ function init() {
         // Initialize search filter UI
         if (typeof renderSearchFilters === 'function') renderSearchFilters();
 
+        // Initialize logic filter UI
+        if (typeof renderLogicFilters === 'function') renderLogicFilters();
+
         // IMPORTANT: Calculate grid dimensions BEFORE running pipeline
         if (typeof updateGridDimensions === 'function') {
             updateGridDimensions();
