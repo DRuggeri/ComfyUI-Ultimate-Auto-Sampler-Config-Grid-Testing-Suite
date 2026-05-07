@@ -393,9 +393,10 @@ class UltimateConfigBuilder:
         
         return trigger_map
     
-    def parse_int_list(self, value: str) -> List[int]:
+    @staticmethod
+    def parse_int_list(value: str) -> List[int]:
         """Parse comma-separated integers"""
-        items = self.parse_comma_list(value)
+        items = UltimateConfigBuilder.parse_comma_list(value)
         result = []
         for item in items:
             try:
@@ -404,18 +405,20 @@ class UltimateConfigBuilder:
             except ValueError:
                 print(f"[ConfigBuilder] Warning: Could not parse integer '{item}'")
         return result
-    
-    def parse_comma_list(self, value) -> List[str]:
+
+    @staticmethod
+    def parse_comma_list(value) -> List[str]:
         """Parse comma-separated string or pass through list"""
         if isinstance(value, list):
             return [str(item).strip() for item in value if str(item).strip()]
         if not value or str(value).strip() == "":
             return []
         return [item.strip() for item in str(value).split(",") if item.strip()]
-    
-    def parse_number_list(self, value: str) -> List[float]:
+
+    @staticmethod
+    def parse_number_list(value: str) -> List[float]:
         """Parse comma-separated numbers"""
-        items = self.parse_comma_list(value)
+        items = UltimateConfigBuilder.parse_comma_list(value)
         result = []
         for item in items:
             try:
@@ -423,8 +426,9 @@ class UltimateConfigBuilder:
             except ValueError:
                 print(f"[ConfigBuilder] Warning: Could not parse '{item}'")
         return result
-    
-    def process_lora_array(self, config_array: Dict, include_none: bool) -> List[str]:
+
+    @staticmethod
+    def process_lora_array(config_array: Dict, include_none: bool) -> List[str]:
         """
         Process a SINGLE config array and return its lora strings.
         
@@ -456,10 +460,42 @@ class UltimateConfigBuilder:
             if lora_bypass_states.get(lora_name, False):
                 continue  # Skip bypassed
             lora_strings.append(lora_str)
-        
+
+        # Apply weight arrays (bracket notation) for "Compare Strengths" entries.
+        # The Builder UI stores per-LoRA strength arrays in a side-channel
+        # (config_array.lora_weight_arrays[name + "_model" / "_clip"]). Rewrite
+        # each lora string from "name:m:c" -> "name:[m_arr]:[c_arr|c]" so the
+        # orchestrator's _expand_lora_weight_arrays can fan them out at runtime.
+        # SYNC WARNING: must match convertStateToConfigs() in conf-builder-utilities.js.
+        weight_arrays = config_array.get("lora_weight_arrays", {}) or {}
+
+        def _apply_weight_array(lora_str: str) -> str:
+            name, _sep, rest = lora_str.partition(":")
+            parts = rest.split(":") if rest else []
+            model_str = parts[0] if parts else "1.00"
+            clip_str = parts[1] if len(parts) > 1 else model_str
+            model_arr = weight_arrays.get(name + "_model")
+            clip_arr = weight_arrays.get(name + "_clip")
+            if model_arr and len(model_arr) > 1:
+                model_part = "[" + ", ".join(str(v) for v in model_arr) + "]"
+                if clip_arr and len(clip_arr) > 1:
+                    clip_part = "[" + ", ".join(str(v) for v in clip_arr) + "]"
+                else:
+                    clip_part = clip_str
+                return f"{name}:{model_part}:{clip_part}"
+            if clip_arr and len(clip_arr) > 1:
+                return f"{name}:{model_str}:[" + ", ".join(str(v) for v in clip_arr) + "]"
+            return lora_str
+
+        lora_strings = [_apply_weight_array(s) for s in lora_strings]
+
         # Add combined version if requested
         if combine and len(lora_strings) > 1:
-            stackable = [s for s in lora_strings if not s.endswith("/")]
+            # Folder refs ("name/") are excluded from stacking — they expand at
+            # runtime into multiple loras. Detect by the NAME portion (before the
+            # first colon) ending in "/", not the whole string, so that
+            # "folder/:[a,b]:[c,d]" (folder ref + strength array) is also excluded.
+            stackable = [s for s in lora_strings if not s.split(":", 1)[0].endswith("/")]
             if len(stackable) > 1:
                 # When combine is true, ONLY return the combined version
                 combined = " + ".join(stackable)
@@ -477,43 +513,27 @@ class UltimateConfigBuilder:
         print(f"[ConfigBuilder] {array_name}: Processed {len(unique_strings)} LoRA configs")
         return unique_strings
     
-    def generate_config(
-        self,
-        session_name,
-        load_session,
-        samplers,
-        schedulers,
-        steps,
-        cfg,
-        lora_config,
-        include_none,
-        model=""
-    ):
+    @staticmethod
+    def state_to_configs_json(state: dict) -> str:
         """
-        Generate configuration.
+        Pure transformer: builder UI state -> configs_json string.
 
-        NOTE: All widget parameters are IGNORED!
-        The actual data comes from the lora_config widget which contains everything.
+        Single source of truth. Called by:
+          - generate_config()              (run-time, via lora_config widget)
+          - /configbuilder/preview         (preview endpoint, via POST body)
+
+        Both code paths share this function. By construction, the preview
+        and the actual node output cannot disagree.
+
+        Args:
+            state: parsed builder UI state (the JSON object stored in the
+                   lora_config widget — config_arrays, prompts, etc.)
+        Returns:
+            The configs_json string (top-level: {"configs": [...], "_distribution": ..., "_session_settings": ...}).
         """
-        # Use Windows-safe print for all logging in this function. Prevents
-        # OSError [Errno 22] from colorama/stdout corruption crashing the node.
-        print = safe_print
+        # SINGLE SOURCE OF TRUTH for builder UI state -> configs_json.
 
-        print(f"\n{'='*80}")
-        print(f"[ConfigBuilder] 🎯 Generating Configuration")
-        print(f"{'='*80}")
-        
-        # Parse the COMPLETE state from lora_config widget
-        try:
-            state = json.loads(lora_config)
-        except json.JSONDecodeError as e:
-            print(f"[ConfigBuilder] ⚠️ Error parsing lora_config: {e}")
-            print(f"[ConfigBuilder] Using default config")
-            state = json.loads(self.get_default_config())
-        
-        # Extract values from state
-        actual_session_name = state.get("session_name", session_name)
-        actual_include_none = state.get("include_none", include_none)
+        actual_include_none = state.get("include_none", False)
         config_arrays = state.get("config_arrays", [])
 
         # Global prompts (used when per-config prompts are not defined)
@@ -536,23 +556,16 @@ class UltimateConfigBuilder:
                 "negative_prompt": "",
                 "use_custom_prompts": False
             }]
-        
+
         configs_output = []
         total_lora_configs = 0
 
-        # ============================================================================
-        # SYNC WARNING: This config-building loop MUST stay in sync with the JS-side
-        # convertStateToConfigs() in web/conf_builder/conf-builder-utilities.js.
-        # That function generates the preview JSON in the Builder UI.
-        # If you add a new config field here, add it there too (and vice versa).
-        # Fields consumed by config_utils.expand_configs() must be output by BOTH.
-        # ============================================================================
         for config_array in config_arrays:
             # Parse values from this config array
-            sampler_list = self.parse_comma_list(config_array.get("samplers", "euler"))
-            scheduler_list = self.parse_comma_list(config_array.get("schedulers", "normal"))
-            steps_list = self.parse_int_list(config_array.get("steps", "20"))
-            cfg_list = self.parse_number_list(config_array.get("cfg", "7.0"))
+            sampler_list = UltimateConfigBuilder.parse_comma_list(config_array.get("samplers", "euler"))
+            scheduler_list = UltimateConfigBuilder.parse_comma_list(config_array.get("schedulers", "normal"))
+            steps_list = UltimateConfigBuilder.parse_int_list(config_array.get("steps", "20"))
+            cfg_list = UltimateConfigBuilder.parse_number_list(config_array.get("cfg", "7.0"))
             models_raw = config_array.get("models", ["None"])
             omit_triggers = config_array.get("lora_omit_triggers", [])
             lora_triggerwords_append_settings = config_array.get("lora_triggerwords_append_settings", {})
@@ -584,11 +597,11 @@ class UltimateConfigBuilder:
                         model_strings.append(str(path))
                 elif isinstance(m, str) and m and m != "None" and not model_bypass_states.get(m, False):
                     model_strings.append(str(m))
-            
+
             # Process loras for this config
-            lora_strings = self.process_lora_array(config_array, actual_include_none)
+            lora_strings = UltimateConfigBuilder.process_lora_array(config_array, actual_include_none)
             total_lora_configs += len(lora_strings)
-            
+
             # Create ONE config for this array
             config = {
                 "sampler": sampler_list if len(sampler_list) > 1 else sampler_list[0] if sampler_list else "euler",
@@ -598,7 +611,7 @@ class UltimateConfigBuilder:
                 "lora": lora_strings if len(lora_strings) > 1 else lora_strings[0] if lora_strings else "None",
                 "model": model_strings if len(model_strings) > 1 else model_strings[0] if model_strings else "None"
             }
-            
+
             # Always include all fields with defaults to prevent manifest data loss
             # when fields are toggled off in the UI and the session is reloaded
             seed_behavior = config_array.get("seed_behavior", "fixed")
@@ -807,26 +820,60 @@ class UltimateConfigBuilder:
             output_obj["_session_settings"] = session_settings
 
         json_output = json.dumps(output_obj, indent=2, ensure_ascii=False)
+        return json_output
 
-        # Calculate totals
-        total_combinations = 0
-        for config in configs_output:
-            lora_count = len(config["lora"]) if isinstance(config["lora"], list) else 1
-            sampler_count = len(config["sampler"]) if isinstance(config["sampler"], list) else 1
-            scheduler_count = len(config["scheduler"]) if isinstance(config["scheduler"], list) else 1
-            steps_count = len(config["steps"]) if isinstance(config["steps"], list) else 1
-            cfg_count = len(config["cfg"]) if isinstance(config["cfg"], list) else 1
-            
-            total_combinations += (sampler_count * scheduler_count * steps_count * cfg_count * lora_count)
-        
-        print(f"[ConfigBuilder] 📊 Configuration Summary:")
-        print(f"  Session: {actual_session_name}")
-        print(f"  Config Arrays: {len(config_arrays)}")
-        print(f"  Total LoRA Configs: {total_lora_configs}")
-        print(f"  Total Combinations: {total_combinations}")
+    def generate_config(
+        self,
+        session_name,
+        load_session,
+        samplers,
+        schedulers,
+        steps,
+        cfg,
+        lora_config,
+        include_none,
+        model=""
+    ):
+        """
+        Generate configuration.
+
+        NOTE: All widget parameters are IGNORED!
+        The actual data comes from the lora_config widget which contains everything.
+        """
+        # Use Windows-safe print for all logging in this function. Prevents
+        # OSError [Errno 22] from colorama/stdout corruption crashing the node.
+        print = safe_print
+
+        print(f"\n{'='*80}")
+        print(f"[ConfigBuilder] 🎯 Generating Configuration")
+        print(f"{'='*80}")
+
+        # Parse the COMPLETE state from lora_config widget
+        try:
+            state = json.loads(lora_config)
+        except json.JSONDecodeError as e:
+            print(f"[ConfigBuilder] ⚠️ Error parsing lora_config: {e}")
+            print(f"[ConfigBuilder] Using default config")
+            state = json.loads(self.get_default_config())
+
+        actual_session_name = state.get("session_name", session_name)
+
+        # ============================================================================
+        # SINGLE SOURCE OF TRUTH: state_to_configs_json is also called by
+        # POST /configbuilder/preview, so the preview cannot disagree with this.
+        # ============================================================================
+        json_output = UltimateConfigBuilder.state_to_configs_json(state)
+
+        # Brief summary log (computed from the helper's output)
+        try:
+            parsed = json.loads(json_output)
+            n_configs = len(parsed.get("configs", []))
+        except Exception:
+            n_configs = 0
+        print(f"[ConfigBuilder] 📊 Session: {actual_session_name}")
+        print(f"[ConfigBuilder] 📊 Configs: {n_configs}")
         print(f"{'='*80}\n")
-        
-        # Return configs (with embedded distribution settings) and session name
+
         return (json_output, actual_session_name)
 
 

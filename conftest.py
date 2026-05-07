@@ -11,6 +11,7 @@ import os
 import importlib
 import importlib.abc
 import importlib.machinery
+import importlib.util
 
 
 # Run immediately at conftest import time (before pytest_configure)
@@ -64,11 +65,14 @@ def _install_stubs():
         srv.PromptServer = type("PromptServer", (), {"instance": _ps_instance})  # type: ignore
 
     # 2. Sub-module stubs (for relative imports in __init__.py)
+    # NOTE: config_builder_node is intentionally excluded from _subs so that
+    # the real module (with UltimateConfigBuilder.state_to_configs_json etc.)
+    # is loaded below via importlib. The stubs here are only for __init__.py's
+    # other relative imports that don't need to be tested directly.
     _subs = {
         "sampler_node": {"SamplerGridTester": type("SamplerGridTester", (), {})},
         "dashboard_node": {"SamplerConfigDashboardViewer": type("SamplerConfigDashboardViewer", (), {})},
         "html_generator": {"get_html_template": lambda *a, **kw: ""},
-        "config_builder_node": {"UltimateConfigBuilder": type("UltimateConfigBuilder", (), {})},
         "json_text_node": {"SmartJSONTextNode": type("SmartJSONTextNode", (), {})},
         "metadata_packer": {"pack_metadata_into_image": lambda *a, **kw: None},
         "directory_scanner": {
@@ -94,6 +98,14 @@ def _install_stubs():
             setattr(sys.modules[bare], k, v)
             setattr(sys.modules[fq], k, v)
 
+    # 2b. Stub network_utils (used by config_builder_node via relative import)
+    for _nu_name in ("network_utils", f"{_PKG_NAME}.network_utils"):
+        if _nu_name not in sys.modules:
+            _nu = types.ModuleType(_nu_name)
+            sys.modules[_nu_name] = _nu
+        if not hasattr(sys.modules[_nu_name], "civitai_fetch_by_hash"):
+            sys.modules[_nu_name].civitai_fetch_by_hash = lambda *a, **kw: None
+
     # 3. Pre-register the package itself
     if _PKG_NAME not in sys.modules:
         pkg_stub = types.ModuleType(_PKG_NAME)
@@ -104,6 +116,27 @@ def _install_stubs():
     # 4. Ensure node root is on sys.path
     if _NODE_ROOT not in sys.path:
         sys.path.insert(0, _NODE_ROOT)
+
+    # 5. Load the real config_builder_node module (with package context so that
+    #    relative imports like `from .network_utils import ...` resolve correctly).
+    #    This must happen after all stubs are registered (steps 1-4) so that the
+    #    module-level decorator calls (server.PromptServer.instance.routes.post/get)
+    #    and relative imports in config_builder_node.py succeed.
+    if "config_builder_node" not in sys.modules:
+        _cb_path = os.path.join(_NODE_ROOT, "config_builder_node.py")
+        _cb_fq = f"{_PKG_NAME}.config_builder_node"
+        _cb_spec = importlib.util.spec_from_file_location(
+            _cb_fq, _cb_path, submodule_search_locations=[]
+        )
+        _cb_spec.submodule_search_locations = None
+        _cb_mod = importlib.util.module_from_spec(_cb_spec)
+        _cb_mod.__package__ = _PKG_NAME
+        sys.modules[_cb_fq] = _cb_mod
+        sys.modules["config_builder_node"] = _cb_mod
+        _cb_spec.loader.exec_module(_cb_mod)
+        # Also wire as package attribute so __init__.py's relative import finds it
+        if _PKG_NAME in sys.modules:
+            setattr(sys.modules[_PKG_NAME], "config_builder_node", _cb_mod)
 
 
 class _PackageInitLoader(importlib.abc.Loader):
