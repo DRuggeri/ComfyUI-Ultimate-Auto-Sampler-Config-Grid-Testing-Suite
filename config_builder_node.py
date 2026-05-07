@@ -1333,3 +1333,25 @@ async def save_lora_triggers_endpoint(request):
         return web.json_response({"status": "saved", "lora_name": normalized, "triggers": triggers})
     except Exception as e:
         return web.json_response({"error": str(e)}, status=500)
+
+
+@server.PromptServer.instance.routes.post("/configbuilder/preview")
+async def preview_endpoint(request):
+    """
+    Preview endpoint — runs state_to_configs_json on the POSTed builder UI
+    state and returns the resulting configs_json string. The Builder UI's
+    JSON Preview panel calls this. Single source of truth: this endpoint and
+    generate_config() share state_to_configs_json, so they cannot disagree.
+    """
+    try:
+        body = await request.json()
+        state = body.get("state")
+        if not isinstance(state, dict):
+            return web.json_response(
+                {"error": "Missing or invalid 'state' object in request body"},
+                status=400,
+            )
+        configs_json = UltimateConfigBuilder.state_to_configs_json(state)
+        return web.json_response({"configs_json": configs_json})
+    except Exception as e:
+        return web.json_response({"error": str(e)}, status=500)
