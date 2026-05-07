@@ -1156,6 +1156,57 @@ def run_generation_loop(
             conf_pre["seed"] = random.randint(0, 2**63 - 1)
             print(f"[GridTester] 🎲 Full run random_before: config {conf_idx_pre} seed → {conf_pre['seed']}")
 
+    # ==== PRE-FLIGHT SCAN: count already-existing configs ====
+    # Walk the same input_jobs × expanded iteration that the main loop uses,
+    # applying per-config resolution overrides, and call check_if_job_completed
+    # with the same arguments.  This gives us an "existing_count" we can show
+    # in the running ETA line so the user knows how much real work is left.
+    # Only useful when overwrite_existing is False (otherwise nothing is skipped).
+    existing_count = 0
+    if not overwrite_existing and not has_optional_inputs and existing_data.get("items"):
+        _pf_total = total_jobs
+        print(f"[GridTester] 🔍 Pre-flight scan: checking which of {_pf_total} configs already exist...")
+        _pf_checked = 0
+        for _pf_job in input_jobs:
+            _pf_w, _pf_h = _pf_job["width"], _pf_job["height"]
+            _pf_batch_idx = _pf_job["batch_idx"]
+            for _pf_job_idx_outer, _pf_job2 in enumerate(input_jobs):
+                if _pf_job2 is not _pf_job:
+                    continue
+                _pf_outer_idx = _pf_job_idx_outer
+                break
+            else:
+                _pf_outer_idx = 0
+            for _pf_conf in expanded:
+                # Mirror the per-config resolution override from the main loop
+                _pf_use_w, _pf_use_h, _pf_use_batch_idx = _pf_w, _pf_h, _pf_batch_idx
+                if _pf_conf.get("resolution") is not None:
+                    if _pf_outer_idx > 0:
+                        continue  # Processed only at job_idx == 0 in the main loop
+                    _pf_use_w, _pf_use_h = _pf_conf["resolution"]
+                    _pf_use_batch_idx = 0
+                # Use conf seed (randomize-behavior seeds won't match existing items — correct)
+                _pf_seed = _pf_conf["seed"]
+                _pf_pos, _ = build_prompt_with_triggers(_pf_conf, lora_triggerwords_mode)
+                _pf_neg = _pf_conf["negative"]
+                _pf_match = check_if_job_completed(
+                    existing_data["items"],
+                    _pf_conf,
+                    _pf_seed,
+                    _pf_use_w, _pf_use_h,
+                    _pf_use_batch_idx,
+                    _pf_pos,
+                    _pf_neg,
+                    has_optional_inputs=False
+                )
+                if _pf_match != -1:
+                    existing_count += 1
+                _pf_checked += 1
+                if _pf_checked % 1000 == 0:
+                    print(f"[GridTester] 🔍  ...scanned {_pf_checked}/{_pf_total} ({existing_count} exist so far)")
+        _pf_new = _pf_total - existing_count
+        print(f"[GridTester] ✅ Pre-flight: {existing_count}/{_pf_total} already exist; {_pf_new} new to generate")
+
     # ==== MAIN GENERATION LOOP ====
     print(f"\n{'='*80}\n")
 
@@ -2043,6 +2094,20 @@ def run_generation_loop(
                 eta_info = calculate_eta(job_durations, current_job, total_jobs)
                 if eta_info:
                     print_generation_progress(current_job, total_jobs, conf, w, h, total_duration, eta_info)
+                    # Compact single-line ETA summary (includes existing_count from pre-flight scan)
+                    _eta_pct = int((current_job / total_jobs) * 100)
+                    if eta_info['hours'] > 0:
+                        _eta_str = f"{eta_info['hours']}h {eta_info['minutes']}m"
+                    elif eta_info['minutes'] > 0:
+                        _eta_str = f"{eta_info['minutes']}m {eta_info['seconds']}s"
+                    else:
+                        _eta_str = f"{eta_info['seconds']}s"
+                    _eta_line = (f"[GridTester] 📊 job {current_job}/{total_jobs} ({_eta_pct}%) | "
+                                 f"ETA: {_eta_str} | ~{eta_info['finish_formatted']} | "
+                                 f"{eta_info['avg_duration']:.1f}s/job")
+                    if existing_count > 0:
+                        _eta_line += f" | {existing_count} existing"
+                    print(_eta_line)
                     # Send progress to dashboard frontend
                     if PromptServer is not None:
                         try:
