@@ -58,8 +58,8 @@ function _evalOp(itemValue, op, filterValue) {
         case '<':  return a < b;
         case '>=': return a >= b;
         case '<=': return a <= b;
-        case '=':  return a === b;
-        case '!=': return a !== b;
+        case '=':  return Math.abs(a - b) < 1e-6;
+        case '!=': return Math.abs(a - b) >= 1e-6;
         default:   return true;
     }
 }
