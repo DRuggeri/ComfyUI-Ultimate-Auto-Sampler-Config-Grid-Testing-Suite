@@ -89,15 +89,12 @@ node --check logic_state.js
 
 **The Builder UI is a DOM widget on the Python node.** Its entire state is serialized to a single `lora_config` STRING widget as JSON. Python's `generate_config()` reads only that widget — all other `INPUT_TYPES` entries are vestigial.
 
-**Single source of truth for config transformation: `generate_config()` in `config_builder_node.py`.** Both the runtime path and the preview endpoint (`POST /configbuilder/preview`) call the same function. Do not add a parallel JS-side transformer that replicates this logic — that pattern was an active bug source and was intentionally eliminated.
+**State → configs_json transformation:** All state-to-output transformation logic lives in `state_to_configs_json` (a `@staticmethod` on `UltimateConfigBuilder` in `config_builder_node.py`, around line 524). Both runtime (`generate_config`, line ~837) and the preview endpoint (`POST /configbuilder/preview`) call this single function. **Do not add a JS-side equivalent transformer** — that pattern existed historically (`convertStateToConfigs`) and was a recurring source of drift bugs; it was deliberately removed in favor of the single source of truth in Python.
 
-**However, `convertStateToConfigs()` in `conf-builder-utilities.js` also exists and must stay in sync.** It is used for the live iteration count preview in the Builder UI. When you add a new config field, update both:
-1. `generate_config()` in `config_builder_node.py` (line ~465)
-2. `convertStateToConfigs()` in `conf-builder-utilities.js` (line ~497)
-
-Also add the new field to:
-- The default state in `conf-builder-main.js` (line ~80)
-- The migration check in the `onConfigure` handler (`conf-builder-main.js` line ~363), so existing saved workflows backfill the default
+When adding a new state field that should appear in `configs_json`:
+1. Add the field to `state_to_configs_json` in `config_builder_node.py`. Make sure tests in `tests/test_state_to_configs_json.py` cover the new field.
+2. Update the Builder UI in `web/conf_builder/conf-builder-config-management.js` to read/write the field via `node.state.<field>`. Also add the default in the initial state object in `conf-builder-main.js` (search for `this.state = {`, around line 103), and add a migration backfill in the async init block below it (`conf-builder-main.js`, around line 484) so existing saved workflows pick up the default.
+3. The preview panel will pick up the new field automatically — it just renders whatever `state_to_configs_json` returns.
 
 **Manifest field names — check before touching favorite/reject logic:**
 - `favorited` (not `favorite`) — used in `__init__.py` routes
@@ -110,7 +107,7 @@ Also add the new field to:
 
 **ComfyUI V3 vs V1 nodes:** Use the `_call_node` and `_unwrap` helpers when calling V3 nodes outside the executor pipeline. See `ltx_video_generation.py` for the established pattern.
 
-**Windows print safety:** This project shadows the built-in `print` with `safe_print` at module level (`print = safe_print`) to avoid colorama `OSError [Errno 22]`. Don't add bare `print()` calls that bypass this — use the module-level name.
+**Windows print safety:** Two modules (`config_builder_node.py`, `ltx_video_generation.py`) shadow `print` with `safe_print` at module level (`print = safe_print`) to avoid colorama/stdout corruption that throws `OSError [Errno 22]` on long-running sessions. If you add new print-heavy code in those files, use the existing `print = safe_print` shadow at module top. Other modules use bare `print()` directly.
 
 **Distributed mode exists.** Workers consume the already-rendered `configs_json` over the wire. Don't assume single-machine execution in generation orchestrator code.
 
@@ -132,7 +129,7 @@ Before submitting:
 - [ ] `python -m pytest tests/ -v` passes
 - [ ] JS syntax checks pass (`node --check` on changed files)
 - [ ] No regressions in existing features
-- [ ] For new config fields: both `generate_config()` (Python) and `convertStateToConfigs()` (JS) updated, plus default state and migration added in `conf-builder-main.js`
+- [ ] For new config fields: `state_to_configs_json` updated in Python, default state and migration backfill added in `conf-builder-main.js`, and UI read/write added in `conf-builder-config-management.js`
 - [ ] For user-facing features: `README.md` updated
 - [ ] For Builder UI or Dashboard changes: smoke-tested in real ComfyUI (unit tests alone are not sufficient here)
 - [ ] No new `import requests`, `subprocess`, `os.system`, `eval`, or `exec` calls (Registry security)
@@ -150,4 +147,4 @@ The maintainer (Jason Hoku) actively monitors both.
 
 ## License
 
-This project is open source. See the `LICENSE` file in the repo root for the full terms.
+This project is open source. The license is declared in `pyproject.toml` (`license = {file = "LICENSE"}`). A `LICENSE` file is referenced there but not yet present in the repo root — check the GitHub repository page for the current license terms.
