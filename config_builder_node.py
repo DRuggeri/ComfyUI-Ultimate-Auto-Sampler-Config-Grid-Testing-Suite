@@ -479,11 +479,19 @@ class UltimateConfigBuilder:
             if model_arr and len(model_arr) > 1:
                 model_part = "[" + ", ".join(str(v) for v in model_arr) + "]"
                 if clip_arr and len(clip_arr) > 1:
+                    # Legacy/edge case: separate clip array → preserves Cartesian behavior
+                    # for backward-compat with workflows saved before the locked-semantics
+                    # simplification (2026-04-28).
                     clip_part = "[" + ", ".join(str(v) for v in clip_arr) + "]"
-                else:
-                    clip_part = clip_str
-                return f"{name}:{model_part}:{clip_part}"
+                    return f"{name}:{model_part}:{clip_part}"
+                # Locked semantics: omit the clip part entirely.
+                # parse_lora_definition (config_utils.py) defaults clip = model when no
+                # third segment is present, so "name:[a,b,c]" expands to N configs each
+                # with model=clip=value. This avoids the Cartesian explosion that
+                # "name:[m]:[c]" would trigger in expand_lora_stack.
+                return f"{name}:{model_part}"
             if clip_arr and len(clip_arr) > 1:
+                # Edge: clip-only array (no model array) — emit as before.
                 return f"{name}:{model_str}:[" + ", ".join(str(v) for v in clip_arr) + "]"
             return lora_str
 

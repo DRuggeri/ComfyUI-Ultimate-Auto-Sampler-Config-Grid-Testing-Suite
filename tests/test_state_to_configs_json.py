@@ -52,23 +52,33 @@ def make_state(loras=None, lora_weight_arrays=None, lora_bypass_states=None,
 
 
 def test_lora_strength_arrays_render_as_brackets():
-    """REGRESSION: Compare Strengths arrays must reach configs_json as bracket form.
+    """REGRESSION: Compare Strengths emits single-bracket form for locked semantics.
 
-    Bug history (2026-04-28): convertStateToConfigs (JS) emitted brackets but
-    process_lora_array (Python) emitted scalar 1.00:1.00 because Python ignored
-    the lora_weight_arrays side-channel. Result: preview disagreed with runtime.
+    Bug history:
+    - 2026-04-28 (morning): JS preview emitted brackets but Python emitted
+      scalar 1.00:1.00 because Python ignored lora_weight_arrays side-channel.
+    - 2026-04-28 (afternoon): Both sides emitted "name:[m]:[c]" (two arrays),
+      which the orchestrator interpreted as Cartesian N×M configs instead of
+      N. Locked-mode fix: emit only "name:[m]" (no clip part) so the orchestrator
+      expands to N configs each with model=clip=value.
+
+    State setup uses ONLY lora_weight_arrays[name + "_model"] (no _clip), which
+    is the data shape the Builder UI now writes for compare strengths.
     """
     state = make_state(
         loras=["Sexy-IL-v11/:1.00:1.00"],
         lora_weight_arrays={
             "Sexy-IL-v11/_model": [0, 1, 2, 5, 10],
-            "Sexy-IL-v11/_clip": [0, 1, 2, 5, 10],
         },
     )
     json_str = UltimateConfigBuilder.state_to_configs_json(state)
     parsed = json.loads(json_str)
     loras = [c["lora"] for c in parsed["configs"]]
-    expected = "Sexy-IL-v11/:[0, 1, 2, 5, 10]:[0, 1, 2, 5, 10]"
+    # Locked semantics (default): single bracket array, no clip part.
+    # The orchestrator expands "name:[a,b,c]" to N configs each with
+    # model=clip=value (parse_lora_definition defaults clip to model
+    # when the third segment is missing).
+    expected = "Sexy-IL-v11/:[0, 1, 2, 5, 10]"
     assert any(l == expected for l in loras), \
         f"Expected exact lora string {expected!r} in output. Got: {loras}"
 
@@ -111,7 +121,6 @@ def test_folder_with_strength_array_not_combined_with_other_loras():
         loras=["myFolder/", "actualLora:0.5:1.00"],
         lora_weight_arrays={
             "myFolder/_model": [0.5, 0.8, 1.0],
-            "myFolder/_clip": [1.0],
         },
     )
     json_str = UltimateConfigBuilder.state_to_configs_json(state)
@@ -171,3 +180,23 @@ def test_ltx_video_config_model_type_propagates():
     parsed = json.loads(json_str)
     cfg = parsed["configs"][0]
     assert cfg["model_type"] == "ltx_video", f"Expected model_type=ltx_video, got: {cfg.get('model_type')!r}"
+
+
+def test_legacy_dual_array_preserves_cartesian_form():
+    """Backward compat: if a workflow was saved with separate _model and _clip
+    arrays (pre-2026-04-28-pm format), the bracket-fold should still emit
+    "name:[m]:[c]" so the orchestrator can Cartesian-expand it. New UI never
+    writes _clip, but legacy state should still round-trip correctly."""
+    state = make_state(
+        loras=["legacyLora:1:1"],
+        lora_weight_arrays={
+            "legacyLora_model": [0.5, 1.0],
+            "legacyLora_clip": [0.7, 1.0],
+        },
+    )
+    json_str = UltimateConfigBuilder.state_to_configs_json(state)
+    parsed = json.loads(json_str)
+    loras = [c["lora"] for c in parsed["configs"]]
+    expected = "legacyLora:[0.5, 1.0]:[0.7, 1.0]"
+    assert any(l == expected for l in loras), \
+        f"Expected legacy dual-array form {expected!r}. Got: {loras}"

@@ -1700,10 +1700,17 @@ export function createLoraElement(node, loraStr, arrayIdx, loraIdx, availableLor
     });
     contentDiv.appendChild(modelSlider);
 
-    // === Compare Strengths section ===
-    // ONE button toggles the entire section. When active, two labeled inputs
-    // appear (Model Strengths + Clip Strengths). When Strength Lock is ON,
-    // only the Model Strengths input shows (CLIP mirrors automatically).
+    // === Compare Strengths section (locked-semantics) ===
+    // ONE button toggles a SINGLE labeled input. We only persist
+    // weightArrays[name + "_model"] — Python emits "name:[a, b, c]" (no clip
+    // part) which the orchestrator expands as N configs each with
+    // model=clip=value. This avoids the Cartesian explosion that
+    // "name:[m]:[c]" (two arrays) would trigger.
+    //
+    // When Strength Lock is ON (default): label says "Strengths:" because
+    // the array applies to both model and clip equally.
+    // When Strength Lock is OFF: label says "Model Strengths:" because the
+    // clip is fixed at the scalar slider value (set independently below).
     const compareBtnRow = document.createElement("div");
     compareBtnRow.style.cssText = "margin: -4px 0 4px 0; display: flex; align-items: center; gap: 4px;";
 
@@ -1711,75 +1718,39 @@ export function createLoraElement(node, loraStr, arrayIdx, loraIdx, availableLor
     compareBtn.className = "cb-btn";
     compareBtn.textContent = isCompareActive ? "✕ Compare Strengths" : "+ Compare Strengths";
     compareBtn.style.cssText = "font-size: 9px; padding: 1px 6px; color: " + (isCompareActive ? "#f80" : "#0af") + ";";
-    compareBtn.title = "Test this LoRA at multiple strength values in one run.\n\nClick to activate, then enter comma-separated values for Model and Clip strengths (e.g. 0.5, 0.8, 1.0).\nThe grid generates one image per strength combination, crossed with your sampler/scheduler/CFG/steps arrays.\n\nWith Strength Lock ON, CLIP mirrors the Model array. Click again to deactivate.";
+    compareBtn.title = "Test this LoRA at multiple strength values in one run.\n\nClick to activate, then enter comma-separated values (e.g. 0.5, 0.8, 1.0). Each value generates one config — model and clip strength both equal that value (locked semantics).\n\nWith Strength Lock OFF, the scalar Clip slider below sets a fixed clip strength while model varies.\n\nClick again to deactivate.";
     compareBtnRow.appendChild(compareBtn);
     contentDiv.appendChild(compareBtnRow);
 
-    // Two labeled inputs container
+    // Single labeled input
     const compareSection = document.createElement("div");
     compareSection.style.cssText = "display: " + (isCompareActive ? "flex" : "none") + "; flex-direction: column; gap: 3px; margin: 0 0 6px 12px; padding: 4px 6px; border-left: 2px solid #0af; background: rgba(0,170,255,0.04);";
 
-    const _makeStrengthRow = (labelText, initialValue, placeholder, onChangeHandler) => {
-        const row = document.createElement("div");
-        row.style.cssText = "display: flex; align-items: center; gap: 6px;";
-        const label = document.createElement("span");
-        label.textContent = labelText;
-        label.style.cssText = "font-size: 10px; color: #ccc; white-space: nowrap; min-width: 100px;";
-        const input = document.createElement("input");
-        input.type = "text";
-        input.placeholder = placeholder;
-        input.value = initialValue;
-        input.style.cssText = "flex: 1; background: #1a1a1a; color: #ccc; border: 1px solid #444; border-radius: 4px; padding: 2px 6px; font-size: 10px;";
-        input.onchange = () => onChangeHandler(input);
-        row.appendChild(label);
-        row.appendChild(input);
-        return { row, input };
-    };
-
-    const modelStrengthInitial = isCompareActive
+    const strengthRow = document.createElement("div");
+    strengthRow.style.cssText = "display: flex; align-items: center; gap: 6px;";
+    const strengthLabel = document.createElement("span");
+    strengthLabel.textContent = isStrengthLocked ? "Strengths:" : "Model Strengths:";
+    strengthLabel.style.cssText = "font-size: 10px; color: #ccc; white-space: nowrap; min-width: 100px;";
+    const strengthInput = document.createElement("input");
+    strengthInput.type = "text";
+    strengthInput.placeholder = "1, 0.8, 0.5";
+    strengthInput.value = isCompareActive
         ? (weightArrays[parsed.name + "_model"] || [1]).join(", ")
         : "1";
-    const clipStrengthInitial = isCompareActive
-        ? (weightArrays[parsed.name + "_clip"] || [1]).join(", ")
-        : "1";
-
-    const modelStrengthsField = _makeStrengthRow(
-        "Model Strengths:",
-        modelStrengthInitial,
-        "1, 0.8, 0.5",
-        (input) => {
-            const vals = input.value.split(",").map(v => parseFloat(v.trim())).filter(v => !isNaN(v));
-            if (vals.length > 0) {
-                weightArrays[parsed.name + "_model"] = vals;
-                if (isStrengthLocked) {
-                    weightArrays[parsed.name + "_clip"] = vals;
-                    if (clipStrengthsField) clipStrengthsField.input.value = input.value;
-                }
-            }
-            node.saveState();
-            updatePreview(node);
+    strengthInput.style.cssText = "flex: 1; background: #1a1a1a; color: #ccc; border: 1px solid #444; border-radius: 4px; padding: 2px 6px; font-size: 10px;";
+    strengthInput.onchange = () => {
+        const vals = strengthInput.value.split(",").map(v => parseFloat(v.trim())).filter(v => !isNaN(v));
+        if (vals.length > 0) {
+            weightArrays[parsed.name + "_model"] = vals;
         }
-    );
-    compareSection.appendChild(modelStrengthsField.row);
-
-    let clipStrengthsField = null;
-    if (!isStrengthLocked) {
-        clipStrengthsField = _makeStrengthRow(
-            "Clip Strengths:",
-            clipStrengthInitial,
-            "1, 0.8, 0.5",
-            (input) => {
-                const vals = input.value.split(",").map(v => parseFloat(v.trim())).filter(v => !isNaN(v));
-                if (vals.length > 0) {
-                    weightArrays[parsed.name + "_clip"] = vals;
-                }
-                node.saveState();
-                updatePreview(node);
-            }
-        );
-        compareSection.appendChild(clipStrengthsField.row);
-    }
-
+        // Always remove _clip — Cartesian path is intentionally dropped.
+        delete weightArrays[parsed.name + "_clip"];
+        node.saveState();
+        updatePreview(node);
+    };
+    strengthRow.appendChild(strengthLabel);
+    strengthRow.appendChild(strengthInput);
+    compareSection.appendChild(strengthRow);
     contentDiv.appendChild(compareSection);
 
     compareBtn.onclick = () => {
@@ -1792,17 +1763,16 @@ export function createLoraElement(node, loraStr, arrayIdx, loraIdx, availableLor
             compareBtn.textContent = "+ Compare Strengths";
             compareBtn.style.color = "#0af";
         } else {
-            // Activate — initialize arrays to [1] and show section
+            // Activate — seed model array with [1], never write _clip
             weightArrays[parsed.name + "_model"] = [1];
-            weightArrays[parsed.name + "_clip"] = [1];
+            delete weightArrays[parsed.name + "_clip"];
             compareSection.style.display = "flex";
             compareBtn.textContent = "✕ Compare Strengths";
             compareBtn.style.color = "#f80";
-            modelStrengthsField.input.value = "1";
-            if (clipStrengthsField) clipStrengthsField.input.value = "1";
-            // Focus the first input so the user can type immediately
-            modelStrengthsField.input.focus();
-            modelStrengthsField.input.select();
+            strengthInput.value = "1";
+            // Focus so the user can type immediately
+            strengthInput.focus();
+            strengthInput.select();
         }
         node.saveState();
         updatePreview(node);
