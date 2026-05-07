@@ -642,6 +642,56 @@ async function deleteNonFavorites() {
     }
 }
 
+// Delete all rejected items from the session
+async function deleteRejected() {
+    if (!window.confirm("Are you sure you want to delete all rejected items? This cannot be undone.")) {
+        return;
+    }
+
+    const statusEl = document.getElementById('delete-status');
+    const sessInput = document.getElementById('session-input');
+    if (!sessInput) {
+        if (statusEl) statusEl.innerText = '❌ Error: Session input not found';
+        return;
+    }
+    const sessionName = sessInput.value;
+
+    if (statusEl) {
+        statusEl.innerText = '⏳ Deleting rejected items...';
+        statusEl.style.color = '#ffaa00';
+    }
+
+    try {
+        const response = await fetch('/config_tester/delete_rejected', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ session_name: sessionName })
+        });
+
+        const resultText = await response.text();
+
+        if (response.ok) {
+            if (statusEl) {
+                statusEl.innerText = '✅ ' + resultText;
+                statusEl.style.color = '#4caf50';
+            }
+            // Reload the page to refresh the dashboard with updated manifest
+            setTimeout(() => { location.reload(); }, 2000);
+        } else {
+            if (statusEl) {
+                statusEl.innerText = '❌ Error: ' + resultText;
+                statusEl.style.color = '#ff3860';
+            }
+        }
+    } catch (error) {
+        console.error('[Delete Rejected] Error:', error);
+        if (statusEl) {
+            statusEl.innerText = '❌ Network error: ' + error.message;
+            statusEl.style.color = '#ff3860';
+        }
+    }
+}
+
 // Reject a specific image (X button)
 function rejectItem(element) {
     const card = element.closest('.card');

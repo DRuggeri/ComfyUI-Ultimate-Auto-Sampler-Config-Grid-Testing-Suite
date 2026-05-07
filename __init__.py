@@ -845,6 +845,90 @@ async def delete_non_favorites(request):
         return web.Response(status=500, text=str(e))
 
 # =============================================================================
+# API: DELETE REJECTED ITEMS
+# =============================================================================
+
+@server.PromptServer.instance.routes.post("/config_tester/delete_rejected")
+async def delete_rejected(request):
+    """
+    Delete all rejected images from a session and update the manifest.
+    """
+    try:
+        data = await request.json()
+        session_name = data.get("session_name")
+
+        # Sanitize
+        if session_name:
+            session_name = re.sub(r'[^\w\-]', '', session_name)
+
+        if not session_name:
+            return web.Response(status=400, text="Missing session_name")
+
+        # Paths
+        base_dir = os.path.join(folder_paths.get_output_directory(), "benchmarks", session_name)
+
+        if not _is_path_within(base_dir, _get_benchmarks_base()):
+            return web.Response(status=403, text="Forbidden: path outside benchmarks directory")
+
+        manifest_path = os.path.join(base_dir, "manifest.json")
+        images_dir = os.path.join(base_dir, "images")
+
+        # Load manifest
+        if not os.path.exists(manifest_path):
+            return web.Response(status=404, text=f"Session '{session_name}' not found")
+
+        with open(manifest_path, "r", encoding="utf-8") as f:
+            manifest = json.load(f)
+
+        items = manifest.get("items", [])
+        rejected = [item for item in items if item.get("rejected", False)]
+        kept = [item for item in items if not item.get("rejected", False)]
+
+        if not rejected:
+            return web.Response(status=200, text="No rejected items to delete")
+
+        # Delete rejected image files
+        deleted_count = 0
+        for item in rejected:
+            file_path = item.get("file", "")
+
+            # Parse filename from various formats
+            if file_path.startswith("/view?"):
+                parsed_url = urllib.parse.urlparse(file_path)
+                url_params = urllib.parse.parse_qs(parsed_url.query)
+                filename = url_params.get("filename", [""])[0]
+            elif file_path.startswith("./images/"):
+                filename = file_path[9:]
+            elif "filename=" in file_path:
+                filename = file_path.split("filename=")[-1].split("&")[0]
+            else:
+                filename = os.path.basename(file_path)
+
+            if filename:
+                image_path = os.path.join(images_dir, filename)
+                if os.path.exists(image_path):
+                    try:
+                        os.remove(image_path)
+                        deleted_count += 1
+                    except Exception as e:
+                        print(f"[Delete] Error deleting {filename}: {e}")
+
+        # Update manifest to remove rejected items
+        manifest["items"] = kept
+        with open(manifest_path, "w", encoding="utf-8") as f:
+            json.dump(manifest, f, indent=2, ensure_ascii=False)
+
+        result_msg = f"Deleted {deleted_count} rejected images. {len(kept)} items remain."
+        print(f"[ConfigTester] 🗑️ {result_msg}")
+        return web.Response(status=200, text=result_msg)
+
+    except Exception as e:
+        print(f"[ConfigTester] Error deleting rejected: {e}")
+        import traceback
+        traceback.print_exc()
+        return web.Response(status=500, text=str(e))
+
+# =============================================================================
 # API: SCAN EXTERNAL DIRECTORY
 # =============================================================================
 
