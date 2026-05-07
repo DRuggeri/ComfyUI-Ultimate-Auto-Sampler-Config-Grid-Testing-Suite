@@ -55,10 +55,32 @@ app.registerExtension({
                 if (!configWidget) return result;
 
                 // 1. Synchronous Setup (CRITICAL: Must happen immediately)
+                // The "converted-widget" trick collapses the LiteGraph slot, but on the
+                // modern Vue node renderer a per-widget DOM element may still mount and
+                // peek out under the HTML overlay. As a belt-and-suspenders, also hide
+                // the actual DOM element when it appears (poll briefly until it does).
                 this.widgets.forEach(w => {
                     w.type = "converted-widget";
                     w.computeSize = () => [0, -4];
                 });
+                // Capture references to the python-side widgets we want to hide
+                // BEFORE we add the DOM widget below (otherwise we'd hide the UI).
+                const _widgetsToHide = this.widgets.slice();
+                const _hideWidgetEls = () => {
+                    _widgetsToHide.forEach(w => {
+                        const el = w.element || w.inputEl;
+                        if (el && el.style && el.style.display !== "none") {
+                            el.style.display = "none";
+                        }
+                    });
+                };
+                _hideWidgetEls();
+                let _hideAttempts = 0;
+                const _hideRetry = () => {
+                    _hideWidgetEls();
+                    if (++_hideAttempts < 40) setTimeout(_hideRetry, 50);
+                };
+                setTimeout(_hideRetry, 50);
                 
                 // Assign the widget reference immediately so onConfigure can find it
                 this.configWidget = configWidget;
@@ -166,7 +188,8 @@ app.registerExtension({
                         seconds: 5,
                         every_n: 1,
                         clear_vram: false
-                    }
+                    },
+                    image_format: "webp"
                 };
 
                 // Create HTML container immediately

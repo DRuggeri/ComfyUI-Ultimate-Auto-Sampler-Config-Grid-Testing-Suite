@@ -6343,6 +6343,7 @@ export function renderCooldownSection(node, container) {
 // ============================================================================
 export function renderRunSettingsSection(node, container) {
     if (node.state.start_at_job === undefined) node.state.start_at_job = 0;
+    if (node.state.image_format === undefined) node.state.image_format = "webp";
 
     const section = document.createElement("div");
     section.className = "cb-section full-width";
@@ -6385,6 +6386,33 @@ export function renderRunSettingsSection(node, container) {
     jobDiv.appendChild(jobInput);
     content.appendChild(jobDiv);
     content.appendChild(jobDesc);
+
+    // Image Format dropdown
+    const fmtDiv = document.createElement("div");
+    fmtDiv.style.cssText = "margin-top: 10px; display: flex; align-items: center; gap: 8px;";
+    const fmtLabel = document.createElement("label");
+    fmtLabel.textContent = "Image Save Format:";
+    fmtLabel.style.cssText = "font-size: 12px; color: #ccc; white-space: nowrap;";
+    const fmtSelect = document.createElement("select");
+    fmtSelect.style.cssText = "background: #1a1a1a; color: #ccc; border: 1px solid #444; border-radius: 4px; padding: 4px 6px; font-size: 12px;";
+    [["webp", "WebP (default, smallest)"], ["png", "PNG (lossless)"], ["jpg", "JPG (small, lossy)"]].forEach(([val, label]) => {
+        const opt = document.createElement("option");
+        opt.value = val;
+        opt.textContent = label;
+        if (val === (node.state.image_format || "webp")) opt.selected = true;
+        fmtSelect.appendChild(opt);
+    });
+    fmtSelect.onchange = () => {
+        node.state.image_format = fmtSelect.value;
+        node.saveState();
+    };
+    const fmtDesc = document.createElement("div");
+    fmtDesc.style.cssText = "font-size: 9px; color: #666; margin-top: 2px;";
+    fmtDesc.textContent = "File format for saved images. PNG is lossless. JPG saves at quality 95.";
+    fmtDiv.appendChild(fmtLabel);
+    fmtDiv.appendChild(fmtSelect);
+    content.appendChild(fmtDiv);
+    content.appendChild(fmtDesc);
 
     section.appendChild(header);
     section.appendChild(content);

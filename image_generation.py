@@ -797,10 +797,10 @@ def print_generation_progress(current_job, total_jobs, config, width, height, du
     print(f"{'='*80}")
 
 
-def flush_batch_with_vae(pending_batch, vae, img_dir, existing_data, session_name, manifest_path=None, unique_id=None):
+def flush_batch_with_vae(pending_batch, vae, img_dir, existing_data, session_name, manifest_path=None, unique_id=None, image_format="webp"):
     """
     Flush a batch of latents by decoding them with VAE and saving.
-    
+
     Args:
         pending_batch: List of (latent_samples, metadata) tuples
         vae: VAE model for decoding
@@ -809,31 +809,43 @@ def flush_batch_with_vae(pending_batch, vae, img_dir, existing_data, session_nam
         session_name: Session name for filenames
         manifest_path: Path to manifest.json file (optional, enables disk syncing)
         unique_id: Node unique ID for dashboard updates (optional, enables dashboard updates)
-        
+        image_format: Image file format — "webp" (default), "png", or "jpg"
+
     Returns:
         int: Number of images saved
     """
     if not pending_batch:
         return 0
-    
+
     import random
-    
+
     saved_count = 0
-    
+
+    # Normalise format string
+    fmt = (image_format or "webp").lower().strip()
+    if fmt not in ("webp", "png", "jpg", "jpeg"):
+        fmt = "webp"
+    ext = "jpg" if fmt in ("jpg", "jpeg") else fmt
+
     for latent_samples, meta in pending_batch:
         # Decode latent to image
         image = decode_latent_with_vae(vae, latent_samples)
-        
+
         # Generate ID using same format as remote_vae
         ts = int(time.time() * 100000) + random.randint(0, 1000)
         meta["id"] = ts
-        
-        # Generate filename using webp format (like remote_vae)
-        filename = f"img_{meta['id']}.webp"
-        
-        # Save image as webp
+
+        # Generate filename with the chosen extension
+        filename = f"img_{meta['id']}.{ext}"
+
+        # Save image in chosen format
         filepath = os.path.join(img_dir, filename)
-        image.save(filepath, quality=80)
+        if fmt == "png":
+            image.save(filepath, format="PNG")
+        elif fmt in ("jpg", "jpeg"):
+            image.save(filepath, format="JPEG", quality=95)
+        else:
+            image.save(filepath, quality=80)
         
         # Normalize denoise to int if it's 1.0 (like remote_vae)
         if meta.get("denoise") == 1.0:

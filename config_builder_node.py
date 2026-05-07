@@ -824,6 +824,10 @@ class UltimateConfigBuilder:
         start_at_job = state.get("start_at_job", 0)
         if start_at_job and int(start_at_job) > 0:
             session_settings["start_at_job"] = int(start_at_job)
+        # Image save format (only emit when non-default to keep configs_json clean)
+        image_format = state.get("image_format", "webp")
+        if image_format and image_format != "webp":
+            session_settings["image_format"] = image_format
         if session_settings:
             output_obj["_session_settings"] = session_settings
 

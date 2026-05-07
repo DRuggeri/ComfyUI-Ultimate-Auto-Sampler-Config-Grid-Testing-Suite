@@ -103,7 +103,7 @@ def extract_remote_vae_url(vae_string):
 def _flush_pending_batch(pending_batch, current_vae_is_remote, current_remote_vae_url,
                          per_config_remote_workers, use_remote_vae, remote_vae_worker,
                          loaded_vae, paths, existing_data, session_name, manifest_path, unique_id,
-                         config_overrides_vae=False):
+                         config_overrides_vae=False, image_format="webp"):
     """Flush pending batch using the appropriate VAE decode method.
 
     Handles three-way dispatch:
@@ -123,11 +123,11 @@ def _flush_pending_batch(pending_batch, current_vae_is_remote, current_remote_va
             flush_batch_with_remote_vae(pending_batch, worker, existing_data, session_name)
         else:
             print(f"[GridTester] ⚠️ No remote worker for {current_remote_vae_url}, falling back to local VAE")
-            flush_batch_with_vae(pending_batch, loaded_vae, paths["images"], existing_data, session_name, manifest_path, unique_id)
+            flush_batch_with_vae(pending_batch, loaded_vae, paths["images"], existing_data, session_name, manifest_path, unique_id, image_format=image_format)
     elif not config_overrides_vae and use_remote_vae and remote_vae_worker:
         flush_batch_with_remote_vae(pending_batch, remote_vae_worker, existing_data, session_name)
     else:
-        flush_batch_with_vae(pending_batch, loaded_vae, paths["images"], existing_data, session_name, manifest_path, unique_id)
+        flush_batch_with_vae(pending_batch, loaded_vae, paths["images"], existing_data, session_name, manifest_path, unique_id, image_format=image_format)
 
 
 def _cleanup_per_config_remote_workers(per_config_remote_workers):
@@ -971,6 +971,9 @@ def run_generation_loop(
     start_at_job = int(session_settings.get("start_at_job", 0)) if session_settings else 0
     if start_at_job > 0:
         print(f"[GridTester] ⏭️ Start At Job #{start_at_job} — skipping earlier jobs")
+    image_format = session_settings.get("image_format", "webp") if session_settings else "webp"
+    if image_format != "webp":
+        print(f"[GridTester] 🖼️ Image save format: {image_format}")
     job_durations = []
     deferred_upscale_queue = []
     eta_start_time = time.time()
@@ -1240,7 +1243,7 @@ def run_generation_loop(
                         _flush_pending_batch(pending_batch, current_vae_is_remote, current_remote_vae_url,
                                              per_config_remote_workers, use_remote_vae, remote_vae_worker,
                                              loaded_vae, paths, existing_data, session_name, paths["manifest"], unique_id,
-                                             config_overrides_vae=config_overrides_vae)
+                                             config_overrides_vae=config_overrides_vae, image_format=image_format)
                         pending_batch = []
 
                     _cleanup_per_config_remote_workers(per_config_remote_workers)
@@ -1431,7 +1434,7 @@ def run_generation_loop(
                     _flush_pending_batch(pending_batch, current_vae_is_remote, current_remote_vae_url,
                                          per_config_remote_workers, use_remote_vae, remote_vae_worker,
                                          loaded_vae, paths, existing_data, session_name, paths["manifest"], unique_id,
-                                         config_overrides_vae=config_overrides_vae)
+                                         config_overrides_vae=config_overrides_vae, image_format=image_format)
                     pending_batch = []
 
                 if target_vae == "Default":
@@ -1558,7 +1561,7 @@ def run_generation_loop(
                                 _flush_pending_batch(pending_batch, current_vae_is_remote, current_remote_vae_url,
                                                      per_config_remote_workers, use_remote_vae, remote_vae_worker,
                                                      loaded_vae, paths, existing_data, session_name, paths["manifest"], unique_id,
-                                                     config_overrides_vae=config_overrides_vae)
+                                                     config_overrides_vae=config_overrides_vae, image_format=image_format)
                                 pending_batch = []
 
                             _cleanup_per_config_remote_workers(per_config_remote_workers)
@@ -2178,7 +2181,7 @@ def run_generation_loop(
                         _flush_pending_batch(pending_batch, current_vae_is_remote, current_remote_vae_url,
                                              per_config_remote_workers, use_remote_vae, remote_vae_worker,
                                              loaded_vae, paths, existing_data, session_name, paths["manifest"], unique_id,
-                                             config_overrides_vae=config_overrides_vae)
+                                             config_overrides_vae=config_overrides_vae, image_format=image_format)
                         pending_batch = []
 
                     _cleanup_per_config_remote_workers(per_config_remote_workers)
@@ -2228,7 +2231,7 @@ def run_generation_loop(
                 _flush_pending_batch(pending_batch, current_vae_is_remote, current_remote_vae_url,
                                      per_config_remote_workers, use_remote_vae, remote_vae_worker,
                                      loaded_vae, paths, existing_data, session_name, paths["manifest"], unique_id,
-                                     config_overrides_vae=config_overrides_vae)
+                                     config_overrides_vae=config_overrides_vae, image_format=image_format)
                 pending_batch = []
 
     # ==== FINALIZATION ====
@@ -2236,7 +2239,7 @@ def run_generation_loop(
         _flush_pending_batch(pending_batch, current_vae_is_remote, current_remote_vae_url,
                              per_config_remote_workers, use_remote_vae, remote_vae_worker,
                              loaded_vae, paths, existing_data, session_name, paths["manifest"], unique_id,
-                             config_overrides_vae=config_overrides_vae)
+                             config_overrides_vae=config_overrides_vae, image_format=image_format)
 
     # ==== DEFERRED UPSCALE PHASE (must run before cleanup so VAE/model/CLIP are still loaded) ====
     if deferred_upscale_queue and session_settings and session_settings.get("upscaling", {}).get("run_upscales_at_end", False):
@@ -2646,6 +2649,11 @@ def _run_distributed_generation(
     if session_settings:
         manager._session_settings = session_settings
 
+    # Extract image format for local master saves
+    image_format = session_settings.get("image_format", "webp") if session_settings else "webp"
+    if image_format != "webp":
+        print(f"[GridTester] 🖼️ Image save format (distributed master): {image_format}")
+
     manager.populate_jobs(
         expanded, input_jobs, existing_data,
         overwrite_existing, has_optional_inputs, lora_triggerwords_mode
@@ -2843,7 +2851,7 @@ def _run_distributed_generation(
                         per_config_remote_workers, use_remote_vae, remote_vae_worker,
                         loaded_vae, paths, existing_data, session_name,
                         paths["manifest"], unique_id,
-                        config_overrides_vae=config_overrides_vae
+                        config_overrides_vae=config_overrides_vae, image_format=image_format
                     )
                     for jid in pending_job_ids:
                         manager.complete_job(jid)
@@ -2979,7 +2987,7 @@ def _run_distributed_generation(
                     per_config_remote_workers, use_remote_vae, remote_vae_worker,
                     loaded_vae, paths, existing_data, session_name,
                     paths["manifest"], unique_id,
-                    config_overrides_vae=config_overrides_vae
+                    config_overrides_vae=config_overrides_vae, image_format=image_format
                 )
                 for jid in pending_job_ids:
                     manager.complete_job(jid)
@@ -3000,7 +3008,7 @@ def _run_distributed_generation(
                 per_config_remote_workers, use_remote_vae, remote_vae_worker,
                 loaded_vae, paths, existing_data, session_name,
                 paths["manifest"], unique_id,
-                config_overrides_vae=config_overrides_vae
+                config_overrides_vae=config_overrides_vae, image_format=image_format
             )
             for jid in pending_job_ids:
                 manager.complete_job(jid)
@@ -3016,7 +3024,7 @@ def _run_distributed_generation(
                 per_config_remote_workers, use_remote_vae, remote_vae_worker,
                 loaded_vae, paths, existing_data, session_name,
                 paths["manifest"], unique_id,
-                config_overrides_vae=config_overrides_vae
+                config_overrides_vae=config_overrides_vae, image_format=image_format
             )
             for jid in pending_job_ids:
                 manager.complete_job(jid)
