@@ -56,11 +56,11 @@ def setup_session_directories(session_name):
     }
 
 
-def initialize_remote_vae(remote_vae_endpoint, img_dir, manifest_path, existing_data, session_name, unique_id):
+def initialize_remote_vae(remote_vae_endpoint, img_dir, manifest_path, existing_data, session_name, unique_id, image_format="webp"):
     """Initialize remote VAE worker if enabled."""
     if not remote_vae_endpoint or remote_vae_endpoint == "None":
         return None
-    
+
     if remote_vae_endpoint in ["SD", "SDXL", "Flux", "HunyuanVideo"]:
         actual_endpoint = HF_ENDPOINTS.get(remote_vae_endpoint)
         print(f"[GridTester] 🌐 Using {remote_vae_endpoint} endpoint: {actual_endpoint}")
@@ -70,14 +70,15 @@ def initialize_remote_vae(remote_vae_endpoint, img_dir, manifest_path, existing_
     else:
         actual_endpoint = remote_vae_endpoint
         print(f"[GridTester] 🌐 Using custom endpoint: {actual_endpoint}")
-    
+
     worker = RemoteVAEDecodeWorker(
         endpoint=actual_endpoint,
         img_dir=img_dir,
         manifest_path=manifest_path,
         existing_data=existing_data,
         session_name=session_name,
-        unique_id=unique_id
+        unique_id=unique_id,
+        image_format=image_format
     )
     print(f"[GridTester] 🌐 Remote VAE worker started")
     return worker
@@ -982,12 +983,13 @@ def run_generation_loop(
     remote_vae_worker = None
     if use_remote_vae and expanded:
         remote_vae_worker = initialize_remote_vae(
-            remote_vae_endpoint, 
-            paths["images"], 
+            remote_vae_endpoint,
+            paths["images"],
             paths["manifest"],
             existing_data,
             session_name,
-            unique_id
+            unique_id,
+            image_format=image_format
         )
     
     # Per-config remote VAE state
@@ -1036,7 +1038,8 @@ def run_generation_loop(
                         endpoint=url, img_dir=paths["images"],
                         manifest_path=paths["manifest"],
                         existing_data=existing_data,
-                        session_name=session_name, unique_id=unique_id
+                        session_name=session_name, unique_id=unique_id,
+                        image_format=image_format
                     )
             else:
                 print(f"[GridTester] 🎨 Loading per-config VAE: {target_vae}")
@@ -1258,7 +1261,8 @@ def run_generation_loop(
                         "seed": seed,
                         "vae_batch_size": vae_batch_size,
                         "configs_json": configs_json,
-                        "resolutions_json": resolutions_json
+                        "resolutions_json": resolutions_json,
+                        "image_format": image_format
                     }
                     save_manifest(paths["manifest"], existing_data)
 
@@ -1456,7 +1460,8 @@ def run_generation_loop(
                             endpoint=url, img_dir=paths["images"],
                             manifest_path=paths["manifest"],
                             existing_data=existing_data,
-                            session_name=session_name, unique_id=unique_id
+                            session_name=session_name, unique_id=unique_id,
+                            image_format=image_format
                         )
                 else:
                     current_vae_is_remote = False
@@ -1576,7 +1581,8 @@ def run_generation_loop(
                                 "seed": seed,
                                 "vae_batch_size": vae_batch_size,
                                 "configs_json": configs_json,
-                                "resolutions_json": resolutions_json
+                                "resolutions_json": resolutions_json,
+                                "image_format": image_format
                             }
                             save_manifest(paths["manifest"], existing_data)
 
@@ -2196,7 +2202,8 @@ def run_generation_loop(
                         "seed": seed,
                         "vae_batch_size": vae_batch_size,
                         "configs_json": configs_json,
-                        "resolutions_json": resolutions_json
+                        "resolutions_json": resolutions_json,
+                        "image_format": image_format
                     }
                     save_manifest(paths["manifest"], existing_data)
 
@@ -2301,7 +2308,8 @@ def run_generation_loop(
         "seed": seed,
         "vae_batch_size": vae_batch_size,
         "configs_json": configs_json,
-        "resolutions_json": resolutions_json
+        "resolutions_json": resolutions_json,
+        "image_format": image_format
     }
     save_manifest(paths["manifest"], existing_data)
 
@@ -2696,7 +2704,8 @@ def _run_distributed_generation(
             "positive": positive_text, "negative": negative_text,
             "model": ckpt_name, "seed": seed,
             "vae_batch_size": vae_batch_size,
-            "configs_json": configs_json, "resolutions_json": resolutions_json
+            "configs_json": configs_json, "resolutions_json": resolutions_json,
+            "image_format": image_format
         }
         save_manifest(paths["manifest"], existing_data)
 
@@ -2739,7 +2748,8 @@ def _run_distributed_generation(
     if use_remote_vae and expanded:
         remote_vae_worker = initialize_remote_vae(
             remote_vae_endpoint, paths["images"], paths["manifest"],
-            existing_data, session_name, unique_id
+            existing_data, session_name, unique_id,
+            image_format=image_format
         )
     per_config_remote_workers = {}
     current_vae_is_remote = False
@@ -2874,7 +2884,8 @@ def _run_distributed_generation(
                             endpoint=url, img_dir=paths["images"],
                             manifest_path=paths["manifest"],
                             existing_data=existing_data,
-                            session_name=session_name, unique_id=unique_id
+                            session_name=session_name, unique_id=unique_id,
+                            image_format=image_format
                         )
                 else:
                     current_vae_is_remote = False
@@ -3043,7 +3054,8 @@ def _run_distributed_generation(
             "positive": positive_text, "negative": negative_text,
             "model": ckpt_name, "seed": seed,
             "vae_batch_size": vae_batch_size,
-            "configs_json": configs_json, "resolutions_json": resolutions_json
+            "configs_json": configs_json, "resolutions_json": resolutions_json,
+            "image_format": image_format
         }
         save_manifest(paths["manifest"], existing_data)
 
@@ -3102,7 +3114,8 @@ def _run_distributed_generation(
                         "positive": positive_text, "negative": negative_text,
                         "model": ckpt_name, "seed": seed,
                         "vae_batch_size": vae_batch_size,
-                        "configs_json": configs_json, "resolutions_json": resolutions_json
+                        "configs_json": configs_json, "resolutions_json": resolutions_json,
+                        "image_format": image_format
                     }
                     save_manifest(paths["manifest"], existing_data)
 
@@ -3207,7 +3220,8 @@ def _run_distributed_generation(
         "positive": positive_text, "negative": negative_text,
         "model": ckpt_name, "seed": seed,
         "vae_batch_size": vae_batch_size,
-        "configs_json": configs_json, "resolutions_json": resolutions_json
+        "configs_json": configs_json, "resolutions_json": resolutions_json,
+        "image_format": image_format
     }
     save_manifest(paths["manifest"], existing_data)
 

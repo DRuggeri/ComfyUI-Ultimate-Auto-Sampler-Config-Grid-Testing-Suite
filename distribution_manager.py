@@ -627,6 +627,10 @@ class DistributionManager:
         if hasattr(self, '_session_settings') and self._session_settings and 'cooldown' in self._session_settings:
             safe_config["_session_cooldown"] = self._session_settings["cooldown"]
 
+        # Attach image_format to worker config so distributed workers honour the user's choice
+        if hasattr(self, '_session_settings') and self._session_settings:
+            safe_config["_session_image_format"] = self._session_settings.get("image_format", "webp")
+
         # Attach pre-encoded conditionings if available (master encoding feature)
         encoded = self.get_encoded_conditionings_for_job(job)
         if encoded:

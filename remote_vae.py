@@ -149,13 +149,17 @@ class RemoteVAEDecodeWorker:
     """
     Background worker thread for async remote VAE decoding
     """
-    def __init__(self, endpoint, img_dir, manifest_path, existing_data, session_name, unique_id):
+    def __init__(self, endpoint, img_dir, manifest_path, existing_data, session_name, unique_id, image_format="webp"):
         self.endpoint = endpoint
         self.img_dir = img_dir
         self.manifest_path = manifest_path
         self.existing_data = existing_data
         self.session_name = session_name
         self.unique_id = unique_id
+        fmt = (image_format or "webp").lower().strip()
+        if fmt not in ("webp", "png", "jpg", "jpeg"):
+            fmt = "webp"
+        self.image_format = fmt
         self.queue = queue.Queue()
         self.thread = threading.Thread(target=self._worker, daemon=True)
         self.thread.start()
@@ -211,13 +215,18 @@ class RemoteVAEDecodeWorker:
                 # Create PIL Image
                 img = Image.fromarray(image_np)
                 
-                # Save image
-                filename = f"img_{meta['id']}.webp"
-                # print("Saving")
-                # print(filename)
-                # print(self.img_dir)
-                img.save(os.path.join(self.img_dir, filename), quality=80)
-                
+                # Save image in chosen format
+                fmt = self.image_format  # Already normalised in __init__
+                ext = "jpg" if fmt in ("jpg", "jpeg") else fmt
+                filename = f"img_{meta['id']}.{ext}"
+                filepath = os.path.join(self.img_dir, filename)
+                if fmt == "png":
+                    img.save(filepath, format="PNG")
+                elif fmt in ("jpg", "jpeg"):
+                    img.save(filepath, format="JPEG", quality=95)
+                else:
+                    img.save(filepath, quality=80)
+
                 meta.update({
                     "file": f"/view?filename={filename}&type=output&subfolder=benchmarks/{self.session_name}/images",
                     "rejected": False

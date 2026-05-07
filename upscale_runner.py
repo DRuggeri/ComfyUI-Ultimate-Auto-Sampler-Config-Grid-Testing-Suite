@@ -116,6 +116,13 @@ def _run_upscale_thread(job, target_items, upscale_config, meta, manifest_data, 
             job["error"] = "No upscale pipelines configured"
             return
 
+        # Resolve image format from manifest meta (written by orchestrator)
+        _raw_fmt = meta.get("image_format", "webp")
+        _fmt = (_raw_fmt or "webp").lower().strip()
+        if _fmt not in ("webp", "png", "jpg", "jpeg"):
+            _fmt = "webp"
+        _ext = "jpg" if _fmt in ("jpg", "jpeg") else _fmt
+
         # Load model, VAE, CLIP for conditioning
         model_name = meta.get("model", "")
         vae_name = meta.get("vae", "")
@@ -267,8 +274,14 @@ def _run_upscale_thread(job, target_items, upscale_config, meta, manifest_data, 
                         if is_last_step:
                             # Save the upscaled image
                             upscale_id = int(time.time() * 100000) + up_random.randint(0, 1000)
-                            upscaled_filename = f"img_{upscale_id}_upscaled.webp"
-                            result_pil.save(os.path.join(images_dir, upscaled_filename), format="WEBP", quality=95)
+                            upscaled_filename = f"img_{upscale_id}_upscaled.{_ext}"
+                            _up_path = os.path.join(images_dir, upscaled_filename)
+                            if _fmt == "png":
+                                result_pil.save(_up_path, format="PNG")
+                            elif _fmt in ("jpg", "jpeg"):
+                                result_pil.save(_up_path, format="JPEG", quality=95)
+                            else:
+                                result_pil.save(_up_path, format="WEBP", quality=95)
 
                             # Create manifest entry
                             upscaled_meta = {
@@ -348,14 +361,26 @@ def _run_upscale_thread(job, target_items, upscale_config, meta, manifest_data, 
                             up_w, up_h = upscaled_pil.size
                             if is_final_output:
                                 upscale_id = int(time.time() * 100000) + up_random.randint(0, 1000)
-                                upscaled_filename = f"img_{upscale_id}_upscaled.webp"
-                                upscaled_pil.save(os.path.join(images_dir, upscaled_filename), format="WEBP", quality=95)
+                                upscaled_filename = f"img_{upscale_id}_upscaled.{_ext}"
+                                _up_path = os.path.join(images_dir, upscaled_filename)
+                                if _fmt == "png":
+                                    upscaled_pil.save(_up_path, format="PNG")
+                                elif _fmt in ("jpg", "jpeg"):
+                                    upscaled_pil.save(_up_path, format="JPEG", quality=95)
+                                else:
+                                    upscaled_pil.save(_up_path, format="WEBP", quality=95)
                         elif isinstance(upscale_result, PILImage.Image):
                             up_w, up_h = upscale_result.size
                             if is_final_output:
                                 upscale_id = int(time.time() * 100000) + up_random.randint(0, 1000)
-                                upscaled_filename = f"img_{upscale_id}_upscaled.webp"
-                                upscale_result.save(os.path.join(images_dir, upscaled_filename), format="WEBP", quality=95)
+                                upscaled_filename = f"img_{upscale_id}_upscaled.{_ext}"
+                                _up_path = os.path.join(images_dir, upscaled_filename)
+                                if _fmt == "png":
+                                    upscale_result.save(_up_path, format="PNG")
+                                elif _fmt in ("jpg", "jpeg"):
+                                    upscale_result.save(_up_path, format="JPEG", quality=95)
+                                else:
+                                    upscale_result.save(_up_path, format="WEBP", quality=95)
                         else:
                             continue
 

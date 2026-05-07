@@ -133,7 +133,9 @@ async def submit_result(request):
         # Ensure images directory exists (defensive - should already be created by orchestrator)
         os.makedirs(paths["images"], exist_ok=True)
 
-        filename = f"img_{meta['id']}.webp"
+        # Use the extension chosen by the worker (falls back to webp for backward compat)
+        _img_ext = meta.pop("_image_ext", "webp")
+        filename = f"img_{meta['id']}.{_img_ext}"
         filepath = os.path.join(paths["images"], filename)
 
         with open(filepath, "wb") as f:

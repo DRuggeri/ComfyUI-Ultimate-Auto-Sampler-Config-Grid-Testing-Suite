@@ -666,8 +666,18 @@ class WorkerThread(threading.Thread):
             del latent_for_decode
 
         # --- Convert to bytes ---
+        # Honour image_format from session settings (injected by master into config)
+        _raw_fmt = config.get("_session_image_format", "webp")
+        _fmt = (_raw_fmt or "webp").lower().strip()
+        if _fmt not in ("webp", "png", "jpg", "jpeg"):
+            _fmt = "webp"
         buf = io.BytesIO()
-        image.save(buf, format="WEBP", quality=80)
+        if _fmt == "png":
+            image.save(buf, format="PNG")
+        elif _fmt in ("jpg", "jpeg"):
+            image.save(buf, format="JPEG", quality=95)
+        else:
+            image.save(buf, format="WEBP", quality=80)
         image_bytes = buf.getvalue()
         del image, buf  # Free PIL image and buffer
 
@@ -679,6 +689,9 @@ class WorkerThread(threading.Thread):
             gen_index=job.get("gen_index")
         )
         meta["id"] = ts
+        # Pass the chosen extension to the master so it can save with the right filename
+        _ext = "jpg" if _fmt in ("jpg", "jpeg") else _fmt
+        meta["_image_ext"] = _ext
 
         return image_bytes, meta
 
