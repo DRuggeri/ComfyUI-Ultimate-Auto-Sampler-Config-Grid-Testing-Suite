@@ -272,6 +272,16 @@ export function getStyles() {
 
             .cb-toggle { display: inline-flex; align-items: center; gap: 8px; cursor: pointer; padding: 6px 0; }
             .cb-preview { background: #0a0a0a; border: 1px solid #3a3a3a; border-radius: 4px; padding: 10px; margin: 10px 0; max-height: 400px; overflow-y: auto; font-family: monospace; font-size: 11px; color: #0cc; }
+
+            /* Output Preview Panel — fixed at bottom of cb-container, resizable */
+            .cb-preview-panel { display: flex; flex-direction: column; flex: 0 1 450px; min-height: 150px; max-height: 80%; background: #0a0a0a; border-top: 2px solid #3a3a3a; overflow: hidden; }
+            .cb-preview-resize-handle { height: 6px; flex: 0 0 6px; background: #2a2a2a; cursor: row-resize; user-select: none; transition: background 0.15s; }
+            .cb-preview-resize-handle:hover { background: #4aa8ff; }
+            .cb-preview-resize-handle.dragging { background: #4aa8ff; }
+            .cb-preview-panel-header { display: flex; justify-content: space-between; align-items: center; padding: 6px 12px; background: #1e1e1e; border-bottom: 1px solid #3a3a3a; color: #e0e0e0; font-size: 12px; font-weight: bold; flex: 0 0 auto; }
+            .cb-preview-panel-header .cb-preview-panel-title { display: flex; align-items: center; gap: 8px; }
+            .cb-preview-panel-header .cb-preview-panel-meta { color: #888; font-weight: normal; font-size: 11px; }
+            .cb-preview-panel-content { flex: 1; overflow: auto; padding: 10px 12px; margin: 0; font-family: monospace; font-size: 11px; line-height: 1.4; color: #0cc; background: #0a0a0a; white-space: pre; }
             .cb-controls-bar { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; margin-top: 10px; padding: 8px; background: #2a2a2a; border-radius: 4px; }
             .cb-header-bar { display: flex; justify-content: space-between; align-items: center; cursor: pointer; padding: 2px 0; }
             .cb-header-bar:hover { background: rgba(255,255,255,0.05); border-radius: 4px; }
@@ -861,8 +871,6 @@ export function createSidebar(node, mainContent, refreshAllConfigBuilders) {
         });
     }
 
-    addNavIcon("📄", "JSON Preview", "cb-sec-preview");
-
     // Divider
     const divider = document.createElement("div");
     divider.className = "cb-sidebar-divider";
@@ -940,7 +948,7 @@ export function createSidebar(node, mainContent, refreshAllConfigBuilders) {
             sectionIds.push(`cb-config-${idx}`);
         });
     }
-    sectionIds.push("cb-sec-distribution", "cb-sec-preview");
+    sectionIds.push("cb-sec-distribution");
     const updateActiveIcon = () => {
         const scrollTop = mainContent.scrollTop;
         let activeId = sectionIds[0];
