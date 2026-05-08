@@ -966,6 +966,7 @@ def run_generation_loop(
     incompatible_loras = {}
     pending_batch = []
     current_job = 0
+    new_completed = 0  # New generations completed in this run (excludes pre-existing skips)
     total_generated = 0
     gen_index_offset = len(existing_data.get("items", []))  # Sequential index for deterministic sort ordering
     skipped_count = 0
@@ -1212,6 +1213,25 @@ def run_generation_loop(
                     print(f"[GridTester] 🔍  ...scanned {_pf_checked}/{_pf_total} ({existing_count} exist so far)")
         _pf_new = _pf_total - existing_count
         print(f"[GridTester] ✅ Pre-flight: {existing_count}/{_pf_total} already exist; {_pf_new} new to generate")
+
+    # Send initial dashboard progress so the user sees "X/N already done"
+    # even before the first new gen completes. Clears any stale values from a prior run.
+    if PromptServer is not None and total_jobs > 0:
+        try:
+            _initial_pct = int((existing_count / total_jobs) * 100)
+            PromptServer.instance.send_sync("ultimate_grid.progress", {
+                "node": unique_id,
+                "session_name": session_name,
+                "current_job": existing_count,
+                "total_jobs": total_jobs,
+                "progress_pct": _initial_pct,
+                "eta_str": "—",
+                "finish_time": "",
+                "avg_duration": 0,
+                "last_duration": 0,
+            })
+        except Exception:
+            pass
 
     # ==== MAIN GENERATION LOOP ====
     print(f"\n{'='*80}\n")
@@ -2099,19 +2119,21 @@ def run_generation_loop(
 
                 # Include upscale time in total duration for ETA accuracy
                 total_duration = duration + total_upscale_duration
+                new_completed += 1
                 job_durations.append(total_duration)
                 eta_info = calculate_eta(job_durations, current_job, total_jobs)
                 if eta_info:
                     print_generation_progress(current_job, total_jobs, conf, w, h, total_duration, eta_info)
-                    # Compact single-line ETA summary (includes existing_count from pre-flight scan)
-                    _eta_pct = int((current_job / total_jobs) * 100)
+                    # Compact single-line ETA summary — uses effective progress (existing + newly completed)
+                    _effective_job = existing_count + new_completed
+                    _eta_pct = int((_effective_job / total_jobs) * 100)
                     if eta_info['hours'] > 0:
                         _eta_str = f"{eta_info['hours']}h {eta_info['minutes']}m"
                     elif eta_info['minutes'] > 0:
                         _eta_str = f"{eta_info['minutes']}m {eta_info['seconds']}s"
                     else:
                         _eta_str = f"{eta_info['seconds']}s"
-                    _eta_line = (f"[GridTester] 📊 job {current_job}/{total_jobs} ({_eta_pct}%) | "
+                    _eta_line = (f"[GridTester] 📊 job {_effective_job}/{total_jobs} ({_eta_pct}%) | "
                                  f"ETA: {_eta_str} | ~{eta_info['finish_formatted']} | "
                                  f"{eta_info['avg_duration']:.1f}s/job")
                     if existing_count > 0:
@@ -2120,7 +2142,7 @@ def run_generation_loop(
                     # Send progress to dashboard frontend
                     if PromptServer is not None:
                         try:
-                            progress_pct = int((current_job / total_jobs) * 100)
+                            progress_pct = int((_effective_job / total_jobs) * 100)
                             if eta_info['hours'] > 0:
                                 eta_str = f"{eta_info['hours']}h {eta_info['minutes']}m"
                             elif eta_info['minutes'] > 0:
@@ -2130,7 +2152,7 @@ def run_generation_loop(
                             PromptServer.instance.send_sync("ultimate_grid.progress", {
                                 "node": unique_id,
                                 "session_name": session_name,
-                                "current_job": current_job,
+                                "current_job": _effective_job,
                                 "total_jobs": total_jobs,
                                 "progress_pct": progress_pct,
                                 "eta_str": eta_str,
