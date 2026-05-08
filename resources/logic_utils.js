@@ -736,7 +736,6 @@ function selectJSON(id) {
 // Trigger generation from Modal
 async function triggerGen(btn) {
     // Build a complete config from the modal fields + the original item's metadata.
-    // This produces an exact config_json entry that the sampler can run directly.
     const d = activeData ? activeData.find(x => x.id === window.currentModalId) : null;
 
     const config = {
@@ -779,24 +778,99 @@ async function triggerGen(btn) {
         if (d.gguf_options) config.gguf_options = d.gguf_options;
     }
 
-    // Wrap in the format the sampler expects
     const configOutput = { configs: [config] };
     const jsonStr = JSON.stringify(configOutput, null, 2);
 
+    console.log("[Revise] Sending config to UltimateSamplerGrid:", config);
+
     try {
-        // Communicate with ComfyUI Graph
-        const graph = window.parent.app.graph;
-        const node = graph._nodes.find(n => n.type === "UltimateSamplerGrid");
-        if (node) {
-            const widget = node.widgets.find(w => w.name === "configs_json");
-            if (widget) {
-                widget.value = jsonStr;
-                window.parent.app.queuePrompt(0);
-                const b = btn; b.innerText = "QUEUED!";
-                setTimeout(() => { closeM(); b.innerText = "GENERATE NEW"; }, 1000);
-            }
+        const app = window.parent.app;
+        const graph = app.graph;
+
+        // Find the SamplerGridTester node(s)
+        const samplerNodes = graph._nodes.filter(n => n.type === "UltimateSamplerGrid");
+        if (samplerNodes.length === 0) {
+            alert("No UltimateSamplerGrid node found in the workflow.\n\nDrag one onto the canvas first, then connect a UltimateConfigBuilder to its configs_json input.");
+            return;
         }
-    } catch (e) { alert("Error: " + e); }
+        if (samplerNodes.length > 1) {
+            console.warn(`[Revise] Multiple UltimateSamplerGrid nodes (${samplerNodes.length}) — using the first one (id=${samplerNodes[0].id}).`);
+        }
+        const node = samplerNodes[0];
+
+        const widget = node.widgets.find(w => w.name === "configs_json");
+        if (!widget) {
+            alert("UltimateSamplerGrid node found, but it has no 'configs_json' widget. The node may be from a different version.");
+            return;
+        }
+
+        // Detect and disconnect any link feeding the configs_json input.
+        // When the input is wired (e.g. from UltimateConfigBuilder), the widget
+        // value is OVERRIDDEN by the upstream link at queue time. We must
+        // disconnect the link, inject our value, queue, then restore the link.
+        const inputIdx = node.findInputSlot("configs_json");
+        let savedLink = null;
+        if (inputIdx !== -1 && node.inputs[inputIdx] && node.inputs[inputIdx].link != null) {
+            const linkId = node.inputs[inputIdx].link;
+            const link = graph.links[linkId];
+            if (link) {
+                savedLink = {
+                    origin_id: link.origin_id,
+                    origin_slot: link.origin_slot,
+                    target_slot: link.target_slot,
+                    type: link.type
+                };
+                node.disconnectInput(inputIdx);
+                console.log(`[Revise] Disconnected configs_json input link (origin=${savedLink.origin_id}.${savedLink.origin_slot}). Will restore after queue.`);
+            }
+        } else {
+            console.log("[Revise] configs_json input is not linked — direct widget injection.");
+        }
+
+        console.log("[Revise] Input link state:", savedLink ? "was linked, disconnected" : "not linked");
+
+        // Defensive widget update: hit every known channel.
+        try { widget.value = jsonStr; } catch (e) { console.warn("[Revise] widget.value set failed:", e); }
+        try { if (widget.inputEl) widget.inputEl.value = jsonStr; } catch (e) { /* DOM-widget alias */ }
+        try { if (widget.element) widget.element.value = jsonStr; } catch (e) { /* newer DOM-widget alias */ }
+        try { if (typeof widget.callback === 'function') widget.callback(jsonStr); } catch (e) { /* some widgets have callbacks */ }
+        try { node.setDirtyCanvas(true, true); } catch (e) { /* redraw */ }
+
+        console.log("[Revise] Widget value (first 200 chars):", String(widget.value || '').slice(0, 200));
+
+        // Queue the prompt. queuePrompt may return a Promise on modern ComfyUI;
+        // older versions return undefined.
+        const queuePromise = app.queuePrompt(0);
+
+        const restoreLink = () => {
+            if (!savedLink) return;
+            try {
+                const origin = graph._nodes.find(n => n.id === savedLink.origin_id);
+                if (!origin) {
+                    console.warn(`[Revise] Cannot restore link: origin node ${savedLink.origin_id} not found.`);
+                    return;
+                }
+                origin.connect(savedLink.origin_slot, node, savedLink.target_slot);
+                console.log(`[Revise] Restored configs_json input link (${savedLink.origin_id}.${savedLink.origin_slot} → ${node.id}.${savedLink.target_slot}).`);
+                node.setDirtyCanvas(true, true);
+            } catch (e) {
+                console.warn("[Revise] Failed to restore link:", e);
+            }
+        };
+
+        if (queuePromise && typeof queuePromise.then === 'function') {
+            queuePromise.then(() => restoreLink(), () => restoreLink());
+        } else {
+            // Older API — fall back to a short delay.
+            setTimeout(restoreLink, 500);
+        }
+
+        btn.innerText = "QUEUED!";
+        setTimeout(() => { closeM(); btn.innerText = "GENERATE NEW"; }, 1000);
+    } catch (e) {
+        console.error("[Revise] triggerGen error:", e);
+        alert("Error: " + (e && e.message ? e.message : e));
+    }
 }
 
 // Scan an external directory and load it as a session
