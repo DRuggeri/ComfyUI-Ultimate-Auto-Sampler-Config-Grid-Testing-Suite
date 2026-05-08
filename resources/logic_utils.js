@@ -865,8 +865,12 @@ async function triggerGen(btn) {
             setTimeout(restoreLink, 500);
         }
 
+        // Briefly flash QUEUED! confirmation but DO NOT close the modal —
+        // the user often wants to immediately queue more revisions of the
+        // same image (e.g. same prompt, different cfg/sampler). They can
+        // close manually via EXIT button or Esc.
         btn.innerText = "QUEUED!";
-        setTimeout(() => { closeM(); btn.innerText = "GENERATE NEW"; }, 1000);
+        setTimeout(() => { btn.innerText = "GENERATE NEW"; }, 1000);
     } catch (e) {
         console.error("[Revise] triggerGen error:", e);
         alert("Error: " + (e && e.message ? e.message : e));
