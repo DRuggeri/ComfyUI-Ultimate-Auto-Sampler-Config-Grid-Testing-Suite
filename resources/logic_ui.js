@@ -1982,6 +1982,7 @@ const _qfTypeLabels = {
     sampler: 'Sampler',
     scheduler: 'Scheduler',
     lora: 'LoRA',
+    lora_strength: 'LoRA Strength',
     model: 'Model',
     denoise: 'Denoise',
     size: 'Size',
@@ -1995,10 +1996,10 @@ const _qfTypeLabels = {
 };
 
 // All types that Quick Filter supports (type-menu order)
-const _qfAllTypes = ['lora', 'cfg', 'steps', 'sampler', 'scheduler', 'denoise', 'size', 'model', 'seed', 'upscaleMethod', 'mediaType', 'positive', 'negative'];
+const _qfAllTypes = ['lora', 'lora_strength', 'cfg', 'steps', 'sampler', 'scheduler', 'denoise', 'size', 'model', 'seed', 'upscaleMethod', 'mediaType', 'positive', 'negative'];
 
 // Types shown in the expanded facet panel (omit prompt types for brevity)
-const _qfFacetableTypes = ['sampler', 'scheduler', 'lora', 'model', 'denoise', 'cfg', 'steps', 'size', 'seed', 'upscaleMethod', 'mediaType'];
+const _qfFacetableTypes = ['sampler', 'scheduler', 'lora', 'lora_strength', 'model', 'denoise', 'cfg', 'steps', 'size', 'seed', 'upscaleMethod', 'mediaType'];
 
 /**
  * Extract a facet value (or array of values) from an item for a given type.
@@ -2009,6 +2010,15 @@ function _qfExtractItemValue(item, type) {
         const lora = String(item.lora || 'None');
         if (lora === 'None') return ['None'];
         return lora.split(' + ').map(p => p.split(':')[0].trim());
+    }
+    if (type === 'lora_strength') {
+        const lora = String(item.lora || 'None');
+        if (lora === 'None') return null;
+        const firstPart = lora.split(' + ')[0];
+        const parts = firstPart.split(':');
+        if (parts.length < 2) return null;
+        const v = parseFloat(parts[1]);
+        return isNaN(v) ? null : v;
     }
     if (type === 'size') {
         return `${item.width || '?'}x${item.height || '?'}`;
@@ -2080,6 +2090,37 @@ function _computeChipFacets(chip) {
     return { count: subset.length, facets };
 }
 
+// Module-level reference so the outside-click handler can be removed by name.
+let _qfMenusOutsideHandler = null;
+
+function _qfAttachOutsideHandler() {
+    if (_qfMenusOutsideHandler) return; // already attached — don't double-register
+    _qfMenusOutsideHandler = (e) => {
+        const tm = document.getElementById('quick-filter-type-menu');
+        const vm = document.getElementById('quick-filter-value-menu');
+        const btn = document.getElementById('quick-filter-add-btn');
+        // Keep menus open when the click is inside any controlled element.
+        if (tm && tm.contains(e.target)) return;
+        if (vm && vm.contains(e.target)) return;
+        if (btn && btn.contains(e.target)) return;
+        _closeQuickFilterMenus();
+    };
+    // Defer one tick so the click that opened the menu doesn't immediately close it.
+    setTimeout(() => {
+        if (_qfMenusOutsideHandler) {
+            // Capture phase bypasses any e.stopPropagation() inside the menus.
+            document.addEventListener('click', _qfMenusOutsideHandler, true);
+        }
+    }, 0);
+}
+
+function _qfDetachOutsideHandler() {
+    if (_qfMenusOutsideHandler) {
+        document.removeEventListener('click', _qfMenusOutsideHandler, true);
+        _qfMenusOutsideHandler = null;
+    }
+}
+
 /**
  * Close all open quick-filter menus by clicking outside.
  */
@@ -2088,6 +2129,7 @@ function _closeQuickFilterMenus() {
     const vm = document.getElementById('quick-filter-value-menu');
     if (tm) tm.style.display = 'none';
     if (vm) vm.style.display = 'none';
+    _qfDetachOutsideHandler();
 }
 
 /**
@@ -2116,28 +2158,19 @@ function _openQuickFilterTypeMenu(btnEl) {
         div.onclick = (e) => {
             e.stopPropagation();
             tm.style.display = 'none';
-            _openQuickFilterValueMenu(type, div);
+            _openQuickFilterValueMenu(type);
         };
         tm.appendChild(div);
     }
 
-    // Position below the button
-    const rect = btnEl.getBoundingClientRect();
-    tm.style.position = 'fixed';
-    tm.style.top = (rect.bottom + 4) + 'px';
-    tm.style.left = rect.left + 'px';
     tm.style.display = 'block';
-
-    // Close on outside click
-    setTimeout(() => {
-        document.addEventListener('click', _closeQuickFilterMenus, { once: true });
-    }, 0);
+    _qfAttachOutsideHandler();
 }
 
 /**
  * Open the value-picker dropdown for a given type.
  */
-function _openQuickFilterValueMenu(type, anchorEl) {
+function _openQuickFilterValueMenu(type) {
     _closeQuickFilterMenus();
     const vm = document.getElementById('quick-filter-value-menu');
     if (!vm) return;
@@ -2170,22 +2203,15 @@ function _openQuickFilterValueMenu(type, anchorEl) {
         }
     }
 
-    // Position near the anchor
-    const rect = anchorEl.getBoundingClientRect();
-    vm.style.position = 'fixed';
-    vm.style.top = rect.top + 'px';
-    vm.style.left = (rect.right + 6) + 'px';
     vm.style.display = 'block';
-
-    setTimeout(() => {
-        document.addEventListener('click', _closeQuickFilterMenus, { once: true });
-    }, 0);
+    _qfAttachOutsideHandler();
 }
 
 /**
  * Add a quick-filter chip. Prevents exact duplicates.
  */
 function addQuickFilter(type, value) {
+    _closeQuickFilterMenus();
     // Prevent duplicates
     const exists = quickFilters.some(f => f.type === type && String(f.value) === String(value));
     if (exists) {

@@ -100,6 +100,17 @@ function _quickFilterMatches(item, f) {
     if (f.type === 'model') {
         return String(item.model || '') === String(f.value);
     }
+    if (f.type === 'lora_strength') {
+        const lora = String(item.lora || 'None');
+        if (lora === 'None') return false;
+        const firstPart = lora.split(' + ')[0];
+        const parts = firstPart.split(':');
+        if (parts.length < 2) return false;
+        const itemStrength = parseFloat(parts[1]);
+        const filterStrength = parseFloat(f.value);
+        if (isNaN(itemStrength) || isNaN(filterStrength)) return false;
+        return Math.abs(itemStrength - filterStrength) < 1e-6;
+    }
     if (['cfg', 'steps', 'denoise', 'seed'].includes(f.type)) {
         const a = parseFloat(item[f.type]);
         const b = parseFloat(f.value);
