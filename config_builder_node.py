@@ -768,10 +768,14 @@ class UltimateConfigBuilder:
             # If neither, omit "positive"/"negative" keys - node inputs will be used as fallback
 
             # --- CONFIG SCHEMA VALIDATION ---
-            # Catches JS/Python sync drift — warns if expected keys are missing
+            # Sanity check for typos / dropped fields. Only includes keys this
+            # function ALWAYS sets unconditionally — fields that are filled in
+            # later by the orchestrator (seed, denoise) or only set for
+            # specific model types (clip_type, text_encoders, gguf_options,
+            # ltx_*) are intentionally excluded so they don't fire false alarms.
             _EXPECTED_CONFIG_KEYS = {
-                "sampler", "scheduler", "steps", "cfg", "denoise", "seed", "seed_behavior",
-                "model", "model_type", "lora", "vae", "clip_type",
+                "sampler", "scheduler", "steps", "cfg", "seed_behavior",
+                "model", "model_type", "lora", "vae",
                 "model_sampling_override", "use_advanced_sampling", "use_flux_guidance",
                 "model_prompt_prefix", "model_prompt_suffix", "attention_mode",
             }
