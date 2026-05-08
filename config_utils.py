@@ -694,7 +694,10 @@ def expand_configs(raw_configs, pos_prompts, neg_prompts, denoise_values, seed, 
                 "advanced_scheduler": combo[17],
                 "flux_guidance_value": combo[18],
                 "resolution": combo[19],  # (w, h) tuple or None
-                "seed": seed,
+                # Per-entry seed override (Revise modal sets this explicitly).
+                # Builder UI does NOT emit entry["seed"] — it uses the node-level
+                # seed widget instead — so this fall-through is safe for that flow.
+                "seed": int(entry["seed"]) if entry.get("seed") not in (None, "") else seed,
                 "seed_behavior": entry.get("seed_behavior", "fixed"),
                 "full_run_seed_behavior": entry.get("full_run_seed_behavior", "fixed"),
                 "model_type": model_type,
