@@ -65,6 +65,11 @@ const sortOptionsList = [
 // Multiple filters are applied with AND logic. OR is a future extension.
 var logicFilters = logicFilters || [];
 
+// --- QUICK FILTER STATE ---
+// Array of faceted filter chips: { type: 'lora', value: 'DMD2.safetensors', _expanded: false }
+// Multiple chips are ANDed together. LoRA chips match any lora in a stack.
+var quickFilters = quickFilters || [];
+
 
 // --- VIRTUALIZATION & PIPELINE ---
 let visibleSlice = { start: -1, end: -1 };

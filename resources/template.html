@@ -533,6 +533,22 @@
                 </div>
             </div>
 
+            <!-- QUICK FILTER SECTION -->
+            <div class="popup-section" id="quick-filter-section">
+                <div class="popup-section-title">QUICK FILTER <span style="font-size: 9px; color: #555; font-weight: normal;">(faceted: pick type → pick value → drill down)</span></div>
+                <div class="search-filter-container">
+                    <div class="search-filter-row">
+                        <button class="search-filter-add-btn" id="quick-filter-add-btn"
+                            onclick="_openQuickFilterTypeMenu(this)" style="position:relative;">
+                            + Add Quick Filter ▾
+                        </button>
+                        <div id="quick-filter-type-menu" style="display:none; position:absolute; z-index:1000; background:#1a1a1a; border:1px solid #333; border-radius:4px; min-width:150px; box-shadow:0 4px 12px rgba(0,0,0,0.5); top:100%; left:0; margin-top:2px;"></div>
+                        <div id="quick-filter-value-menu" style="display:none; position:absolute; z-index:1001; background:#1a1a1a; border:1px solid #333; border-radius:4px; min-width:180px; max-height:220px; overflow-y:auto; box-shadow:0 4px 12px rgba(0,0,0,0.5);"></div>
+                    </div>
+                    <div id="quick-filter-chips" style="margin-top:6px;"></div>
+                </div>
+            </div>
+
             <!-- Meta Info Section -->
 
 

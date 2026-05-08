@@ -79,6 +79,52 @@ function matchesLogicFilters(item) {
     return true;
 }
 
+// ============================================================
+// QUICK FILTER HELPERS (faceted chip filtering)
+// ============================================================
+
+/**
+ * Test whether a single item matches a single quick-filter chip.
+ * - lora: matches if the chip value is one of the lora names in the item's stack.
+ * - model: exact equality on the full model string.
+ * - numeric types (cfg/steps/denoise/seed): float tolerance 1e-6.
+ * - everything else: String exact match.
+ */
+function _quickFilterMatches(item, f) {
+    if (f.type === 'lora') {
+        const lora = String(item.lora || 'None');
+        if (lora === 'None') return f.value === 'None';
+        const names = lora.split(' + ').map(p => p.split(':')[0].trim());
+        return names.includes(f.value);
+    }
+    if (f.type === 'model') {
+        return String(item.model || '') === String(f.value);
+    }
+    if (['cfg', 'steps', 'denoise', 'seed'].includes(f.type)) {
+        const a = parseFloat(item[f.type]);
+        const b = parseFloat(f.value);
+        if (isNaN(a) || isNaN(b)) return String(item[f.type]) === String(f.value);
+        return Math.abs(a - b) < 1e-6;
+    }
+    if (f.type === 'size') {
+        const itemSize = `${item.width || '?'}x${item.height || '?'}`;
+        return itemSize === String(f.value);
+    }
+    return String(item[f.type]) === String(f.value);
+}
+
+/**
+ * Check if an item passes ALL active quick-filter chips (AND logic).
+ * Returns true when no chips are active, or every chip matches.
+ */
+function matchesQuickFilters(item) {
+    if (typeof quickFilters === 'undefined' || quickFilters.length === 0) return true;
+    for (const f of quickFilters) {
+        if (!_quickFilterMatches(item, f)) return false;
+    }
+    return true;
+}
+
 // Generate cache key from current filters
 function getFilterKey() {
     const parts = [
@@ -101,7 +147,8 @@ function getFilterKey() {
         [...filters.upscaleMethod].sort().join(','),
         [...filters.mediaType].sort().join(','),
         searchFilters.map(f => `${f.type}:${f.term}`).join('|'),
-        (typeof logicFilters !== 'undefined' ? logicFilters.map(f => `${f.field}${f.op}${f.value}`).join('|') : '')
+        (typeof logicFilters !== 'undefined' ? logicFilters.map(f => `${f.field}${f.op}${f.value}`).join('|') : ''),
+        (typeof quickFilters !== 'undefined' ? quickFilters.map(f => `${f.type}:${f.value}`).join('|') : '')
     ];
     return parts.join('|');
 }
@@ -347,6 +394,9 @@ function incrementalFilter(newItems) {
         // Apply logic filters (numeric comparisons)
         if (!matchesLogicFilters(d)) return false;
 
+        // Apply quick filters (faceted chip AND logic)
+        if (!matchesQuickFilters(d)) return false;
+
         return true;
     });
 }
@@ -440,6 +490,9 @@ function executePipeline() {
 
         // Apply logic filters (numeric comparisons)
         if (!matchesLogicFilters(d)) return false;
+
+        // Apply quick filters (faceted chip AND logic)
+        if (!matchesQuickFilters(d)) return false;
 
         return true;
     });

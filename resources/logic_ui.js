@@ -745,6 +745,12 @@ function resetAllFilters() {
         if (typeof renderLogicFilters === 'function') renderLogicFilters();
     }
 
+    // Clear quick filters
+    if (typeof quickFilters !== 'undefined') {
+        quickFilters.length = 0;
+        if (typeof renderQuickFilters === 'function') renderQuickFilters();
+    }
+
     // Clear the filter button cache so initFilters rebuilds on next call
     if (typeof filterButtonCache !== 'undefined') {
         for (const key in filterButtonCache) delete filterButtonCache[key];
@@ -1963,6 +1969,385 @@ function renderLogicFilters() {
         clearBtn.style.padding = '4px 10px';
         clearBtn.innerText = 'CLEAR ALL';
         clearBtn.onclick = clearAllLogicFilters;
+        container.appendChild(clearBtn);
+    }
+}
+
+// ============================================================
+// QUICK FILTER FUNCTIONS (faceted chip filtering)
+// ============================================================
+
+// Human-readable labels for each filter type
+const _qfTypeLabels = {
+    sampler: 'Sampler',
+    scheduler: 'Scheduler',
+    lora: 'LoRA',
+    model: 'Model',
+    denoise: 'Denoise',
+    size: 'Size',
+    seed: 'Seed',
+    steps: 'Steps',
+    cfg: 'CFG',
+    upscaleMethod: 'Upscale',
+    mediaType: 'Media',
+    positive: 'Positive',
+    negative: 'Negative'
+};
+
+// All types that Quick Filter supports (type-menu order)
+const _qfAllTypes = ['lora', 'cfg', 'steps', 'sampler', 'scheduler', 'denoise', 'size', 'model', 'seed', 'upscaleMethod', 'mediaType', 'positive', 'negative'];
+
+// Types shown in the expanded facet panel (omit prompt types for brevity)
+const _qfFacetableTypes = ['sampler', 'scheduler', 'lora', 'model', 'denoise', 'cfg', 'steps', 'size', 'seed', 'upscaleMethod', 'mediaType'];
+
+/**
+ * Extract a facet value (or array of values) from an item for a given type.
+ * Returns null if the field is missing.
+ */
+function _qfExtractItemValue(item, type) {
+    if (type === 'lora') {
+        const lora = String(item.lora || 'None');
+        if (lora === 'None') return ['None'];
+        return lora.split(' + ').map(p => p.split(':')[0].trim());
+    }
+    if (type === 'size') {
+        return `${item.width || '?'}x${item.height || '?'}`;
+    }
+    if (type === 'model') {
+        return item.model || meta && meta.model || 'Default';
+    }
+    if (type === 'steps') return String(item.steps);
+    if (type === 'cfg') return String(item.cfg);
+    if (type === 'positive') return item.positive || (meta && meta.positive) || '';
+    if (type === 'negative') return item.negative || (meta && meta.negative) || '';
+    if (type === 'upscaleMethod') {
+        if (!item.upscaled) return 'No Upscale';
+        const mode = item.upscale_mode || '';
+        const model = item.upscale_model;
+        const shortModel = model ? String(model).replace(/\\/g, '/').split('/').pop().replace(/\.[^.]+$/, '') : '';
+        return shortModel ? `${mode} + ${shortModel}` : mode || 'Upscaled';
+    }
+    if (type === 'mediaType') return item.media_type || 'image';
+    const v = item[type];
+    if (v === undefined || v === null) return null;
+    return String(v);
+}
+
+/**
+ * Get all unique values in activeData for a given type.
+ * Returns a sorted array of strings.
+ */
+function _qfUniqueValuesForType(type) {
+    const seen = new Set();
+    const data = (typeof activeData !== 'undefined' ? activeData : []);
+    for (const item of data) {
+        const val = _qfExtractItemValue(item, type);
+        if (val === null || val === undefined) continue;
+        if (Array.isArray(val)) {
+            val.forEach(v => seen.add(String(v)));
+        } else {
+            seen.add(String(val));
+        }
+    }
+    return [...seen].sort((a, b) => a.localeCompare(b, undefined, { numeric: true, sensitivity: 'base' }));
+}
+
+/**
+ * Compute facets for an expanded chip:
+ * - subset: items matching this chip's primary (type, value)
+ * - for each other type, collect unique values in that subset
+ */
+function _computeChipFacets(chip) {
+    const data = (typeof activeData !== 'undefined' ? activeData : []);
+    const subset = data.filter(item => _quickFilterMatches(item, chip));
+    const facets = {};
+    for (const type of _qfFacetableTypes) {
+        if (type === chip.type) continue;
+        facets[type] = new Set();
+    }
+    for (const item of subset) {
+        for (const type of _qfFacetableTypes) {
+            if (type === chip.type) continue;
+            const val = _qfExtractItemValue(item, type);
+            if (val === null || val === undefined) continue;
+            if (Array.isArray(val)) {
+                val.forEach(v => facets[type].add(String(v)));
+            } else {
+                facets[type].add(String(val));
+            }
+        }
+    }
+    return { count: subset.length, facets };
+}
+
+/**
+ * Close all open quick-filter menus by clicking outside.
+ */
+function _closeQuickFilterMenus() {
+    const tm = document.getElementById('quick-filter-type-menu');
+    const vm = document.getElementById('quick-filter-value-menu');
+    if (tm) tm.style.display = 'none';
+    if (vm) vm.style.display = 'none';
+}
+
+/**
+ * Open the type-picker dropdown from the "+ Add Quick Filter" button.
+ */
+function _openQuickFilterTypeMenu(btnEl) {
+    _closeQuickFilterMenus();
+    const tm = document.getElementById('quick-filter-type-menu');
+    if (!tm) return;
+    tm.innerHTML = '';
+
+    const data = (typeof activeData !== 'undefined' ? activeData : []);
+    if (data.length === 0) {
+        tm.innerHTML = '<div style="padding:8px 12px; color:#666; font-size:11px;">No data loaded</div>';
+        tm.style.display = 'block';
+        return;
+    }
+
+    for (const type of _qfAllTypes) {
+        const label = _qfTypeLabels[type] || type;
+        const div = document.createElement('div');
+        div.style.cssText = 'padding:7px 14px; cursor:pointer; font-size:12px; color:#ccc; white-space:nowrap;';
+        div.textContent = label;
+        div.onmouseover = () => div.style.background = '#2a2a2a';
+        div.onmouseout = () => div.style.background = '';
+        div.onclick = (e) => {
+            e.stopPropagation();
+            tm.style.display = 'none';
+            _openQuickFilterValueMenu(type, div);
+        };
+        tm.appendChild(div);
+    }
+
+    // Position below the button
+    const rect = btnEl.getBoundingClientRect();
+    tm.style.position = 'fixed';
+    tm.style.top = (rect.bottom + 4) + 'px';
+    tm.style.left = rect.left + 'px';
+    tm.style.display = 'block';
+
+    // Close on outside click
+    setTimeout(() => {
+        document.addEventListener('click', _closeQuickFilterMenus, { once: true });
+    }, 0);
+}
+
+/**
+ * Open the value-picker dropdown for a given type.
+ */
+function _openQuickFilterValueMenu(type, anchorEl) {
+    _closeQuickFilterMenus();
+    const vm = document.getElementById('quick-filter-value-menu');
+    if (!vm) return;
+    vm.innerHTML = '';
+
+    const values = _qfUniqueValuesForType(type);
+    const label = _qfTypeLabels[type] || type;
+
+    if (values.length === 0) {
+        vm.innerHTML = `<div style="padding:8px 12px; color:#666; font-size:11px;">No values for ${label}</div>`;
+    } else {
+        const header = document.createElement('div');
+        header.style.cssText = 'padding:5px 12px; font-size:10px; color:#555; border-bottom:1px solid #2a2a2a; text-transform:uppercase; letter-spacing:0.05em;';
+        header.textContent = label;
+        vm.appendChild(header);
+
+        for (const val of values) {
+            const div = document.createElement('div');
+            div.style.cssText = 'padding:6px 14px; cursor:pointer; font-size:12px; color:#ccc; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; max-width:240px;';
+            div.title = val;
+            div.textContent = val;
+            div.onmouseover = () => div.style.background = '#2a2a2a';
+            div.onmouseout = () => div.style.background = '';
+            div.onclick = (e) => {
+                e.stopPropagation();
+                vm.style.display = 'none';
+                addQuickFilter(type, val);
+            };
+            vm.appendChild(div);
+        }
+    }
+
+    // Position near the anchor
+    const rect = anchorEl.getBoundingClientRect();
+    vm.style.position = 'fixed';
+    vm.style.top = rect.top + 'px';
+    vm.style.left = (rect.right + 6) + 'px';
+    vm.style.display = 'block';
+
+    setTimeout(() => {
+        document.addEventListener('click', _closeQuickFilterMenus, { once: true });
+    }, 0);
+}
+
+/**
+ * Add a quick-filter chip. Prevents exact duplicates.
+ */
+function addQuickFilter(type, value) {
+    // Prevent duplicates
+    const exists = quickFilters.some(f => f.type === type && String(f.value) === String(value));
+    if (exists) {
+        console.log(`[QuickFilter] Duplicate chip skipped: ${type}=${value}`);
+        return;
+    }
+    quickFilters.push({ type, value: String(value), _expanded: false });
+    renderQuickFilters();
+    updateDataPipeline();
+    console.log(`[QuickFilter] Added chip: ${type}=${value} (total: ${quickFilters.length})`);
+}
+
+/**
+ * Remove a quick-filter chip by index.
+ */
+function removeQuickFilter(idx) {
+    if (idx >= 0 && idx < quickFilters.length) {
+        const removed = quickFilters.splice(idx, 1)[0];
+        console.log(`[QuickFilter] Removed chip: ${removed.type}=${removed.value}`);
+        renderQuickFilters();
+        updateDataPipeline();
+    }
+}
+
+/**
+ * Toggle the expand/collapse state of a chip.
+ */
+function toggleQuickFilterChip(idx) {
+    if (idx >= 0 && idx < quickFilters.length) {
+        quickFilters[idx]._expanded = !quickFilters[idx]._expanded;
+        renderQuickFilters();
+    }
+}
+
+/**
+ * Clear all quick-filter chips.
+ */
+function clearAllQuickFilters() {
+    if (quickFilters.length === 0) return;
+    quickFilters.length = 0;
+    renderQuickFilters();
+    updateDataPipeline();
+    console.log('[QuickFilter] All chips cleared');
+}
+
+/**
+ * Render quick-filter chips into #quick-filter-chips.
+ */
+function renderQuickFilters() {
+    const container = document.getElementById('quick-filter-chips');
+    if (!container) return;
+    container.innerHTML = '';
+
+    if (quickFilters.length === 0) {
+        container.innerHTML = '<div style="color:#555; font-size:10px; padding:4px 0;">No active quick filters</div>';
+        return;
+    }
+
+    quickFilters.forEach((chip, idx) => {
+        const label = _qfTypeLabels[chip.type] || chip.type;
+
+        const chipEl = document.createElement('div');
+        chipEl.style.cssText = 'border:1px solid #1e4a6e; border-radius:4px; margin-bottom:6px; overflow:hidden; background:#0d1f2d;';
+
+        // --- Header row ---
+        const header = document.createElement('div');
+        header.style.cssText = 'display:flex; align-items:center; padding:4px 6px; gap:6px; cursor:pointer; user-select:none;';
+
+        const typeBadge = document.createElement('span');
+        typeBadge.style.cssText = 'background:#1a3a5c; color:#5ab4f5; font-size:10px; padding:1px 6px; border-radius:3px; font-weight:600; letter-spacing:0.04em; flex-shrink:0;';
+        typeBadge.textContent = label.toUpperCase();
+
+        const valueSpan = document.createElement('span');
+        valueSpan.style.cssText = 'flex:1; font-size:11px; color:#d0d8e0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;';
+        valueSpan.title = chip.value;
+        valueSpan.textContent = chip.value;
+
+        const toggleBtn = document.createElement('button');
+        toggleBtn.style.cssText = 'background:none; border:none; color:#5ab4f5; cursor:pointer; font-size:11px; padding:0 4px; flex-shrink:0;';
+        toggleBtn.title = chip._expanded ? 'Collapse' : 'Expand facets';
+        toggleBtn.textContent = chip._expanded ? '▼' : '▶';
+        toggleBtn.onclick = (e) => { e.stopPropagation(); toggleQuickFilterChip(idx); };
+
+        const removeBtn = document.createElement('button');
+        removeBtn.style.cssText = 'background:none; border:none; color:#666; cursor:pointer; font-size:12px; padding:0 2px; flex-shrink:0; line-height:1;';
+        removeBtn.title = 'Remove filter';
+        removeBtn.textContent = '✕';
+        removeBtn.onclick = (e) => { e.stopPropagation(); removeQuickFilter(idx); };
+
+        header.onclick = () => toggleQuickFilterChip(idx);
+        header.appendChild(typeBadge);
+        header.appendChild(valueSpan);
+        header.appendChild(toggleBtn);
+        header.appendChild(removeBtn);
+        chipEl.appendChild(header);
+
+        // --- Expanded body ---
+        if (chip._expanded) {
+            const body = document.createElement('div');
+            body.style.cssText = 'border-top:1px solid #1e4a6e; padding:8px; background:#0a151f;';
+
+            const { count, facets } = _computeChipFacets(chip);
+
+            const countEl = document.createElement('div');
+            countEl.style.cssText = 'font-size:10px; color:#5ab4f5; margin-bottom:6px; font-weight:600;';
+            countEl.textContent = `Items matching: ${count}`;
+            body.appendChild(countEl);
+
+            let anyFacets = false;
+            for (const type of _qfFacetableTypes) {
+                if (type === chip.type) continue;
+                const vals = facets[type];
+                if (!vals || vals.size === 0) continue;
+
+                const sortedVals = [...vals].sort((a, b) => a.localeCompare(b, undefined, { numeric: true, sensitivity: 'base' }));
+
+                anyFacets = true;
+                const row = document.createElement('div');
+                row.style.cssText = 'margin-bottom:5px;';
+
+                const rowLabel = document.createElement('span');
+                rowLabel.style.cssText = 'font-size:9px; color:#555; text-transform:uppercase; letter-spacing:0.05em; margin-right:6px;';
+                rowLabel.textContent = (_qfTypeLabels[type] || type) + ':';
+                row.appendChild(rowLabel);
+
+                for (const val of sortedVals) {
+                    // Check if this value is already an active chip
+                    const alreadyActive = quickFilters.some(f => f.type === type && f.value === val);
+                    const btn = document.createElement('button');
+                    btn.style.cssText = `display:inline-block; margin:1px 2px; padding:2px 7px; font-size:10px; border-radius:3px; cursor:pointer; border:1px solid ${alreadyActive ? '#2a6e44' : '#1e4a6e'}; background:${alreadyActive ? '#1a4a2a' : 'transparent'}; color:${alreadyActive ? '#4ecf7a' : '#8ab4d4'}; transition:background 0.1s;`;
+                    btn.title = alreadyActive ? `Already filtering ${type}=${val}` : `Add filter: ${type}=${val}`;
+                    btn.textContent = val.length > 30 ? val.slice(0, 28) + '…' : val;
+                    if (!alreadyActive) {
+                        btn.onclick = (e) => { e.stopPropagation(); addQuickFilter(type, val); };
+                        btn.onmouseover = () => btn.style.background = '#1a3a5c';
+                        btn.onmouseout = () => btn.style.background = 'transparent';
+                    }
+                    row.appendChild(btn);
+                }
+                body.appendChild(row);
+            }
+
+            if (!anyFacets) {
+                const empty = document.createElement('div');
+                empty.style.cssText = 'font-size:10px; color:#444; font-style:italic;';
+                empty.textContent = 'No other facets available in this subset.';
+                body.appendChild(empty);
+            }
+
+            chipEl.appendChild(body);
+        }
+
+        container.appendChild(chipEl);
+    });
+
+    // Clear-all button when multiple chips are active
+    if (quickFilters.length > 1) {
+        const clearBtn = document.createElement('button');
+        clearBtn.className = 'search-filter-add-btn';
+        clearBtn.style.cssText = 'background:#ff3860; padding:4px 10px; margin-top:4px;';
+        clearBtn.textContent = 'CLEAR ALL';
+        clearBtn.onclick = clearAllQuickFilters;
         container.appendChild(clearBtn);
     }
 }
