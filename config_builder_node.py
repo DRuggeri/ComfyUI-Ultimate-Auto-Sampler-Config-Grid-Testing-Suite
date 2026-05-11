@@ -832,6 +832,42 @@ class UltimateConfigBuilder:
         image_format = state.get("image_format", "webp")
         if image_format and image_format != "webp":
             session_settings["image_format"] = image_format
+        # Generator-node override settings — emit only when non-default so the
+        # widget value on the SamplerGridTester node wins for users who haven't
+        # explicitly set them in the Builder UI. When the Generator widgets are
+        # eventually removed, these can be made unconditional.
+        ov_existing = state.get("overwrite_existing", False)
+        if ov_existing:
+            session_settings["overwrite_existing"] = True
+
+        flush_be = state.get("flush_batch_every", 4)
+        try:
+            flush_be = int(flush_be)
+        except (TypeError, ValueError):
+            flush_be = 4
+        if flush_be != 4:
+            session_settings["flush_batch_every"] = flush_be
+
+        lora_tw = state.get("lora_triggerwords_mode", "None")
+        if lora_tw and lora_tw != "None":
+            session_settings["lora_triggerwords_mode"] = lora_tw
+
+        save_cc = state.get("save_conditioning_cache_to_file", False)
+        if save_cc:
+            session_settings["save_conditioning_cache_to_file"] = True
+
+        en_mc = state.get("enable_model_cache", False)
+        if en_mc:
+            session_settings["enable_model_cache"] = True
+
+        vae_bs = state.get("vae_batch_size", 4)
+        try:
+            vae_bs = int(vae_bs)
+        except (TypeError, ValueError):
+            vae_bs = 4
+        if vae_bs != 4:
+            session_settings["vae_batch_size"] = vae_bs
+
         if session_settings:
             output_obj["_session_settings"] = session_settings
 

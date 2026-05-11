@@ -292,6 +292,37 @@ class SamplerGridTester:
         except Exception as e:
             print(f"[GridTester] ⚠️ Error parsing configs_json for distribution: {e}")
 
+        # Builder UI Run Settings override widget values when present.
+        # When a user sets these in the Builder UI, _session_settings carries
+        # them through configs_json and they take precedence over what's
+        # wired to the SamplerGridTester widgets. Generator widgets are still
+        # the fallback for backward compat.
+        if session_settings:
+            if "overwrite_existing" in session_settings:
+                overwrite_existing = bool(session_settings["overwrite_existing"])
+                print(f"[GridTester] ⚙️ overwrite_existing overridden by Builder UI: {overwrite_existing}")
+            if "flush_batch_every" in session_settings:
+                try:
+                    flush_batch_every = int(session_settings["flush_batch_every"])
+                    print(f"[GridTester] ⚙️ flush_batch_every overridden by Builder UI: {flush_batch_every}")
+                except (TypeError, ValueError):
+                    pass
+            if "lora_triggerwords_mode" in session_settings:
+                lora_triggerwords_mode = str(session_settings["lora_triggerwords_mode"])
+                print(f"[GridTester] ⚙️ lora_triggerwords_mode overridden by Builder UI: {lora_triggerwords_mode}")
+            if "save_conditioning_cache_to_file" in session_settings:
+                save_conditioning_cache_to_file = bool(session_settings["save_conditioning_cache_to_file"])
+                print(f"[GridTester] ⚙️ save_conditioning_cache_to_file overridden by Builder UI: {save_conditioning_cache_to_file}")
+            if "enable_model_cache" in session_settings:
+                enable_model_cache = bool(session_settings["enable_model_cache"])
+                print(f"[GridTester] ⚙️ enable_model_cache overridden by Builder UI: {enable_model_cache}")
+            if "vae_batch_size" in session_settings:
+                try:
+                    vae_batch_size = int(session_settings["vae_batch_size"])
+                    print(f"[GridTester] ⚙️ vae_batch_size overridden by Builder UI: {vae_batch_size}")
+                except (TypeError, ValueError):
+                    pass
+
         return run_generation_loop(
             self,
             ckpt_name, positive_text, negative_text, seed, denoise, vae_batch_size,

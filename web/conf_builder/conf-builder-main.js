@@ -189,7 +189,13 @@ app.registerExtension({
                         every_n: 1,
                         clear_vram: false
                     },
-                    image_format: "webp"
+                    image_format: "webp",
+                    overwrite_existing: false,
+                    flush_batch_every: 4,
+                    lora_triggerwords_mode: "None",
+                    save_conditioning_cache_to_file: false,
+                    enable_model_cache: false,
+                    vae_batch_size: 4
                 };
 
                 // Create HTML container immediately
@@ -266,6 +272,14 @@ app.registerExtension({
                                     if (arr.flux_guidance_value === undefined) arr.flux_guidance_value = "3.5";
                                 });
                             }
+
+                            // Migration: ensure top-level Run Settings fields exist
+                            if (this.state.overwrite_existing === undefined) this.state.overwrite_existing = false;
+                            if (this.state.flush_batch_every === undefined) this.state.flush_batch_every = 4;
+                            if (this.state.lora_triggerwords_mode === undefined) this.state.lora_triggerwords_mode = "None";
+                            if (this.state.save_conditioning_cache_to_file === undefined) this.state.save_conditioning_cache_to_file = false;
+                            if (this.state.enable_model_cache === undefined) this.state.enable_model_cache = false;
+                            if (this.state.vae_batch_size === undefined) this.state.vae_batch_size = 4;
 
                             this.saveState();
                             this.renderUI();

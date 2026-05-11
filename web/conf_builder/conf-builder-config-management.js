@@ -6344,6 +6344,12 @@ export function renderCooldownSection(node, container) {
 export function renderRunSettingsSection(node, container) {
     if (node.state.start_at_job === undefined) node.state.start_at_job = 0;
     if (node.state.image_format === undefined) node.state.image_format = "webp";
+    if (node.state.overwrite_existing === undefined) node.state.overwrite_existing = false;
+    if (node.state.flush_batch_every === undefined) node.state.flush_batch_every = 4;
+    if (node.state.lora_triggerwords_mode === undefined) node.state.lora_triggerwords_mode = "None";
+    if (node.state.save_conditioning_cache_to_file === undefined) node.state.save_conditioning_cache_to_file = false;
+    if (node.state.enable_model_cache === undefined) node.state.enable_model_cache = false;
+    if (node.state.vae_batch_size === undefined) node.state.vae_batch_size = 4;
 
     const section = document.createElement("div");
     section.className = "cb-section full-width";
@@ -6413,6 +6419,73 @@ export function renderRunSettingsSection(node, container) {
     fmtDiv.appendChild(fmtSelect);
     content.appendChild(fmtDiv);
     content.appendChild(fmtDesc);
+
+    // Helper: renders a labeled row with a "?" tooltip icon, binding to node.state[stateKey].
+    function _addRunSetting(content, opts) {
+        // opts: { stateKey, label, tooltip, kind: "bool"|"int"|"select", options?, min?, max?, defaultValue }
+        const row = document.createElement("div");
+        row.style.cssText = "margin-top: 10px; display: flex; align-items: center; gap: 8px;";
+
+        const label = document.createElement("label");
+        label.textContent = opts.label + ":";
+        label.style.cssText = "font-size: 12px; color: #ccc; white-space: nowrap;";
+
+        const help = document.createElement("span");
+        help.textContent = "?";
+        help.title = opts.tooltip;
+        help.style.cssText = "display: inline-flex; align-items: center; justify-content: center; width: 16px; height: 16px; border-radius: 50%; background: #2a2a2a; color: #8af; font-size: 10px; font-weight: bold; cursor: help; user-select: none;";
+
+        let input;
+        if (opts.kind === "bool") {
+            input = document.createElement("input");
+            input.type = "checkbox";
+            input.checked = !!node.state[opts.stateKey];
+            input.style.cssText = "transform: scale(1.2); cursor: pointer;";
+            input.onchange = () => { node.state[opts.stateKey] = input.checked; node.saveState(); };
+        } else if (opts.kind === "int") {
+            input = document.createElement("input");
+            input.type = "number";
+            if (opts.min !== undefined) input.min = opts.min;
+            if (opts.max !== undefined) input.max = opts.max;
+            input.value = node.state[opts.stateKey] !== undefined ? node.state[opts.stateKey] : opts.defaultValue;
+            input.style.cssText = "width: 70px; background: #1a1a1a; color: #ccc; border: 1px solid #444; border-radius: 4px; padding: 4px 6px; font-size: 12px;";
+            input.onchange = () => {
+                const v = parseInt(input.value);
+                node.state[opts.stateKey] = isNaN(v) ? opts.defaultValue : v;
+                node.saveState();
+            };
+        } else if (opts.kind === "select") {
+            input = document.createElement("select");
+            input.style.cssText = "background: #1a1a1a; color: #ccc; border: 1px solid #444; border-radius: 4px; padding: 4px 6px; font-size: 12px;";
+            (opts.options || []).forEach(o => {
+                const opt = document.createElement("option");
+                opt.value = o;
+                opt.textContent = o;
+                if (o === (node.state[opts.stateKey] || opts.defaultValue)) opt.selected = true;
+                input.appendChild(opt);
+            });
+            input.onchange = () => { node.state[opts.stateKey] = input.value; node.saveState(); };
+        }
+
+        row.appendChild(label);
+        row.appendChild(help);
+        row.appendChild(input);
+        content.appendChild(row);
+    }
+
+    _addRunSetting(content, { stateKey: "overwrite_existing", label: "Overwrite Existing", kind: "bool",
+        tooltip: "True = Re-run everything. False = Skip already generated images (Resume)." });
+    _addRunSetting(content, { stateKey: "flush_batch_every", label: "Flush Batch Every", kind: "int", min: 0, max: 64, defaultValue: 4,
+        tooltip: "Update dashboard every X images. 0 = Use VAE Batch Size." });
+    _addRunSetting(content, { stateKey: "lora_triggerwords_mode", label: "LoRA Triggerwords Mode", kind: "select",
+        options: ["None", "Append To End", "Append To Start", "Read From Config"], defaultValue: "None",
+        tooltip: "None = Don't fetch/append trigger words. Append To End = Add triggers at end of prompt (default behavior). Append To Start = Add triggers at start of prompt. Read From Config = Use lora_triggerwords_append_settings in config JSON to specify per-lora placement." });
+    _addRunSetting(content, { stateKey: "save_conditioning_cache_to_file", label: "Save Conditioning Cache To File", kind: "bool",
+        tooltip: "Save CLIP conditioning cache to disk. Useful when experimenting with the same prompts/models — skips text encoding on resume. WARNING: Can create very large files in output/benchmarks. Automatically disabled when optional inputs (model/clip/conditioning) are connected." });
+    _addRunSetting(content, { stateKey: "enable_model_cache", label: "Enable Model Cache", kind: "bool",
+        tooltip: "Experimental: intelligent model/LoRA caching with async background preloading. Speeds up generation when switching LoRAs frequently. Loads cached LoRAs from RAM instead of disk. Disable to reduce RAM/VRAM usage." });
+    _addRunSetting(content, { stateKey: "vae_batch_size", label: "VAE Batch Size", kind: "int", min: -1, max: 64, defaultValue: 4,
+        tooltip: "How many images to encode/decode per VAE pass. Lower = less VRAM. -1 = process all at once. Default: 4." });
 
     section.appendChild(header);
     section.appendChild(content);
@@ -6582,6 +6655,10 @@ export async function renderUI(node, availableLoras, modelLists, loraFolders, av
 
     // Global Prompts Section
     renderGlobalPromptsSection(node, mainContent);
+
+    // Run Settings Section — session-level generator overrides, shown at top
+    // so users see them before diving into config arrays.
+    renderRunSettingsSection(node, mainContent);
 
     // Config Arrays Section
     const configSection = document.createElement("div");
@@ -6774,7 +6851,6 @@ export async function renderUI(node, availableLoras, modelLists, loraFolders, av
     // Session-level settings (applies to all configs)
     renderUpscalingSection(node, mainContent, modelLists);
     renderCooldownSection(node, mainContent);
-    renderRunSettingsSection(node, mainContent);
 
     // Output Preview — rendered as a SIBLING of layoutWrapper (not inside
     // mainContent), so it sits as a fixed/resizable panel at the bottom of
