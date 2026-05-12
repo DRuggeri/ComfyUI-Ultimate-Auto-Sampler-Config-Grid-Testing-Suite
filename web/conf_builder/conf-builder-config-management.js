@@ -6650,15 +6650,16 @@ export async function renderUI(node, availableLoras, modelLists, loraFolders, av
 
     // === MAIN CONTENT SECTIONS ===
 
+    // Run Settings Section — session-level generator overrides. Rendered at
+    // the very top so users see core run-behavior knobs (resume/overwrite,
+    // batching, caching) before anything else.
+    renderRunSettingsSection(node, mainContent);
+
     // Distribution Settings Section (always shown with On/Off toggle)
     renderDistributionSettingsSection(node, mainContent);
 
     // Global Prompts Section
     renderGlobalPromptsSection(node, mainContent);
-
-    // Run Settings Section — session-level generator overrides, shown at top
-    // so users see them before diving into config arrays.
-    renderRunSettingsSection(node, mainContent);
 
     // Config Arrays Section
     const configSection = document.createElement("div");
