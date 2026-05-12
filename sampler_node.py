@@ -322,6 +322,9 @@ class SamplerGridTester:
                     print(f"[GridTester] ⚙️ vae_batch_size overridden by Builder UI: {vae_batch_size}")
                 except (TypeError, ValueError):
                     pass
+            if "session_name" in session_settings:
+                session_name = str(session_settings["session_name"])
+                print(f"[GridTester] ⚙️ session_name overridden by Builder UI: {session_name}")
 
         return run_generation_loop(
             self,

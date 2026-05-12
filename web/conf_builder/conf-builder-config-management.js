@@ -6383,7 +6383,7 @@ export function renderRunSettingsSection(node, container) {
     jobInput.style.cssText = "width: 70px; background: #1a1a1a; color: #ccc; border: 1px solid #444; border-radius: 4px; padding: 4px 6px; font-size: 12px;";
     jobInput.onchange = () => {
         node.state.start_at_job = parseInt(jobInput.value) || 0;
-        node.setDirtyCanvas(true);
+        node.saveState();
     };
     const jobDesc = document.createElement("div");
     jobDesc.style.cssText = "font-size: 9px; color: #666;";

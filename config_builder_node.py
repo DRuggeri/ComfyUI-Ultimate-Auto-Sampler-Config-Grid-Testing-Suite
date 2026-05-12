@@ -831,49 +831,33 @@ class UltimateConfigBuilder:
         cooldown_data = state.get("cooldown", {})
         if cooldown_data and cooldown_data.get("enabled", False):
             session_settings["cooldown"] = cooldown_data
-        # Start At Job # (skip to a specific job number)
-        start_at_job = state.get("start_at_job", 0)
-        if start_at_job and int(start_at_job) > 0:
-            session_settings["start_at_job"] = int(start_at_job)
-        # Image save format (only emit when non-default to keep configs_json clean)
-        image_format = state.get("image_format", "webp")
-        if image_format and image_format != "webp":
-            session_settings["image_format"] = image_format
-        # Generator-node override settings — emit only when non-default so the
-        # widget value on the SamplerGridTester node wins for users who haven't
-        # explicitly set them in the Builder UI. When the Generator widgets are
-        # eventually removed, these can be made unconditional.
-        ov_existing = state.get("overwrite_existing", False)
-        if ov_existing:
-            session_settings["overwrite_existing"] = True
-
-        flush_be = state.get("flush_batch_every", 4)
+        # Start At Job # (skip to a specific job number) — always emit.
         try:
-            flush_be = int(flush_be)
+            session_settings["start_at_job"] = int(state.get("start_at_job", 0))
         except (TypeError, ValueError):
-            flush_be = 4
-        if flush_be != 4:
-            session_settings["flush_batch_every"] = flush_be
-
-        lora_tw = state.get("lora_triggerwords_mode", "None")
-        if lora_tw and lora_tw != "None":
-            session_settings["lora_triggerwords_mode"] = lora_tw
-
-        save_cc = state.get("save_conditioning_cache_to_file", False)
-        if save_cc:
-            session_settings["save_conditioning_cache_to_file"] = True
-
-        en_mc = state.get("enable_model_cache", False)
-        if en_mc:
-            session_settings["enable_model_cache"] = True
-
-        vae_bs = state.get("vae_batch_size", 4)
+            session_settings["start_at_job"] = 0
+        # Image save format — always emit so Builder UI is authoritative.
+        session_settings["image_format"] = str(state.get("image_format", "webp"))
+        # Builder UI is authoritative for all run settings — emit every field.
+        # Type coercion is defensive; the Builder UI sends correct types but
+        # workflows saved before the Builder UI had these fields might have
+        # missing or string-typed values that need normalization.
+        session_settings["overwrite_existing"] = bool(state.get("overwrite_existing", False))
         try:
-            vae_bs = int(vae_bs)
+            session_settings["flush_batch_every"] = int(state.get("flush_batch_every", 4))
         except (TypeError, ValueError):
-            vae_bs = 4
-        if vae_bs != 4:
-            session_settings["vae_batch_size"] = vae_bs
+            session_settings["flush_batch_every"] = 4
+        session_settings["lora_triggerwords_mode"] = str(state.get("lora_triggerwords_mode", "None"))
+        session_settings["save_conditioning_cache_to_file"] = bool(state.get("save_conditioning_cache_to_file", False))
+        session_settings["enable_model_cache"] = bool(state.get("enable_model_cache", False))
+        try:
+            session_settings["vae_batch_size"] = int(state.get("vae_batch_size", 4))
+        except (TypeError, ValueError):
+            session_settings["vae_batch_size"] = 4
+
+        # session_name moves into session_settings too so the Generator's
+        # session_name widget can be removed (Phase 2).
+        session_settings["session_name"] = str(state.get("session_name", "my_session"))
 
         if session_settings:
             output_obj["_session_settings"] = session_settings
