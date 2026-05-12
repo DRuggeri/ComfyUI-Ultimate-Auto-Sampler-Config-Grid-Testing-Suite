@@ -232,8 +232,11 @@ class UltimateConfigBuilder:
             }
         }
     
-    RETURN_TYPES = ("STRING", "STRING")
-    RETURN_NAMES = ("configs_json", "session_name")
+    # session_name is carried through configs_json's _session_settings now,
+    # so the dedicated output socket is redundant. Removed to simplify the
+    # node interface.
+    RETURN_TYPES = ("STRING",)
+    RETURN_NAMES = ("configs_json",)
     FUNCTION = "generate_config"
     CATEGORY = "sampling/testing"
     OUTPUT_NODE = True
@@ -917,7 +920,7 @@ class UltimateConfigBuilder:
         print(f"[ConfigBuilder] 📊 Configs: {n_configs}")
         print(f"{'='*80}\n")
 
-        return (json_output, actual_session_name)
+        return (json_output,)
 
 
 # API endpoint for trigger word lookup
