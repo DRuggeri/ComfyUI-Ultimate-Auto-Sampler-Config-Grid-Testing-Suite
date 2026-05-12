@@ -633,13 +633,20 @@ class UltimateConfigBuilder:
             full_run_seed = config_array.get("full_run_seed", 0)
             config["full_run_seed"] = int(full_run_seed) if full_run_seed else 0
 
-            # Process VAEs — always include (default "None" if unset)
+            # Process VAEs — filter out bypassed (unchecked) entries AND any
+            # empty / "None" placeholders. If nothing remains, OMIT the "vae"
+            # key entirely so the orchestrator falls back to the default
+            # behavior (no per-config VAE override). Emitting "vae": "None"
+            # made the generator try to load a model file literally named
+            # "None", which fails.
             vaes_raw = config_array.get("vaes", ["None"])
-            vae_strings = [str(v) for v in vaes_raw if v and v != "None"]
+            vae_bypass_states = config_array.get("vae_bypass_states", {}) or {}
+            vae_strings = [
+                str(v) for v in vaes_raw
+                if v and v != "None" and not vae_bypass_states.get(str(v), False)
+            ]
             if vae_strings:
                 config["vae"] = vae_strings if len(vae_strings) > 1 else vae_strings[0]
-            else:
-                config["vae"] = "None"
 
             # Always include model_type and related fields
             config["model_type"] = model_type
