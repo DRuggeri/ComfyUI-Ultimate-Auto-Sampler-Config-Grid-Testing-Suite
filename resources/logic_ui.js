@@ -1286,17 +1286,25 @@ function createCard(d) {
     const favClass = isFavorited ? 'favorited' : '';
     const favIcon = isFavorited ? '★' : '☆';
 
-    // Calculate LoRA display
+    // Calculate LoRA display. Keep the row to a SINGLE line regardless of
+    // how many LoRAs are stacked — when cards are taller than the virtual
+    // scroller's row stride, they overflow into adjacent grid rows and
+    // break the 1-9 quick-favorite hotkey's row clustering. Full list is
+    // still available via tooltip (title attribute).
     let loraLine = "";
     if (d.lora === "None") {
         loraLine = `<div class="stat"><b>LoRA:</b> <span style="opacity:0.3">-</span></div>`;
     } else if (d.lora.includes(" + ")) {
-        const count = d.lora.split(" + ").length;
-        loraLine = `<div class="stat" title="${d.lora.replace(/ \+ /g, '\n')}"><b>LoRA:</b><br /> <span style="color:var(--accent-lora)">(${d.lora.replace(/ \+ /g, '\n')})</span></div>`;
+        const parts = d.lora.split(" + ");
+        const count = parts.length;
+        const firstName = String(parts[0]).replace(/\\/g, '/').split('/').pop().split(':')[0];
+        const truncatedFirst = firstName.length > 14 ? firstName.substring(0, 12) + '…' : firstName;
+        const fullList = d.lora.replace(/ \+ /g, '\n');
+        loraLine = `<div class="stat" title="${fullList}"><b>LoRA:</b> <span style="color:var(--accent-lora)">${truncatedFirst} +${count - 1} more</span></div>`;
     } else {
         const rawName = String(d.lora);
         let fileName = rawName.replace(/\\/g, '/').split('/').pop().split(':')[0];
-        if (fileName.length > 20) fileName = fileName.substring(0, 18) + '...';
+        if (fileName.length > 20) fileName = fileName.substring(0, 18) + '…';
         loraLine = `<div class="stat" title="${d.lora}"><b>LoRA:</b> <span>${fileName}</span></div>`;
     }
 
