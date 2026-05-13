@@ -847,16 +847,16 @@ class UltimateConfigBuilder:
         # missing or string-typed values that need normalization.
         session_settings["overwrite_existing"] = bool(state.get("overwrite_existing", False))
         try:
-            session_settings["flush_batch_every"] = int(state.get("flush_batch_every", 4))
+            session_settings["flush_batch_every"] = int(state.get("flush_batch_every", 1))
         except (TypeError, ValueError):
-            session_settings["flush_batch_every"] = 4
+            session_settings["flush_batch_every"] = 1
         session_settings["lora_triggerwords_mode"] = str(state.get("lora_triggerwords_mode", "None"))
         session_settings["save_conditioning_cache_to_file"] = bool(state.get("save_conditioning_cache_to_file", False))
         session_settings["enable_model_cache"] = bool(state.get("enable_model_cache", False))
         try:
-            session_settings["vae_batch_size"] = int(state.get("vae_batch_size", 4))
+            session_settings["vae_batch_size"] = int(state.get("vae_batch_size", 1))
         except (TypeError, ValueError):
-            session_settings["vae_batch_size"] = 4
+            session_settings["vae_batch_size"] = 1
 
         # session_name moves into session_settings too so the Generator's
         # session_name widget can be removed (Phase 2).

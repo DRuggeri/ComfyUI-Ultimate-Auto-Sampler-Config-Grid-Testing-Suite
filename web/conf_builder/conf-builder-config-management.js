@@ -6345,11 +6345,11 @@ export function renderRunSettingsSection(node, container) {
     if (node.state.start_at_job === undefined) node.state.start_at_job = 0;
     if (node.state.image_format === undefined) node.state.image_format = "webp";
     if (node.state.overwrite_existing === undefined) node.state.overwrite_existing = false;
-    if (node.state.flush_batch_every === undefined) node.state.flush_batch_every = 4;
+    if (node.state.flush_batch_every === undefined) node.state.flush_batch_every = 1;
     if (node.state.lora_triggerwords_mode === undefined) node.state.lora_triggerwords_mode = "None";
     if (node.state.save_conditioning_cache_to_file === undefined) node.state.save_conditioning_cache_to_file = false;
     if (node.state.enable_model_cache === undefined) node.state.enable_model_cache = false;
-    if (node.state.vae_batch_size === undefined) node.state.vae_batch_size = 4;
+    if (node.state.vae_batch_size === undefined) node.state.vae_batch_size = 1;
 
     const section = document.createElement("div");
     section.className = "cb-section full-width";
@@ -6475,7 +6475,7 @@ export function renderRunSettingsSection(node, container) {
 
     _addRunSetting(content, { stateKey: "overwrite_existing", label: "Overwrite Existing", kind: "bool",
         tooltip: "True = Re-run everything. False = Skip already generated images (Resume)." });
-    _addRunSetting(content, { stateKey: "flush_batch_every", label: "Flush Batch Every", kind: "int", min: 0, max: 64, defaultValue: 4,
+    _addRunSetting(content, { stateKey: "flush_batch_every", label: "Flush Batch Every", kind: "int", min: 0, max: 64, defaultValue: 1,
         tooltip: "Update dashboard every X images. 0 = Use VAE Batch Size." });
     _addRunSetting(content, { stateKey: "lora_triggerwords_mode", label: "LoRA Triggerwords Mode", kind: "select",
         options: ["None", "Append To End", "Append To Start", "Read From Config"], defaultValue: "None",
@@ -6484,7 +6484,7 @@ export function renderRunSettingsSection(node, container) {
         tooltip: "Save CLIP conditioning cache to disk. Useful when experimenting with the same prompts/models — skips text encoding on resume. WARNING: Can create very large files in output/benchmarks. Automatically disabled when optional inputs (model/clip/conditioning) are connected." });
     _addRunSetting(content, { stateKey: "enable_model_cache", label: "Enable Model Cache", kind: "bool",
         tooltip: "Experimental: intelligent model/LoRA caching with async background preloading. Speeds up generation when switching LoRAs frequently. Loads cached LoRAs from RAM instead of disk. Disable to reduce RAM/VRAM usage." });
-    _addRunSetting(content, { stateKey: "vae_batch_size", label: "VAE Batch Size", kind: "int", min: -1, max: 64, defaultValue: 4,
+    _addRunSetting(content, { stateKey: "vae_batch_size", label: "VAE Batch Size", kind: "int", min: -1, max: 64, defaultValue: 1,
         tooltip: "How many images to encode/decode per VAE pass. Lower = less VRAM. -1 = process all at once. Default: 4." });
 
     section.appendChild(header);

@@ -242,11 +242,11 @@ class SamplerGridTester:
         negative_text = ""
         seed = 0
         denoise = "1.0"
-        vae_batch_size = 4
+        vae_batch_size = 1
         resolutions_json = '[[1024, 1024]]'
         session_name = "my_session"
         overwrite_existing = False
-        flush_batch_every = 4
+        flush_batch_every = 1
         add_random_seeds_to_gens = 0
         lora_triggerwords_mode = "None"
         remote_vae_endpoint = "None"
