@@ -33,6 +33,14 @@ def generate_image(
     advanced_guider="cfg_guider",
     advanced_scheduler="basic",
     flux_guidance_value=0.0,
+    use_deep_shrink=False,
+    deep_shrink_block_number=3,
+    deep_shrink_downscale_factor=2.0,
+    deep_shrink_start_percent=0.0,
+    deep_shrink_end_percent=0.35,
+    deep_shrink_downscale_after_skip=True,
+    deep_shrink_downscale_method="bicubic",
+    deep_shrink_upscale_method="bicubic",
     width=1024,
     height=1024
 ):
@@ -60,6 +68,14 @@ def generate_image(
         advanced_guider: Guider type ("cfg_guider", "basic_guider")
         advanced_scheduler: Scheduler type for advanced sampling ("basic", "flux2")
         flux_guidance_value: Flux guidance value (0.0 = disabled)
+        use_deep_shrink: Whether to apply Kohya Deep Shrink (PatchModelAddDownscale)
+        deep_shrink_block_number: UNet block to downscale at (1-32, default 3)
+        deep_shrink_downscale_factor: Downscale factor (0.1-9.0, default 2.0)
+        deep_shrink_start_percent: Diffusion start % for the patch (default 0.0)
+        deep_shrink_end_percent: Diffusion end % for the patch (default 0.35)
+        deep_shrink_downscale_after_skip: Whether to downscale after skip (default True)
+        deep_shrink_downscale_method: Downscale interpolation method (default "bicubic")
+        deep_shrink_upscale_method: Upscale interpolation method (default "bicubic")
         width: Image width (used by Flux model sampling and Flux2Scheduler)
         height: Image height (used by Flux model sampling and Flux2Scheduler)
 
@@ -140,6 +156,32 @@ def generate_image(
             model_sampling.set_parameters(shift=shift)
             patched_model.add_object_patch("model_sampling", model_sampling)
             print(f"[GridTester] 🔧 Applied ModelSamplingFlux2 (shift={shift})")
+
+    # === Kohya Deep Shrink (PatchModelAddDownscale) ===
+    # Patches the UNet to downscale features at a specific block during the
+    # early portion of diffusion. Wraps ComfyUI's built-in
+    # PatchModelAddDownscale (comfy_extras/nodes_model_downscale.py).
+    # Looked up via NODE_CLASS_MAPPINGS per project convention — never import
+    # custom_nodes / comfy_extras directly.
+    if use_deep_shrink:
+        try:
+            deep_shrink_cls = nodes.NODE_CLASS_MAPPINGS.get("PatchModelAddDownscale")
+            if deep_shrink_cls is not None:
+                patched_model = deep_shrink_cls().patch(
+                    patched_model,
+                    int(deep_shrink_block_number),
+                    float(deep_shrink_downscale_factor),
+                    float(deep_shrink_start_percent),
+                    float(deep_shrink_end_percent),
+                    bool(deep_shrink_downscale_after_skip),
+                    str(deep_shrink_downscale_method),
+                    str(deep_shrink_upscale_method),
+                )[0]
+                print(f"[GridTester] 🔧 Applied PatchModelAddDownscale (Kohya Deep Shrink): block={deep_shrink_block_number}, factor={deep_shrink_downscale_factor}, range={deep_shrink_start_percent}-{deep_shrink_end_percent}, after_skip={deep_shrink_downscale_after_skip}, down={deep_shrink_downscale_method}, up={deep_shrink_upscale_method}")
+            else:
+                print("[GridTester] ⚠️ PatchModelAddDownscale node not available in this ComfyUI build — Deep Shrink skipped")
+        except Exception as e:
+            print(f"[GridTester] ⚠️ Failed to apply Deep Shrink: {e}")
 
     # === Flux Guidance ===
     # Modify positive conditioning with guidance value (used by Flux 1 models)

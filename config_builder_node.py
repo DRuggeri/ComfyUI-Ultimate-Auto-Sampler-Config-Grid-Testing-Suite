@@ -756,6 +756,20 @@ class UltimateConfigBuilder:
             if use_flux_guidance:
                 config["flux_guidance_value"] = flux_guidance_value
 
+            # Deep Shrink (Kohya / PatchModelAddDownscale) — patches the UNet
+            # to downscale features at a specific block during early diffusion.
+            # Only emit detail params when toggle is on, to keep configs_json clean.
+            use_deep_shrink = config_array.get("use_deep_shrink", False)
+            config["use_deep_shrink"] = bool(use_deep_shrink)
+            if use_deep_shrink:
+                config["deep_shrink_block_number"] = int(config_array.get("deep_shrink_block_number", 3))
+                config["deep_shrink_downscale_factor"] = float(config_array.get("deep_shrink_downscale_factor", 2.0))
+                config["deep_shrink_start_percent"] = float(config_array.get("deep_shrink_start_percent", 0.0))
+                config["deep_shrink_end_percent"] = float(config_array.get("deep_shrink_end_percent", 0.35))
+                config["deep_shrink_downscale_after_skip"] = bool(config_array.get("deep_shrink_downscale_after_skip", True))
+                config["deep_shrink_downscale_method"] = str(config_array.get("deep_shrink_downscale_method", "bicubic"))
+                config["deep_shrink_upscale_method"] = str(config_array.get("deep_shrink_upscale_method", "bicubic"))
+
             # ==== PROMPT HANDLING ====
             # Priority: per-config > global > node inputs (omitted = use node inputs)
             use_custom = config_array.get("use_custom_prompts", False)
@@ -788,6 +802,7 @@ class UltimateConfigBuilder:
                 "model", "model_type", "lora", "vae",
                 "model_sampling_override", "use_advanced_sampling", "use_flux_guidance",
                 "model_prompt_prefix", "model_prompt_suffix", "attention_mode",
+                "use_deep_shrink",
             }
             missing = _EXPECTED_CONFIG_KEYS - set(config.keys())
             if missing:

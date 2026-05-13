@@ -147,7 +147,16 @@ app.registerExtension({
                         advanced_guider: "cfg_guider",
                         advanced_scheduler: "basic",
                         use_flux_guidance: false,
-                        flux_guidance_value: "3.5"
+                        flux_guidance_value: "3.5",
+                        // Kohya Deep Shrink (PatchModelAddDownscale)
+                        use_deep_shrink: false,
+                        deep_shrink_block_number: 3,
+                        deep_shrink_downscale_factor: 2.0,
+                        deep_shrink_start_percent: 0.0,
+                        deep_shrink_end_percent: 0.35,
+                        deep_shrink_downscale_after_skip: true,
+                        deep_shrink_downscale_method: "bicubic",
+                        deep_shrink_upscale_method: "bicubic"
                     }],
                     upscaling: {
                         enabled: false,
@@ -283,6 +292,14 @@ app.registerExtension({
                                     if (arr.advanced_scheduler === undefined) arr.advanced_scheduler = "basic";
                                     if (arr.use_flux_guidance === undefined) arr.use_flux_guidance = false;
                                     if (arr.flux_guidance_value === undefined) arr.flux_guidance_value = "3.5";
+                                    if (arr.use_deep_shrink === undefined) arr.use_deep_shrink = false;
+                                    if (arr.deep_shrink_block_number === undefined) arr.deep_shrink_block_number = 3;
+                                    if (arr.deep_shrink_downscale_factor === undefined) arr.deep_shrink_downscale_factor = 2.0;
+                                    if (arr.deep_shrink_start_percent === undefined) arr.deep_shrink_start_percent = 0.0;
+                                    if (arr.deep_shrink_end_percent === undefined) arr.deep_shrink_end_percent = 0.35;
+                                    if (arr.deep_shrink_downscale_after_skip === undefined) arr.deep_shrink_downscale_after_skip = true;
+                                    if (arr.deep_shrink_downscale_method === undefined) arr.deep_shrink_downscale_method = "bicubic";
+                                    if (arr.deep_shrink_upscale_method === undefined) arr.deep_shrink_upscale_method = "bicubic";
                                 });
                             }
 
@@ -420,6 +437,14 @@ app.registerExtension({
                                     if (arr.advanced_scheduler === undefined) arr.advanced_scheduler = "basic";
                                     if (arr.use_flux_guidance === undefined) arr.use_flux_guidance = false;
                                     if (arr.flux_guidance_value === undefined) arr.flux_guidance_value = "3.5";
+                                    if (arr.use_deep_shrink === undefined) arr.use_deep_shrink = false;
+                                    if (arr.deep_shrink_block_number === undefined) arr.deep_shrink_block_number = 3;
+                                    if (arr.deep_shrink_downscale_factor === undefined) arr.deep_shrink_downscale_factor = 2.0;
+                                    if (arr.deep_shrink_start_percent === undefined) arr.deep_shrink_start_percent = 0.0;
+                                    if (arr.deep_shrink_end_percent === undefined) arr.deep_shrink_end_percent = 0.35;
+                                    if (arr.deep_shrink_downscale_after_skip === undefined) arr.deep_shrink_downscale_after_skip = true;
+                                    if (arr.deep_shrink_downscale_method === undefined) arr.deep_shrink_downscale_method = "bicubic";
+                                    if (arr.deep_shrink_upscale_method === undefined) arr.deep_shrink_upscale_method = "bicubic";
                                 });
 
                                 this.state.config_arrays = loadedArrays;
@@ -583,6 +608,14 @@ app.registerExtension({
                                 if (arr.advanced_scheduler === undefined) arr.advanced_scheduler = "basic";
                                 if (arr.use_flux_guidance === undefined) arr.use_flux_guidance = false;
                                 if (arr.flux_guidance_value === undefined) arr.flux_guidance_value = "3.5";
+                                if (arr.use_deep_shrink === undefined) arr.use_deep_shrink = false;
+                                if (arr.deep_shrink_block_number === undefined) arr.deep_shrink_block_number = 3;
+                                if (arr.deep_shrink_downscale_factor === undefined) arr.deep_shrink_downscale_factor = 2.0;
+                                if (arr.deep_shrink_start_percent === undefined) arr.deep_shrink_start_percent = 0.0;
+                                if (arr.deep_shrink_end_percent === undefined) arr.deep_shrink_end_percent = 0.35;
+                                if (arr.deep_shrink_downscale_after_skip === undefined) arr.deep_shrink_downscale_after_skip = true;
+                                if (arr.deep_shrink_downscale_method === undefined) arr.deep_shrink_downscale_method = "bicubic";
+                                if (arr.deep_shrink_upscale_method === undefined) arr.deep_shrink_upscale_method = "bicubic";
                             });
                         } else if (existing.lora_config) {
                             this.state = this.migrateOldFormat(existing);

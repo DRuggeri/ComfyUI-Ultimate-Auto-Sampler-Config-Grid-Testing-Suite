@@ -1761,6 +1761,14 @@ def run_generation_loop(
                     advanced_guider=conf.get("advanced_guider", "cfg_guider"),
                     advanced_scheduler=conf.get("advanced_scheduler", "basic"),
                     flux_guidance_value=conf.get("flux_guidance_value", 0.0),
+                    use_deep_shrink=conf.get("use_deep_shrink", False),
+                    deep_shrink_block_number=conf.get("deep_shrink_block_number", 3),
+                    deep_shrink_downscale_factor=conf.get("deep_shrink_downscale_factor", 2.0),
+                    deep_shrink_start_percent=conf.get("deep_shrink_start_percent", 0.0),
+                    deep_shrink_end_percent=conf.get("deep_shrink_end_percent", 0.35),
+                    deep_shrink_downscale_after_skip=conf.get("deep_shrink_downscale_after_skip", True),
+                    deep_shrink_downscale_method=conf.get("deep_shrink_downscale_method", "bicubic"),
+                    deep_shrink_upscale_method=conf.get("deep_shrink_upscale_method", "bicubic"),
                     width=w,
                     height=h
                 )
@@ -2981,6 +2989,14 @@ def _run_distributed_generation(
                     advanced_guider=conf.get("advanced_guider", "cfg_guider"),
                     advanced_scheduler=conf.get("advanced_scheduler", "basic"),
                     flux_guidance_value=conf.get("flux_guidance_value", 0.0),
+                    use_deep_shrink=conf.get("use_deep_shrink", False),
+                    deep_shrink_block_number=conf.get("deep_shrink_block_number", 3),
+                    deep_shrink_downscale_factor=conf.get("deep_shrink_downscale_factor", 2.0),
+                    deep_shrink_start_percent=conf.get("deep_shrink_start_percent", 0.0),
+                    deep_shrink_end_percent=conf.get("deep_shrink_end_percent", 0.35),
+                    deep_shrink_downscale_after_skip=conf.get("deep_shrink_downscale_after_skip", True),
+                    deep_shrink_downscale_method=conf.get("deep_shrink_downscale_method", "bicubic"),
+                    deep_shrink_upscale_method=conf.get("deep_shrink_upscale_method", "bicubic"),
                     width=w,
                     height=h
                 )
