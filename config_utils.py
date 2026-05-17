@@ -218,7 +218,7 @@ def _expand_lora_weight_arrays(lora_string):
 
         # Check for bracket notation in strength values
         # Match pattern: name:[array_or_value]:[array_or_value] or name:[array_or_value]
-        bracket_match = re.search(r'\[[\d.,\s]+\]', part)
+        bracket_match = re.search(r'\[[\d.,\s-]+\]', part)
         if not bracket_match:
             # No arrays in this part, keep as-is
             parts_expansions.append([part])
