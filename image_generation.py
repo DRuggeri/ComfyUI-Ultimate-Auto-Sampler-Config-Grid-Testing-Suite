@@ -161,22 +161,46 @@ def generate_image(
     # Patches the UNet to downscale features at a specific block during the
     # early portion of diffusion. Wraps ComfyUI's built-in
     # PatchModelAddDownscale (comfy_extras/nodes_model_downscale.py).
-    # Looked up via NODE_CLASS_MAPPINGS per project convention — never import
-    # custom_nodes / comfy_extras directly.
+    # Looked up via NODE_CLASS_MAPPINGS per project convention.
+    #
+    # Current ComfyUI ships this as a V3 io.ComfyNode subclass with a
+    # classmethod execute() returning io.NodeOutput (whose positional outputs
+    # live in .args). Older builds had a V1 instance method `.patch()`. We
+    # dispatch to either depending on what we find — same pattern as
+    # ltx_video_generation._call_node / _unwrap.
     if use_deep_shrink:
         try:
             deep_shrink_cls = nodes.NODE_CLASS_MAPPINGS.get("PatchModelAddDownscale")
             if deep_shrink_cls is not None:
-                patched_model = deep_shrink_cls().patch(
-                    patched_model,
-                    int(deep_shrink_block_number),
-                    float(deep_shrink_downscale_factor),
-                    float(deep_shrink_start_percent),
-                    float(deep_shrink_end_percent),
-                    bool(deep_shrink_downscale_after_skip),
-                    str(deep_shrink_downscale_method),
-                    str(deep_shrink_upscale_method),
-                )[0]
+                ds_kwargs = dict(
+                    model=patched_model,
+                    block_number=int(deep_shrink_block_number),
+                    downscale_factor=float(deep_shrink_downscale_factor),
+                    start_percent=float(deep_shrink_start_percent),
+                    end_percent=float(deep_shrink_end_percent),
+                    downscale_after_skip=bool(deep_shrink_downscale_after_skip),
+                    downscale_method=str(deep_shrink_downscale_method),
+                    upscale_method=str(deep_shrink_upscale_method),
+                )
+                # Try V3 first (classmethod execute, NodeOutput return).
+                ds_result = None
+                try:
+                    from comfy_api.latest import io as _ds_io
+                    if isinstance(deep_shrink_cls, type) and issubclass(deep_shrink_cls, _ds_io.ComfyNode):
+                        ds_result = deep_shrink_cls.execute(**ds_kwargs)
+                except (ImportError, TypeError):
+                    pass
+                if ds_result is None:
+                    # V1 fallback (instance method named by FUNCTION, default "patch").
+                    fn_name = getattr(deep_shrink_cls, "FUNCTION", "patch")
+                    ds_result = getattr(deep_shrink_cls(), fn_name)(**ds_kwargs)
+                # Unwrap to a single MODEL value.
+                if hasattr(ds_result, "args") and isinstance(getattr(ds_result, "args"), tuple):
+                    patched_model = ds_result.args[0]  # V3 NodeOutput
+                elif isinstance(ds_result, (tuple, list)):
+                    patched_model = ds_result[0]      # V1 tuple
+                else:
+                    patched_model = ds_result          # bare model
                 print(f"[GridTester] 🔧 Applied PatchModelAddDownscale (Kohya Deep Shrink): block={deep_shrink_block_number}, factor={deep_shrink_downscale_factor}, range={deep_shrink_start_percent}-{deep_shrink_end_percent}, after_skip={deep_shrink_downscale_after_skip}, down={deep_shrink_downscale_method}, up={deep_shrink_upscale_method}")
             else:
                 print("[GridTester] ⚠️ PatchModelAddDownscale node not available in this ComfyUI build — Deep Shrink skipped")
