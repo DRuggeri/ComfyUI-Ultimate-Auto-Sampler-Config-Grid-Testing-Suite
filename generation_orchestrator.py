@@ -222,9 +222,16 @@ def check_if_job_completed(existing_items, conf, seed, width, height, batch_idx,
         conf_clip_skip = conf.get("clip_skip", 0)
         if item_clip_skip != conf_clip_skip: continue
 
-        # Check VAE — different VAEs produce different decoded images
-        item_vae = item.get("vae", "Default")
-        conf_vae = conf.get("vae", "Default")
+        # Check VAE — different VAEs produce different decoded images.
+        # Normalize "None"/empty to "Default" so legacy configs that emit
+        # "vae": "None" don't appear distinct from configs that omit the
+        # key entirely.
+        def _norm_vae(v):
+            if not v or str(v) in ("None", "none"):
+                return "Default"
+            return v
+        item_vae = _norm_vae(item.get("vae", "Default"))
+        conf_vae = _norm_vae(conf.get("vae", "Default"))
         if item_vae != conf_vae: continue
 
         return idx
@@ -1024,9 +1031,14 @@ def run_generation_loop(
         # Remember this model's default VAE for reverting later
         default_model_vae = loaded_vae
 
-        # Per-config VAE: if first config specifies a VAE, load it
-        # Config Builder VAE settings take priority over sampler node's remote_vae_endpoint
+        # Per-config VAE: if first config specifies a VAE, load it.
+        # Config Builder VAE settings take priority over sampler node's
+        # remote_vae_endpoint. Normalize "None"/empty to "Default" — a
+        # fresh Builder UI with no VAE selected should mean "use the
+        # checkpoint's bundled VAE", not "load a model file named None".
         target_vae = first_conf.get("vae", "Default")
+        if not target_vae or str(target_vae) in ("None", "none"):
+            target_vae = "Default"
         if target_vae != "Default":
             config_overrides_vae = True
             if is_remote_vae(target_vae):
@@ -1452,6 +1464,8 @@ def run_generation_loop(
             # ==== PER-CONFIG VAE SWITCHING ====
             # Config Builder VAE settings take priority over sampler node's remote_vae_endpoint
             target_vae = conf.get("vae", "Default")
+            if not target_vae or str(target_vae) in ("None", "none"):
+                target_vae = "Default"
             if target_vae != cached_vae_key:
                 # Flush pending batch before switching VAE (they need current VAE for decoding)
                 if pending_batch:
@@ -2883,6 +2897,8 @@ def _run_distributed_generation(
             # --- VAE Switching ---
             # Config Builder VAE settings take priority over sampler node's remote_vae_endpoint
             target_vae = conf.get("vae", "Default")
+            if not target_vae or str(target_vae) in ("None", "none"):
+                target_vae = "Default"
             if target_vae != cached_vae_key:
                 # Flush pending batch before switching VAE
                 if pending_batch:
