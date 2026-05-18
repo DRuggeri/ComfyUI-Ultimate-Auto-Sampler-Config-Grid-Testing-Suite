@@ -1955,7 +1955,11 @@ def run_generation_loop(
                                             "florence2_model": step_result.get("florence2_model", ""),
                                             "note": f"Florence2 found no '{step_result.get('florence2_text_input', '')}' in image",
                                         })
-                                        existing_data["items"].append(sentinel_meta)
+                                        # Insert at beginning + set upscale_produced (matches L2255-2256
+                                        # canonical pattern). Without upscale_produced=True, the base
+                                        # image at L2337 would ALSO get saved as a duplicate.
+                                        existing_data["items"].insert(0, sentinel_meta)
+                                        upscale_produced = True
                                         save_manifest(paths["manifest"], existing_data)
                                         upscale_combo_idx += 1
                                     continue  # skip the normal combo loop
@@ -1983,6 +1987,7 @@ def run_generation_loop(
                                         "id": upscale_id,
                                         "file": f"/view?filename={upscaled_filename}&type=output&subfolder=benchmarks/{session_name}/images",
                                         "filename": upscaled_filename,
+                                        "rejected": False,
                                         "upscaled": True,
                                         "upscale_source": "inline",
                                         "upscale_pipeline": pipeline_name,
@@ -1998,7 +2003,11 @@ def run_generation_loop(
                                         "florence2_bbox": step_result.get("florence2_bbox"),
                                         "hires_denoise": f2_config["hires_denoise"],
                                     })
-                                    existing_data["items"].append(upscaled_meta)
+                                    # Insert at beginning + set upscale_produced (matches L2255-2256
+                                    # canonical pattern). Without upscale_produced=True, the base
+                                    # image at L2337 would ALSO get saved as a duplicate.
+                                    existing_data["items"].insert(0, upscaled_meta)
+                                    upscale_produced = True
                                     save_manifest(paths["manifest"], existing_data)
                                     if PromptServer is not None:
                                         try:
