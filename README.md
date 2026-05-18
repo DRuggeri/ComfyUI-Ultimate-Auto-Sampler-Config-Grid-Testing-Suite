@@ -197,7 +197,8 @@ If you'd rather build the graph yourself:
 
 ### 🔍 Upscaling & Post-Processing
 * **Array-Based Upscaling:** Define multiple upscale configurations, each with its own mode, models, ratios, and denoise values. All combinations are expanded via Cartesian product — test 3 upscale models × 2 ratios × 2 denoise values = 12 upscaled variants per source image.
-* **Three Upscaling Modes:** `hires_only` (latent upscale + re-denoise), `model_only` (upscale model like RealESRGAN), or `model_then_hires` (upscale model followed by hires denoise pass).
+* **Five Upscaling Modes:** `hires_only` (latent upscale + re-denoise), `model_only` (upscale model like RealESRGAN), `model_then_hires` (upscale model followed by hires denoise pass), `seedvr2` (SeedVR2 diffusion-based upscaler), and `florence2_hires` (Florence2-driven targeted hi-res fix — see below).
+* **Florence2 Hi-Res Fix:** Targeted region inpaint using [kijai/ComfyUI-Florence2](https://github.com/kijai/ComfyUI-Florence2)'s referring-expression segmentation. Type what you want fixed (`face`, `hands`, `eyes`, `clothing`) as a free-text input; Florence2 detects the polygon, USCG crops to that region, runs a megapixel-scaled hi-res inpaint pass with your chosen denoise/sampler/steps, and pastes the result back with feathered blending. Pick model/LoRA from each image's original manifest entry or use the Builder's currently-loaded one. Grid-test face fixes the same way you grid-test base configs — combine with other upscale steps in one pipeline for a base-hi-res → face-fix chain. Requires the `ComfyUI-Florence2` custom node (auto-detected at job start with a clear install hint if missing).
 * **Upscale Model Discovery:** Automatically detects installed upscale models from ComfyUI's `upscale_models` folder with a searchable dropdown in the Config Builder.
 * **Tiled VAE Support:** Enable tiled VAE decoding for upscaled images to handle large resolutions without running out of VRAM.
 * **Only Final Output Saved:** When upscaling is enabled, only the upscaled version is saved — the intermediate base image is automatically skipped, keeping your session clean.
@@ -1502,7 +1503,7 @@ After modifying backend Python files, restart ComfyUI. After modifying `web/` JS
 ## 📝 Changelog
 
 ### Update 3/9/26 — Upscaling, Workflow Packing & Config Builder Enhancements
-* 🔍 **Array-Based Upscaling System:** Define multiple upscale configs with Cartesian expansion across models, ratios, and denoise values. Three modes: hires_only, model_only, model_then_hires.
+* 🔍 **Array-Based Upscaling System:** Define multiple upscale configs with Cartesian expansion across models, ratios, and denoise values. Five modes: hires_only, model_only, model_then_hires, seedvr2, and florence2_hires (targeted region inpaint via Florence2 segmentation — needs ComfyUI-Florence2).
 * 🖼️ **Upscale Model Discovery:** Auto-detects installed upscale models (RealESRGAN, etc.) from ComfyUI's folder system with searchable dropdown.
 * 📦 **Pack Full Workflow into Exports:** Embed the entire ComfyUI graph into exported favorite images as PNG metadata — drag back into ComfyUI to restore.
 * 🔧 **Pack Config as Nodes Workflow:** Generate per-image pure-nodes workflows matching each image's exact generation parameters.
