@@ -327,15 +327,21 @@ _FH_LORA_LOADER = None
 
 def _resolve_loaders():
     """Lazy-import the real loaders. Only called from runtime path; tests
-    monkeypatch _FH_CKPT_LOADER / _FH_LORA_LOADER directly."""
+    monkeypatch _FH_CKPT_LOADER / _FH_LORA_LOADER directly.
+
+    Uses load_loras_for_preencoding (NOT load_loras) — its signature is
+    (base_model, base_clip, lora_string) and returns (model, clip), exactly
+    matching what we need. The full load_loras() requires target_model_name
+    and incompatible_loras dict tracking which is only meaningful when
+    iterating across multiple grid configs."""
     global _FH_CKPT_LOADER, _FH_LORA_LOADER
     if _FH_CKPT_LOADER is None or _FH_LORA_LOADER is None:
         try:
-            from .model_loader import load_checkpoint, load_loras
+            from .model_loader import load_checkpoint, load_loras_for_preencoding
         except ImportError:
-            from model_loader import load_checkpoint, load_loras
+            from model_loader import load_checkpoint, load_loras_for_preencoding
         _FH_CKPT_LOADER = _FH_CKPT_LOADER or load_checkpoint
-        _FH_LORA_LOADER = _FH_LORA_LOADER or load_loras
+        _FH_LORA_LOADER = _FH_LORA_LOADER or load_loras_for_preencoding
     return _FH_CKPT_LOADER, _FH_LORA_LOADER
 
 
@@ -559,21 +565,47 @@ def run_florence2_step(
         cache=ckpt_cache,
     )
 
-    # 9. Conditioning (reuse the upscale_runner's cache structure)
+    # 9. Conditioning. When the per-item clip is the SAME identity as the session's
+    #    clip (fallback_handles[1]), we can reuse the upscale_runner's conditioning
+    #    cache. When from_manifest loaded a DIFFERENT model, the per-item clip can
+    #    have a different architecture (e.g. SDXL 2048-dim vs SD1.5 768-dim); reusing
+    #    session-cached conditioning would feed wrong-shape tensors into cross-attn
+    #    and crash with "mat1 and mat2 shapes cannot be multiplied". So we maintain
+    #    a per-clip-identity conditioning cache inside ckpt_cache.
     try:
         from .batch_encoding import encode_prompt_with_combinators
     except ImportError:
         from batch_encoding import encode_prompt_with_combinators
-    if positive_prompt not in conditioning_cache["positive"]:
-        conditioning_cache["positive"][positive_prompt] = encode_prompt_with_combinators(
-            clip_handle, positive_prompt, clip_skip
-        )
-    if negative_prompt not in conditioning_cache["negative"]:
-        conditioning_cache["negative"][negative_prompt] = encode_prompt_with_combinators(
-            clip_handle, negative_prompt, clip_skip
-        )
-    pos_cond = conditioning_cache["positive"][positive_prompt]
-    neg_cond = conditioning_cache["negative"][negative_prompt]
+
+    session_clip = fallback_handles[1]
+    if clip_handle is session_clip:
+        # Same clip as session — reuse the upscale_runner's shared cache.
+        if positive_prompt not in conditioning_cache["positive"]:
+            conditioning_cache["positive"][positive_prompt] = encode_prompt_with_combinators(
+                clip_handle, positive_prompt, clip_skip
+            )
+        if negative_prompt not in conditioning_cache["negative"]:
+            conditioning_cache["negative"][negative_prompt] = encode_prompt_with_combinators(
+                clip_handle, negative_prompt, clip_skip
+            )
+        pos_cond = conditioning_cache["positive"][positive_prompt]
+        neg_cond = conditioning_cache["negative"][negative_prompt]
+    else:
+        # Different clip (per-manifest model) — use a per-clip-id cache inside
+        # ckpt_cache so multiple images with the same per-item model still share.
+        per_clip = ckpt_cache.setdefault("_cond_cache", {})
+        clip_id = id(clip_handle)
+        bucket = per_clip.setdefault(clip_id, {"positive": {}, "negative": {}})
+        if positive_prompt not in bucket["positive"]:
+            bucket["positive"][positive_prompt] = encode_prompt_with_combinators(
+                clip_handle, positive_prompt, clip_skip
+            )
+        if negative_prompt not in bucket["negative"]:
+            bucket["negative"][negative_prompt] = encode_prompt_with_combinators(
+                clip_handle, negative_prompt, clip_skip
+            )
+        pos_cond = bucket["positive"][positive_prompt]
+        neg_cond = bucket["negative"][negative_prompt]
 
     # 10. VAE encode -> generate_image (project's known-working sampling path)
     try:
