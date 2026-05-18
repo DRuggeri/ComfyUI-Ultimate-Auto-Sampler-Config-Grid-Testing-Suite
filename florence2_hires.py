@@ -487,9 +487,135 @@ def run_florence2_step(
         manifest_extras["duration"] = round(time.time() - t_start, 2)
         return manifest_extras
 
-    # 5+: full pipeline filled in by Task 9.
-    # For now return ok-with-empty so the test for no-detection passes.
+    # 5. GrowMask (core ComfyUI)
+    import nodes
+    grow_cls = nodes.NODE_CLASS_MAPPINGS.get("GrowMask")
+    if grow_cls is None:
+        raise RuntimeError("GrowMask node not available (core ComfyUI). Reinstall ComfyUI.")
+    grow_result = _call_node(
+        grow_cls,
+        mask=mask,
+        expand=int(step_config.get("grow_expand", 32)),
+        tapered_corners=True,
+    )
+    grown_mask = _unwrap(grow_result, 0)
+
+    # 6. Crop by mask (pure Python)
+    try:
+        cropped_img, cropped_mask, bbox = _crop_image_by_mask(
+            source_image,
+            grown_mask,
+            padding=int(step_config.get("crop_padding", 64)),
+            min_crop_resolution=int(step_config.get("min_crop_resolution", 256)),
+            max_crop_resolution=int(step_config.get("max_crop_resolution", 1536)),
+        )
+    except ValueError as e:
+        print(f"[Florence2HiResFix] Crop failed ({e}); skipping")
+        manifest_extras["status"] = "no_detection"
+        manifest_extras["florence2_detection_count"] = detection_count
+        manifest_extras["duration"] = round(time.time() - t_start, 2)
+        return manifest_extras
+    crop_w, crop_h = bbox[2], bbox[3]
+    if crop_w <= 1 or crop_h <= 1:
+        print(f"[Florence2HiResFix] Degenerate crop ({crop_w}x{crop_h}); skipping")
+        manifest_extras["status"] = "no_detection"
+        manifest_extras["florence2_detection_count"] = detection_count
+        manifest_extras["duration"] = round(time.time() - t_start, 2)
+        return manifest_extras
+
+    # 7. Megapixel resize (NHWC -> NCHW for common_upscale -> NHWC back)
+    import comfy.utils
+    target_w, target_h = compute_target_dims(
+        crop_w, crop_h, float(step_config.get("target_megapixels", 1.0))
+    )
+    cropped_nchw = cropped_img.movedim(-1, 1)
+    resized_nchw = comfy.utils.common_upscale(
+        cropped_nchw, target_w, target_h, "lanczos", "disabled"
+    )
+    resized_img = resized_nchw.movedim(1, -1)
+
+    # 8. Resolve checkpoint+lora handles for this item
+    model_handle, clip_handle, vae_handle = _get_or_load_checkpoint_lora(
+        item, fallback_handles,
+        model_source=step_config.get("model_source", "from_manifest"),
+        cache=ckpt_cache,
+    )
+
+    # 9. Conditioning (reuse the upscale_runner's cache structure)
+    from batch_encoding import encode_prompt_with_combinators
+    if positive_prompt not in conditioning_cache["positive"]:
+        conditioning_cache["positive"][positive_prompt] = encode_prompt_with_combinators(
+            clip_handle, positive_prompt, clip_skip
+        )
+    if negative_prompt not in conditioning_cache["negative"]:
+        conditioning_cache["negative"][negative_prompt] = encode_prompt_with_combinators(
+            clip_handle, negative_prompt, clip_skip
+        )
+    pos_cond = conditioning_cache["positive"][positive_prompt]
+    neg_cond = conditioning_cache["negative"][negative_prompt]
+
+    # 10. VAE encode -> generate_image (project's known-working sampling path)
+    from image_generation import generate_image, decode_latent_with_vae
+
+    encoded_latent = vae_handle.encode(resized_img[:, :, :, :3])
+    noise_seed = int(item.get("seed", 0)) + 1  # tiny offset so face pass != base seed exactly
+
+    hires_latent_dict, _ = generate_image(
+        patched_model=model_handle,
+        seed=noise_seed,
+        steps=int(step_config.get("hires_steps", 15)),
+        cfg=float(step_config.get("cfg", 1.5)),
+        sampler_name=step_config.get("sampler", "euler"),
+        scheduler=step_config.get("scheduler", "simple"),
+        positive_conditioning=pos_cond,
+        negative_conditioning=neg_cond,
+        latent_input={"samples": encoded_latent},
+        denoise=float(step_config.get("hires_denoise", 0.45)),
+        width=target_w,
+        height=target_h,
+    )
+    decoded_pil = decode_latent_with_vae(vae_handle, hires_latent_dict["samples"])
+
+    # Convert PIL back to tensor for paste-back
+    import numpy as np
+    import torch
+    decoded_arr = np.array(decoded_pil).astype(np.float32) / 255.0
+    decoded = torch.from_numpy(decoded_arr).unsqueeze(0)  # (1, H, W, 3)
+
+    # 11. Resize inpainted crop back to original crop size
+    decoded_nchw = decoded.movedim(-1, 1)
+    resized_back_nchw = comfy.utils.common_upscale(
+        decoded_nchw, crop_w, crop_h, "lanczos", "center"
+    )
+    resized_back = resized_back_nchw.movedim(1, -1)
+
+    # 12. FeatherMask (core ComfyUI)
+    feather_cls = nodes.NODE_CLASS_MAPPINGS.get("FeatherMask")
+    if feather_cls is None:
+        raise RuntimeError("FeatherMask node not available (core ComfyUI). Reinstall ComfyUI.")
+    feather_result = _call_node(
+        feather_cls,
+        mask=cropped_mask,
+        left=int(step_config.get("feather_left", 128)),
+        top=int(step_config.get("feather_top", 128)),
+        right=int(step_config.get("feather_right", 128)),
+        bottom=int(step_config.get("feather_bottom", 128)),
+    )
+    feathered = _unwrap(feather_result, 0)
+
+    # 13. Paste back into source
+    final_tensor = _paste_into_image(source_image, resized_back, feathered, bbox)
+
+    # 14. NHWC tensor -> PIL for upscale_runner save path
+    from PIL import Image as PILImage
+    arr = (final_tensor[0].clamp(0, 1) * 255.0).cpu().numpy().astype(np.uint8)
+    final_pil = PILImage.fromarray(arr, mode="RGB")
+
     manifest_extras["status"] = "ok"
     manifest_extras["florence2_detection_count"] = detection_count
+    manifest_extras["florence2_bbox"] = list(bbox)
+    manifest_extras["image_pil"] = final_pil
+    manifest_extras["image_width"] = final_pil.size[0]
+    manifest_extras["image_height"] = final_pil.size[1]
     manifest_extras["duration"] = round(time.time() - t_start, 2)
     return manifest_extras
