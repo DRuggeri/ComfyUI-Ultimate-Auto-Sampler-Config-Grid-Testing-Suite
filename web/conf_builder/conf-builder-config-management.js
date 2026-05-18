@@ -5387,6 +5387,26 @@ export function renderConfigPromptsSection(node, div, configArray, arrayIdx) {
 // UPSCALING SETTINGS (Session-level, pipeline-based with sequential steps)
 // ============================================================================
 
+// Default Florence2 Hi-Res Fix options
+function createDefaultFlorence2Options() {
+    return {
+        model: "microsoft/Florence-2-base",
+        text_input: "face",
+        output_mask_select: "",
+        target_megapixels: 1.0,
+        crop_padding: 64,
+        min_crop_resolution: 256,
+        max_crop_resolution: 1536,
+        grow_expand: 32,
+        feather_left: 128,
+        feather_top: 128,
+        feather_right: 128,
+        feather_bottom: 128,
+        model_source: "from_manifest",
+        on_no_detection: "skip"
+    };
+}
+
 // Default SeedVR2 options — matches SeedVR2 node defaults
 function createDefaultSeedVR2Options() {
     return {
@@ -5436,7 +5456,8 @@ function createDefaultStep() {
         hires_mask_blur: 8,
         hires_tile_padding: 32,
         hires_force_uniform_tiles: false,
-        seedvr2: createDefaultSeedVR2Options()
+        seedvr2: createDefaultSeedVR2Options(),
+        florence2: createDefaultFlorence2Options()
     };
 }
 
@@ -5456,6 +5477,7 @@ function ensureStepFields(step) {
     if (!step.hires_tile_padding) step.hires_tile_padding = 32;
     if (step.hires_force_uniform_tiles === undefined) step.hires_force_uniform_tiles = false;
     if (!step.seedvr2) step.seedvr2 = createDefaultSeedVR2Options();
+    if (!step.florence2) step.florence2 = createDefaultFlorence2Options();
 }
 
 export function renderUpscalingSection(node, container, modelLists) {
