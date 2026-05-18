@@ -619,3 +619,65 @@ def run_florence2_step(
     manifest_extras["image_height"] = final_pil.size[1]
     manifest_extras["duration"] = round(time.time() - t_start, 2)
     return manifest_extras
+
+
+def build_florence2_manifest_entry(
+    step_result, item, *, session_name, pipeline_name, upscale_id,
+    upscaled_filename, current_index, hires_denoise
+):
+    """Build the manifest entry dict for a successful Florence2 hi-res-fix.
+
+    Returns a dict ready to be `manifest_data["items"].insert(0, entry)`.
+    """
+    base = {
+        k: v for k, v in item.items()
+        if k not in ("id", "gen_index", "file", "filename", "upscaled",
+                     "width", "height", "duration",
+                     "upscale_source", "upscale_pipeline", "upscale_mode",
+                     "upscale_ratio", "upscale_denoise", "upscale_model")
+    }
+    base.update({
+        "id": upscale_id,
+        "gen_index": current_index,
+        "file": f"/view?filename={upscaled_filename}&type=output&subfolder=benchmarks/{session_name}/images",
+        "filename": upscaled_filename,
+        "width": step_result["image_width"],
+        "height": step_result["image_height"],
+        "duration": float(step_result.get("duration", 0)),
+        "upscaled": True,
+        "upscale_source": "dashboard",
+        "upscale_pipeline": pipeline_name,
+        "upscale_mode": "florence2_hires",
+        "florence2_model": step_result.get("florence2_model"),
+        "florence2_text_input": step_result.get("florence2_text_input"),
+        "florence2_target_megapixels": step_result.get("florence2_target_megapixels"),
+        "florence2_crop_padding": step_result.get("florence2_crop_padding"),
+        "florence2_grow_expand": step_result.get("florence2_grow_expand"),
+        "florence2_feather": step_result.get("florence2_feather"),
+        "florence2_output_mask_select": step_result.get("florence2_output_mask_select"),
+        "florence2_model_source": step_result.get("florence2_model_source"),
+        "florence2_detection_count": step_result.get("florence2_detection_count"),
+        "florence2_bbox": step_result.get("florence2_bbox"),
+        "hires_denoise": hires_denoise,
+    })
+    return base
+
+
+def build_florence2_no_detection_entry(step_result, item, *, sentinel_id, current_index):
+    """Build a sentinel manifest entry for a Florence2 no-detection result.
+
+    No new image file is written — the entry points back at the source filename
+    so the dashboard can render a "no detection" badge alongside the original.
+    """
+    text = step_result.get("florence2_text_input", "")
+    return {
+        "id": sentinel_id,
+        "gen_index": current_index,
+        "filename": item.get("filename", ""),
+        "file": item.get("file", ""),
+        "upscaled": False,
+        "florence2_no_detection": True,
+        "florence2_text_input": text,
+        "florence2_model": step_result.get("florence2_model", ""),
+        "note": f"Florence2 found no '{text}' in image",
+    }

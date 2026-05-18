@@ -313,6 +313,97 @@ def _run_upscale_thread(job, target_items, upscale_config, meta, manifest_data, 
                             pipe_h_current = up_h
                         continue  # Skip the normal combo loop
 
+                    # --- Florence2 Hi-Res Fix mode ---
+                    if mode == "florence2_hires":
+                        from .florence2_hires import (
+                            run_florence2_step, preflight_florence2,
+                            build_florence2_manifest_entry, build_florence2_no_detection_entry,
+                        )
+                        import numpy as _np
+
+                        # Preflight once per job (cached)
+                        if not job.get("_florence2_preflighted"):
+                            preflight_florence2()
+                            job["_florence2_preflighted"] = True
+
+                        # Merge top-level step sampling fields into a unified config dict.
+                        # hires_denoise on the step may be "0.45, 0.65" — Florence2 uses just one
+                        # value per pass; take the first.
+                        _hd = str(ucfg.get("hires_denoise", "0.45")).split(",")[0].strip() or "0.45"
+                        f2_config = {
+                            **(ucfg.get("florence2", {}) or {}),
+                            "hires_denoise": float(_hd),
+                            "hires_steps": int(ucfg.get("hires_steps", 15) or 15),
+                            "cfg": float(ucfg.get("cfg", 1.5) or 1.5),
+                            "sampler": ucfg.get("sampler", "euler"),
+                            "scheduler": ucfg.get("scheduler", "simple"),
+                        }
+
+                        # Source image: load fresh from disk as tensor (1, H, W, 3)
+                        src_pil = PILImage.open(os.path.join(images_dir, filename)).convert("RGB")
+                        src_arr = _np.array(src_pil).astype(_np.float32) / 255.0
+                        src_tensor = torch.from_numpy(src_arr).unsqueeze(0)
+
+                        # Per-job checkpoint+lora cache (lazy init)
+                        if "_florence2_ckpt_cache" not in job:
+                            job["_florence2_ckpt_cache"] = {}
+
+                        step_result = run_florence2_step(
+                            source_image=src_tensor,
+                            item=item,
+                            step_config=f2_config,
+                            fallback_handles=(patched_model, patched_clip, loaded_vae),
+                            ckpt_cache=job["_florence2_ckpt_cache"],
+                            conditioning_cache=conditioning_cache,
+                            positive_prompt=pos_prompt,
+                            negative_prompt=neg_prompt,
+                            clip_skip=clip_skip,
+                        )
+
+                        is_last_step = step_idx == len(expanded_steps) - 1
+
+                        if step_result.get("status") == "no_detection":
+                            sentinel_id = int(time.time() * 100000) + up_random.randint(0, 1000)
+                            entry = build_florence2_no_detection_entry(
+                                step_result, item,
+                                sentinel_id=sentinel_id,
+                                current_index=len(manifest_data["items"]),
+                            )
+                            manifest_data["items"].insert(0, entry)
+                            upscale_combo_idx += 1
+                            total_upscale_duration += float(step_result.get("duration", 0))
+                            continue
+
+                        total_upscale_duration += float(step_result.get("duration", 0))
+
+                        if is_last_step:
+                            upscale_id = int(time.time() * 100000) + up_random.randint(0, 1000)
+                            upscaled_filename = f"img_{upscale_id}_upscaled.{_ext}"
+                            _up_path = os.path.join(images_dir, upscaled_filename)
+                            result_pil = step_result["image_pil"]
+                            if _fmt == "png":
+                                result_pil.save(_up_path, format="PNG")
+                            elif _fmt in ("jpg", "jpeg"):
+                                result_pil.save(_up_path, format="JPEG", quality=95)
+                            else:
+                                result_pil.save(_up_path, format="WEBP", quality=95)
+
+                            entry = build_florence2_manifest_entry(
+                                step_result, item,
+                                session_name=session_name,
+                                pipeline_name=pipeline_name,
+                                upscale_id=upscale_id,
+                                upscaled_filename=upscaled_filename,
+                                current_index=len(manifest_data["items"]),
+                                hires_denoise=f2_config["hires_denoise"],
+                            )
+                            manifest_data["items"].insert(0, entry)
+                            upscale_combo_idx += 1
+                        else:
+                            pipe_w_current = step_result["image_width"]
+                            pipe_h_current = step_result["image_height"]
+                        continue  # Skip the normal combo loop
+
                     raw_ratios = str(ucfg.get("upscale_ratios", "1.5"))
                     ratios = [float(r.strip()) for r in raw_ratios.split(",") if r.strip()] or [1.5]
                     raw_denoise = str(ucfg.get("hires_denoise", "0.3"))
