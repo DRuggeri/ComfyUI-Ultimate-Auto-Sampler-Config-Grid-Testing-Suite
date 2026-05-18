@@ -491,6 +491,11 @@ def run_florence2_step(
 
     text_input = manifest_extras["florence2_text_input"]
     print(f"[Florence2HiResFix] Detecting '{text_input}' in image...")
+    # max_new_tokens=256 (was 1024): Florence2's KV cache scales linearly with
+    # sequence length × num_beams × hidden_dim × num_layers. For
+    # referring_expression_segmentation outputting a face polygon (~10-50 tokens),
+    # 1024 is wildly over-provisioned and wastes GiB of VRAM on dashboard batches
+    # where the session checkpoint is already loaded.
     det_result = _call_node(
         f2r_cls,
         image=source_image,
@@ -499,7 +504,7 @@ def run_florence2_step(
         task="referring_expression_segmentation",
         fill_mask=True,
         keep_model_loaded=True,
-        max_new_tokens=1024,
+        max_new_tokens=256,
         num_beams=3,
         do_sample=False,
         output_mask_select=step_config.get("output_mask_select", ""),
@@ -705,12 +710,21 @@ def run_florence2_step(
     manifest_extras["duration"] = round(time.time() - t_start, 2)
 
     # VRAM hygiene: release intermediate tensors before next item. The KSampler
-    # latents, VAE-decoded crops, and Florence2 beam-search buffers can fragment
-    # GPU memory across iterations. soft_empty_cache lets ComfyUI reclaim it.
-    # Skip in tests (mm import would pull comfy stack at module load).
+    # latents, VAE-decoded crops, and Florence2 beam-search KV cache buffers can
+    # fragment GPU memory across iterations. gc.collect() drops Python-side
+    # references; soft_empty_cache + torch.cuda.empty_cache let ComfyUI / PyTorch
+    # reclaim the freed memory. Skip in tests (mm import would pull comfy stack).
     try:
+        import gc as _gc
+        _gc.collect()
         import comfy.model_management as _mm
         _mm.soft_empty_cache()
+        try:
+            import torch as _torch
+            if _torch.cuda.is_available():
+                _torch.cuda.empty_cache()
+        except Exception:
+            pass
     except Exception:
         pass
 
