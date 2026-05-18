@@ -230,3 +230,51 @@ def _paste_into_image(destination, source, mask, bbox):
     blended = source * mask_3c + dest_slice * (1.0 - mask_3c)
     result[:, y0:y0 + bh, x0:x0 + bw, :] = blended
     return result
+
+
+# Required Florence2 node class names (looked up via nodes.NODE_CLASS_MAPPINGS)
+REQUIRED_FLORENCE2_NODE_NAMES = [
+    "Florence2Run",
+    "DownloadAndLoadFlorence2Model",
+]
+
+
+def get_florence2_node_classes():
+    """Look up Florence2 nodes in NODE_CLASS_MAPPINGS.
+
+    Returns:
+        Dict mapping node name to class.
+
+    Raises:
+        RuntimeError: any required node is missing.
+    """
+    import nodes
+    found = {}
+    missing = []
+    for name in REQUIRED_FLORENCE2_NODE_NAMES:
+        cls = nodes.NODE_CLASS_MAPPINGS.get(name)
+        if cls is None:
+            missing.append(name)
+        else:
+            found[name] = cls
+    if missing:
+        raise RuntimeError(
+            "Florence2 Hi-Res Fix requires the kijai/ComfyUI-Florence2 custom node.\n"
+            "Missing node(s): " + ", ".join(missing) + "\n\n"
+            "Install via ComfyUI Manager:\n"
+            "  search 'Florence-2' -> install -> restart Comfy\n\n"
+            "Or manually:\n"
+            "  cd ComfyUI/custom_nodes\n"
+            "  git clone https://github.com/kijai/ComfyUI-Florence2\n"
+            "  restart Comfy"
+        )
+    return found
+
+
+def preflight_florence2():
+    """Validate the Florence2 dependencies are installed.
+
+    Call ONCE per job before any image is processed. Raises with a clear
+    install hint if either required node is missing.
+    """
+    get_florence2_node_classes()
