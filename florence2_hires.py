@@ -278,3 +278,38 @@ def preflight_florence2():
     install hint if either required node is missing.
     """
     get_florence2_node_classes()
+
+
+# Module-level cache for Florence2 models. Keyed by model name string.
+# Cleared on Comfy restart; survives across jobs in the same session.
+_FLORENCE2_MODEL_CACHE = {}
+
+
+def load_florence2_model(model_name):
+    """Load a Florence2 model, caching by name across jobs.
+
+    Args:
+        model_name: HF Hub id, e.g. "microsoft/Florence-2-base"
+
+    Returns:
+        The loaded model handle (whatever the loader node returns at index 0).
+    """
+    if model_name in _FLORENCE2_MODEL_CACHE:
+        return _FLORENCE2_MODEL_CACHE[model_name]
+
+    from ltx_video_generation import _call_node, _unwrap
+
+    classes = get_florence2_node_classes()
+    loader_cls = classes["DownloadAndLoadFlorence2Model"]
+
+    print(f"[Florence2HiResFix] Loading {model_name}...")
+    result = _call_node(
+        loader_cls,
+        model=model_name,
+        precision="fp16",
+        attention="sdpa",
+        convert_to_safetensors=False,
+    )
+    handle = _unwrap(result, 0)
+    _FLORENCE2_MODEL_CACHE[model_name] = handle
+    return handle
