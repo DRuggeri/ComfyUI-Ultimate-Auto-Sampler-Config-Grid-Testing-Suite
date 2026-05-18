@@ -62,3 +62,52 @@ def compute_target_dims(src_w, src_h, target_megapixels):
     new_w = max(64, min(4096, int(round(src_w * scale)) // 8 * 8))
     new_h = max(64, min(4096, int(round(src_h * scale)) // 8 * 8))
     return new_w, new_h
+
+
+def parse_mask_select_indices(user_input, detected_count):
+    """Parse user's output_mask_select string against detected region count.
+
+    Args:
+        user_input: string from UI; "" = use all, "0" = first, "0,2" = specific indices.
+        detected_count: how many regions Florence2 actually returned.
+
+    Returns:
+        Tuple (indices: list[int], mode: str) where mode is one of:
+        - "all": use all detected regions (caller should union)
+        - "select": use the listed indices
+        - "no_detection": no valid selection possible (caller should treat as miss)
+    """
+    if detected_count <= 0:
+        return [], "no_detection"
+
+    stripped = (user_input or "").strip()
+    if not stripped:
+        return [], "all"
+
+    raw_tokens = [t.strip() for t in stripped.split(",") if t.strip()]
+    if not raw_tokens:
+        return [], "all"
+
+    parsed = []
+    for tok in raw_tokens:
+        try:
+            n = int(tok)
+        except ValueError:
+            return [], "no_detection"
+        if n < 0:
+            return [], "no_detection"
+        if n < detected_count:
+            parsed.append(n)
+        # OOR indices silently dropped
+
+    if not parsed:
+        return [], "no_detection"
+
+    # Stable dedupe preserving order
+    seen = set()
+    out = []
+    for n in parsed:
+        if n not in seen:
+            seen.add(n)
+            out.append(n)
+    return out, "select"
