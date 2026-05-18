@@ -5938,6 +5938,7 @@ export function renderUpscalingSection(node, container, modelLists) {
                     <option value="model_only" ${ucfg.mode === "model_only" ? 'selected' : ''}>Model Upscale Only</option>
                     <option value="model_then_hires" ${ucfg.mode === "model_then_hires" ? 'selected' : ''}>Model Upscale \u2192 HiRes Fix</option>
                     <option value="seedvr2" ${ucfg.mode === "seedvr2" ? 'selected' : ''}>SeedVR2 Upscale</option>
+                    <option value="florence2_hires" ${ucfg.mode === "florence2_hires" ? 'selected' : ''}>Florence2 Hi-Res Fix</option>
                 `;
                 modeSelect.onchange = () => {
                     ucfg.mode = modeSelect.value;
@@ -5956,9 +5957,10 @@ export function renderUpscalingSection(node, container, modelLists) {
                 resizeSelect.onchange = () => { ucfg.resize_method = resizeSelect.value; node.saveState(); };
                 grid.appendChild(createInputGroup("Resize Method", resizeSelect));
 
-                const showHires = ucfg.mode === "hires_only" || ucfg.mode === "model_then_hires";
+                const showHires = ucfg.mode === "hires_only" || ucfg.mode === "model_then_hires" || ucfg.mode === "florence2_hires";
                 const showModel = ucfg.mode === "model_only" || ucfg.mode === "model_then_hires";
                 const showSeedVR2 = ucfg.mode === "seedvr2";
+                const showFlorence2 = ucfg.mode === "florence2_hires";
 
                 // --- HiRes fields (multi-value: ratios, denoise) ---
                 if (showHires) {
@@ -6362,6 +6364,126 @@ export function renderUpscalingSection(node, container, modelLists) {
                     grid.appendChild(createInputGroup("Cache VAE Model", vaeCacheCb));
                 }
 
+                // --- Florence2 Hi-Res Fix sub-panel ---
+                if (showFlorence2) {
+                    if (!ucfg.florence2) ucfg.florence2 = createDefaultFlorence2Options();
+                    const f2 = ucfg.florence2;
+
+                    // --- Group A: Florence2 detection ---
+                    const f2ModelSelect = document.createElement("select");
+                    f2ModelSelect.className = "cb-select";
+                    f2ModelSelect.title = "Florence2 model for segmentation. base/large work for referring_expression_segmentation; ft variants slightly worse.";
+                    [
+                        "microsoft/Florence-2-base",
+                        "microsoft/Florence-2-base-ft",
+                        "microsoft/Florence-2-large",
+                        "microsoft/Florence-2-large-ft",
+                    ].forEach(name => {
+                        const opt = document.createElement("option");
+                        opt.value = name; opt.textContent = name;
+                        if (f2.model === name) opt.selected = true;
+                        f2ModelSelect.appendChild(opt);
+                    });
+                    f2ModelSelect.onchange = () => { f2.model = f2ModelSelect.value; node.saveState(); };
+                    grid.appendChild(createInputGroup("Florence2 Model", f2ModelSelect));
+
+                    const f2TextInput = document.createElement("input");
+                    f2TextInput.type = "text"; f2TextInput.className = "cb-input";
+                    f2TextInput.value = f2.text_input || "face";
+                    f2TextInput.placeholder = "face, head, hands, eyes...";
+                    f2TextInput.title = "What to detect. Try: face, head, hands, eyes, person, clothing.";
+                    f2TextInput.onchange = () => { f2.text_input = f2TextInput.value; node.saveState(); };
+                    grid.appendChild(createInputGroup("Detect What?", f2TextInput));
+
+                    const f2MaskSelInput = document.createElement("input");
+                    f2MaskSelInput.type = "text"; f2MaskSelInput.className = "cb-input";
+                    f2MaskSelInput.value = f2.output_mask_select || "";
+                    f2MaskSelInput.placeholder = '(empty = all)';
+                    f2MaskSelInput.title = "Empty = all detections. '0' = primary/largest. '0,2' = pick specific indices.";
+                    f2MaskSelInput.onchange = () => { f2.output_mask_select = f2MaskSelInput.value; node.saveState(); };
+                    grid.appendChild(createInputGroup("Output Mask Select", f2MaskSelInput));
+
+                    // --- Group B: Crop & resize ---
+                    const f2MpInput = document.createElement("input");
+                    f2MpInput.type = "number"; f2MpInput.className = "cb-input";
+                    f2MpInput.value = f2.target_megapixels ?? 1.0;
+                    f2MpInput.min = 0.25; f2MpInput.max = 4.0; f2MpInput.step = 0.25;
+                    f2MpInput.title = "Resize cropped region to this many megapixels before the hi-res pass. 1.0 ≈ 1024×1024.";
+                    f2MpInput.onchange = () => { f2.target_megapixels = parseFloat(f2MpInput.value); node.saveState(); };
+                    grid.appendChild(createInputGroup("Hi-Res Target (MP)", f2MpInput));
+
+                    const f2PadInput = document.createElement("input");
+                    f2PadInput.type = "number"; f2PadInput.className = "cb-input";
+                    f2PadInput.value = f2.crop_padding ?? 64;
+                    f2PadInput.min = 0; f2PadInput.max = 256; f2PadInput.step = 8;
+                    f2PadInput.title = "Padding around detected polygon. Higher = more blending context.";
+                    f2PadInput.onchange = () => { f2.crop_padding = parseInt(f2PadInput.value, 10); node.saveState(); };
+                    grid.appendChild(createInputGroup("Crop Padding (px)", f2PadInput));
+
+                    const f2MinCropInput = document.createElement("input");
+                    f2MinCropInput.type = "number"; f2MinCropInput.className = "cb-input";
+                    f2MinCropInput.value = f2.min_crop_resolution ?? 256;
+                    f2MinCropInput.min = 64; f2MinCropInput.max = 4096; f2MinCropInput.step = 8;
+                    f2MinCropInput.title = "Floor for crop size — prevents tiny inpaints.";
+                    f2MinCropInput.onchange = () => { f2.min_crop_resolution = parseInt(f2MinCropInput.value, 10); node.saveState(); };
+                    grid.appendChild(createInputGroup("Min Crop Res (px)", f2MinCropInput));
+
+                    const f2MaxCropInput = document.createElement("input");
+                    f2MaxCropInput.type = "number"; f2MaxCropInput.className = "cb-input";
+                    f2MaxCropInput.value = f2.max_crop_resolution ?? 1536;
+                    f2MaxCropInput.min = 64; f2MaxCropInput.max = 4096; f2MaxCropInput.step = 8;
+                    f2MaxCropInput.title = "Ceiling for crop size — prevents OOM on full-frame detections.";
+                    f2MaxCropInput.onchange = () => { f2.max_crop_resolution = parseInt(f2MaxCropInput.value, 10); node.saveState(); };
+                    grid.appendChild(createInputGroup("Max Crop Res (px)", f2MaxCropInput));
+
+                    // --- Group C: Mask shaping ---
+                    const f2GrowInput = document.createElement("input");
+                    f2GrowInput.type = "number"; f2GrowInput.className = "cb-input";
+                    f2GrowInput.value = f2.grow_expand ?? 32;
+                    f2GrowInput.min = -64; f2GrowInput.max = 256; f2GrowInput.step = 1;
+                    f2GrowInput.title = "GrowMask expand. Negative shrinks. Adds pixels to polygon edges.";
+                    f2GrowInput.onchange = () => { f2.grow_expand = parseInt(f2GrowInput.value, 10); node.saveState(); };
+                    grid.appendChild(createInputGroup("Grow Mask (px)", f2GrowInput));
+
+                    ["left", "top", "right", "bottom"].forEach(side => {
+                        const inp = document.createElement("input");
+                        inp.type = "number"; inp.className = "cb-input";
+                        const key = `feather_${side}`;
+                        inp.value = f2[key] ?? 128;
+                        inp.min = 0; inp.max = 256; inp.step = 1;
+                        inp.title = `FeatherMask ${side}-side alpha falloff in pixels.`;
+                        inp.onchange = () => { f2[key] = parseInt(inp.value, 10); node.saveState(); };
+                        grid.appendChild(createInputGroup(`Feather ${side.charAt(0).toUpperCase() + side.slice(1)} (px)`, inp));
+                    });
+
+                    // --- Group E: Model/LoRA source ---
+                    const f2SourceSelect = document.createElement("select");
+                    f2SourceSelect.className = "cb-select";
+                    f2SourceSelect.title = "'From manifest' uses each image's original model/LoRA. 'From this Builder config' uses the same model the upscale session loaded.";
+                    [
+                        ["from_manifest", "From manifest (per-image)"],
+                        ["from_builder", "From this Builder config"],
+                    ].forEach(([val, lbl]) => {
+                        const opt = document.createElement("option");
+                        opt.value = val; opt.textContent = lbl;
+                        if (f2.model_source === val) opt.selected = true;
+                        f2SourceSelect.appendChild(opt);
+                    });
+                    f2SourceSelect.onchange = () => { f2.model_source = f2SourceSelect.value; node.saveState(); };
+                    grid.appendChild(createInputGroup("Model/LoRA Source", f2SourceSelect));
+
+                    // --- Group F: No-detection ---
+                    const f2NoDetSelect = document.createElement("select");
+                    f2NoDetSelect.className = "cb-select";
+                    f2NoDetSelect.title = "What to do when Florence2 finds nothing in the image.";
+                    const optSkip = document.createElement("option");
+                    optSkip.value = "skip"; optSkip.textContent = "Skip + log";
+                    if ((f2.on_no_detection || "skip") === "skip") optSkip.selected = true;
+                    f2NoDetSelect.appendChild(optSkip);
+                    f2NoDetSelect.onchange = () => { f2.on_no_detection = f2NoDetSelect.value; node.saveState(); };
+                    grid.appendChild(createInputGroup("If No Detection", f2NoDetSelect));
+                }
+
                 card.appendChild(grid);
 
                 // Iteration count for this step
@@ -6372,6 +6494,7 @@ export function renderUpscalingSection(node, container, modelLists) {
                 const models = Math.max(1, (ucfg.upscale_models || []).length);
                 let combos = 1;
                 if (showSeedVR2) combos = 1; // SeedVR2 = 1 output per input
+                else if (showFlorence2) combos = 1; // Florence2 = 1 output per input (uses hires_denoise as a single value, not array)
                 else if (showHires) combos *= ratios * denoises;
                 if (showModel) combos *= models;
                 const repeatCount = ucfg.repeat || 1;
