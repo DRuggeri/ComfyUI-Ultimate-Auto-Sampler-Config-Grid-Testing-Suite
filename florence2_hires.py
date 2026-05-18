@@ -111,3 +111,92 @@ def parse_mask_select_indices(user_input, detected_count):
             seen.add(n)
             out.append(n)
     return out, "select"
+
+
+def _crop_image_by_mask(image, mask, padding, min_crop_resolution, max_crop_resolution):
+    """Crop image to the bbox of a mask, with padding and min/max constraints.
+
+    Args:
+        image: torch tensor (B, H, W, C) float32 in [0,1]
+        mask: torch tensor (B, H, W) float32 in [0,1]
+        padding: int, pixels to expand bbox each side before clamping
+        min_crop_resolution: int, minimum bbox dim — expands bbox if smaller
+        max_crop_resolution: int, maximum bbox dim — shrinks bbox if larger
+
+    Returns:
+        Tuple (cropped_image, cropped_mask, bbox) where bbox = (x0, y0, w, h).
+
+    Raises:
+        ValueError: mask is empty (sum == 0).
+    """
+    import torch
+
+    # Caller is responsible for no-detection check; this is defense-in-depth.
+    if mask.sum() <= 0:
+        raise ValueError("Mask is empty — cannot compute bbox")
+
+    # Find tight bbox via nonzero indices on a 2D view of the first batch.
+    # Mask is (B, H, W); we use batch 0 (Florence2Run returns single-batch).
+    m2d = mask[0]  # (H, W)
+    img_h, img_w = m2d.shape
+
+    nz = torch.nonzero(m2d > 0.5)  # (N, 2) = (y, x)
+    if nz.numel() == 0:
+        raise ValueError("Mask is empty after thresholding")
+
+    y_min = int(nz[:, 0].min().item())
+    y_max = int(nz[:, 0].max().item())
+    x_min = int(nz[:, 1].min().item())
+    x_max = int(nz[:, 1].max().item())
+
+    # Apply padding
+    x0 = max(0, x_min - padding)
+    y0 = max(0, y_min - padding)
+    x1 = min(img_w, x_max + 1 + padding)
+    y1 = min(img_h, y_max + 1 + padding)
+
+    bw = x1 - x0
+    bh = y1 - y0
+
+    # Apply min_crop_resolution by expanding around center, clamping to image bounds.
+    if bw < min_crop_resolution:
+        cx = (x0 + x1) // 2
+        half = min_crop_resolution // 2
+        x0 = max(0, cx - half)
+        x1 = min(img_w, x0 + min_crop_resolution)
+        x0 = max(0, x1 - min_crop_resolution)  # second pass in case clamp shifted
+        bw = x1 - x0
+    if bh < min_crop_resolution:
+        cy = (y0 + y1) // 2
+        half = min_crop_resolution // 2
+        y0 = max(0, cy - half)
+        y1 = min(img_h, y0 + min_crop_resolution)
+        y0 = max(0, y1 - min_crop_resolution)
+        bh = y1 - y0
+
+    # Apply max_crop_resolution by contracting around center.
+    if bw > max_crop_resolution:
+        cx = (x0 + x1) // 2
+        half = max_crop_resolution // 2
+        x0 = cx - half
+        x1 = x0 + max_crop_resolution
+        bw = x1 - x0
+    if bh > max_crop_resolution:
+        cy = (y0 + y1) // 2
+        half = max_crop_resolution // 2
+        y0 = cy - half
+        y1 = y0 + max_crop_resolution
+        bh = y1 - y0
+
+    # Final clamp to image (in case max shrinking pushed us off-bounds)
+    x0 = max(0, x0)
+    y0 = max(0, y0)
+    x1 = min(img_w, x1)
+    y1 = min(img_h, y1)
+    bw = x1 - x0
+    bh = y1 - y0
+
+    cropped_image = image[:, y0:y1, x0:x1, :].contiguous()
+    cropped_mask = mask[:, y0:y1, x0:x1].contiguous()
+    bbox = (x0, y0, bw, bh)
+    return cropped_image, cropped_mask, bbox

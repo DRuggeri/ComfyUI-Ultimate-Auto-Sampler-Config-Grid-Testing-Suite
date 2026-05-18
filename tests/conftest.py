@@ -9,6 +9,13 @@ import sys
 import types
 import os
 
+# Try to import real torch first — some tests (crop/paste, integration) need it.
+# If torch isn't installed in the active Python, fall through to the stub loop below.
+try:
+    import torch  # noqa: F401 — surfacing real torch into sys.modules
+except ImportError:
+    pass
+
 # ── Stub out ComfyUI-only modules before any test or __init__.py import ──────
 _COMFY_STUBS = [
     "server",

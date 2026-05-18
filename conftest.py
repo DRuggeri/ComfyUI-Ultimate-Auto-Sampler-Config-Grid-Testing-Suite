@@ -22,6 +22,14 @@ _PKG_NAME = os.path.basename(_NODE_ROOT)  # "ComfyUI-Ultimate-Auto-Sampler-Confi
 def _install_stubs():
     """Install all stubs needed to import the package __init__.py cleanly."""
 
+    # Try real torch first — tests that use torch tensors (crop/paste, integration)
+    # need it. If real torch isn't installed, the stub-if-missing logic below leaves
+    # the stub in place and those tests will skip or fail with a clear error.
+    try:
+        import torch  # noqa: F401
+    except ImportError:
+        pass
+
     # 1. External deps
     for name in [
         "torch", "torchvision", "torchaudio",
