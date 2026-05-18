@@ -5393,6 +5393,7 @@ function createDefaultFlorence2Options() {
         model: "microsoft/Florence-2-base",
         text_input: "face",
         output_mask_select: "",
+        max_new_tokens: 256,
         target_megapixels: 1.0,
         crop_padding: 64,
         min_crop_resolution: 0,        // No floor — Florence2's polygon decides
@@ -6410,6 +6411,14 @@ export function renderUpscalingSection(node, container, modelLists) {
                     f2MaskSelInput.title = "Empty = all detections. '0' = primary/largest. '0,2' = pick specific indices.";
                     f2MaskSelInput.onchange = () => { f2.output_mask_select = f2MaskSelInput.value; node.saveState(); };
                     grid.appendChild(createInputGroup("Output Mask Select", f2MaskSelInput));
+
+                    const f2MaxTokInput = document.createElement("input");
+                    f2MaxTokInput.type = "number"; f2MaxTokInput.className = "cb-input";
+                    f2MaxTokInput.value = f2.max_new_tokens ?? 256;
+                    f2MaxTokInput.min = 32; f2MaxTokInput.max = 2048; f2MaxTokInput.step = 32;
+                    f2MaxTokInput.title = "Florence2 beam-search budget. ~50 tokens needed for a face polygon, 256 leaves 5x headroom. Higher = more VRAM (KV cache scales linearly). Bump if you see truncated polygons on complex scenes.";
+                    f2MaxTokInput.onchange = () => { f2.max_new_tokens = parseInt(f2MaxTokInput.value, 10); node.saveState(); };
+                    grid.appendChild(createInputGroup("Max New Tokens", f2MaxTokInput));
 
                     // --- Group B: Crop & resize ---
                     const f2MpInput = document.createElement("input");

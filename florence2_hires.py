@@ -490,16 +490,17 @@ def run_florence2_step(
     f2r_cls = classes["Florence2Run"]
 
     text_input = manifest_extras["florence2_text_input"]
-    print(f"[Florence2HiResFix] Detecting '{text_input}' in image...")
-    # max_new_tokens=256 (was 1024): Florence2's KV cache scales linearly with
-    # sequence length × num_beams × hidden_dim × num_layers. For
-    # referring_expression_segmentation outputting a face polygon (~10-50 tokens),
-    # 1024 is wildly over-provisioned.
-    # keep_model_loaded=False (was True): Florence2 model is moved back to CPU after
-    # each detection. The Python handle in _FLORENCE2_MODEL_CACHE still works (next
-    # call moves it back to GPU automatically, ~1-2s). The win: Florence2 doesn't
-    # compete with KSampler or the session checkpoint for VRAM during the inpaint
-    # stage. Worth a small per-image latency to avoid OOM on 8 GiB cards.
+    # max_new_tokens default 256 (kijai default is 1024): controls Florence2's KV cache
+    # size, which scales as max_new_tokens × num_beams × hidden_dim × num_layers.
+    # For referring_expression_segmentation outputting a face polygon (~10-50 tokens),
+    # 256 leaves 5x headroom for complex multi-face scenes while cutting the cache 4x.
+    # User can bump higher in the UI if they're hitting truncation on complex polygons.
+    # keep_model_loaded=False: Florence2 moves to CPU after each detection. The Python
+    # handle in _FLORENCE2_MODEL_CACHE still works (next call moves it back to GPU,
+    # ~1-2s). Florence2 stops competing with KSampler / session checkpoint for VRAM.
+    max_new_tokens = int(step_config.get("max_new_tokens", 256) or 256)
+    manifest_extras["florence2_max_new_tokens"] = max_new_tokens
+    print(f"[Florence2HiResFix] Detecting '{text_input}' in image... (max_new_tokens={max_new_tokens})")
     det_result = _call_node(
         f2r_cls,
         image=source_image,
@@ -508,7 +509,7 @@ def run_florence2_step(
         task="referring_expression_segmentation",
         fill_mask=True,
         keep_model_loaded=False,
-        max_new_tokens=256,
+        max_new_tokens=max_new_tokens,
         num_beams=3,
         do_sample=False,
         output_mask_select=step_config.get("output_mask_select", ""),
