@@ -1872,6 +1872,138 @@ def run_generation_loop(
                             show_hires = mode in ("hires_only", "model_then_hires")
                             show_model = mode in ("model_only", "model_then_hires")
 
+                            # --- Florence2 Hi-Res Fix mode (inline path) ---
+                            if mode == "florence2_hires":
+                                from .florence2_hires import (
+                                    run_florence2_step, preflight_florence2,
+                                    build_florence2_manifest_entry, build_florence2_no_detection_entry,
+                                )
+                                from PIL import Image as PILImage
+                                import numpy as _np
+                                import torch as _torch
+
+                                # Preflight once per job (cached on the job object via closure proxy —
+                                # use a module-global guard since `job` doesn't exist in this scope)
+                                global _FLORENCE2_INLINE_PREFLIGHTED
+                                if not globals().get("_FLORENCE2_INLINE_PREFLIGHTED", False):
+                                    preflight_florence2()
+                                    _FLORENCE2_INLINE_PREFLIGHTED = True
+
+                                # Decode current latent to PIL for Florence2 input
+                                src_pil = decode_latent_with_vae(loaded_vae, pipe_latent["samples"])
+                                src_arr = _np.array(src_pil.convert("RGB")).astype(_np.float32) / 255.0
+                                src_tensor = _torch.from_numpy(src_arr).unsqueeze(0)
+
+                                # Build the unified step config — merge step.florence2 sub-object
+                                # with top-level sampling fields from the step.
+                                _hd = str(ucfg.get("hires_denoise", "0.45")).split(",")[0].strip() or "0.45"
+                                f2_config = {
+                                    **(ucfg.get("florence2", {}) or {}),
+                                    "hires_denoise": float(_hd),
+                                    "hires_steps": int(ucfg.get("hires_steps", 15) or 15),
+                                    "cfg": float(ucfg.get("cfg", 1.5) or 1.5),
+                                    "sampler": ucfg.get("sampler", "euler"),
+                                    "scheduler": ucfg.get("scheduler", "simple"),
+                                    # In inline mode the model+lora are already loaded for this
+                                    # job — forcing from_builder avoids a redundant reload that
+                                    # from_manifest would trigger.
+                                    "model_source": "from_builder",
+                                }
+
+                                # Minimal item dict for run_florence2_step's manifest-extras path
+                                item_for_florence2 = {
+                                    "model": conf.get("model", ""),
+                                    "lora_expanded": conf.get("loras_expanded", ""),
+                                    "seed": current_seed,
+                                }
+
+                                step_result = run_florence2_step(
+                                    source_image=src_tensor,
+                                    item=item_for_florence2,
+                                    step_config=f2_config,
+                                    fallback_handles=(patched_model, patched_clip, loaded_vae),
+                                    ckpt_cache={},  # no caching needed; from_builder uses fallback
+                                    conditioning_cache=conditioning_cache,
+                                    positive_prompt=actual_positive_prompt,
+                                    negative_prompt=actual_negative_prompt,
+                                    clip_skip=conf.get("clip_skip", 0),
+                                )
+
+                                is_last_step = step_idx == len(expanded_steps) - 1
+                                is_final_output = is_last_step
+
+                                if step_result.get("status") == "no_detection":
+                                    if is_final_output:
+                                        # Append sentinel entry pointing back at the base image
+                                        sentinel_id = int(time.time() * 100000) + random.randint(0, 1000)
+                                        sentinel_meta = dict(meta)
+                                        sentinel_meta.update({
+                                            "id": sentinel_id,
+                                            "gen_index": len(existing_data["items"]),
+                                            "upscaled": False,
+                                            "florence2_no_detection": True,
+                                            "florence2_text_input": step_result.get("florence2_text_input", ""),
+                                            "florence2_model": step_result.get("florence2_model", ""),
+                                            "note": f"Florence2 found no '{step_result.get('florence2_text_input', '')}' in image",
+                                        })
+                                        existing_data["items"].append(sentinel_meta)
+                                        save_manifest(paths["manifest"], existing_data)
+                                        upscale_combo_idx += 1
+                                    continue  # skip the normal combo loop
+
+                                total_upscale_duration += float(step_result.get("duration", 0))
+
+                                if is_final_output:
+                                    # Save the Florence2-fixed image and update manifest
+                                    upscale_id = int(time.time() * 100000) + random.randint(0, 1000)
+                                    upscaled_filename = f"img_{upscale_id}.webp"
+                                    filepath = os.path.join(paths["images"], upscaled_filename)
+                                    step_result["image_pil"].save(filepath, format="WEBP", quality=95)
+
+                                    upscaled_meta = dict(meta)
+                                    upscaled_meta.update({
+                                        "id": upscale_id,
+                                        "gen_index": len(existing_data["items"]),
+                                        "file": f"/view?filename={upscaled_filename}&type=output&subfolder=benchmarks/{session_name}/images",
+                                        "filename": upscaled_filename,
+                                        "width": step_result["image_width"],
+                                        "height": step_result["image_height"],
+                                        "duration": float(step_result.get("duration", 0)),
+                                        "upscaled": True,
+                                        "upscale_source": "inline",
+                                        "upscale_pipeline": pipeline_name,
+                                        "upscale_mode": "florence2_hires",
+                                        "florence2_model": step_result.get("florence2_model"),
+                                        "florence2_text_input": step_result.get("florence2_text_input"),
+                                        "florence2_target_megapixels": step_result.get("florence2_target_megapixels"),
+                                        "florence2_crop_padding": step_result.get("florence2_crop_padding"),
+                                        "florence2_grow_expand": step_result.get("florence2_grow_expand"),
+                                        "florence2_feather": step_result.get("florence2_feather"),
+                                        "florence2_output_mask_select": step_result.get("florence2_output_mask_select"),
+                                        "florence2_detection_count": step_result.get("florence2_detection_count"),
+                                        "florence2_bbox": step_result.get("florence2_bbox"),
+                                        "hires_denoise": f2_config["hires_denoise"],
+                                    })
+                                    existing_data["items"].append(upscaled_meta)
+                                    save_manifest(paths["manifest"], existing_data)
+                                    if PromptServer is not None:
+                                        try:
+                                            PromptServer.instance.send_sync("ultimate_grid.update_data", {
+                                                "session_name": session_name,
+                                                "new_items": [upscaled_meta]
+                                            })
+                                        except Exception:
+                                            pass
+                                    upscale_combo_idx += 1
+                                else:
+                                    # Chained — re-encode result_pil for next step's pipe_latent
+                                    _next_arr = _np.array(step_result["image_pil"].convert("RGB")).astype(_np.float32) / 255.0
+                                    _next_tensor = _torch.from_numpy(_next_arr).unsqueeze(0)
+                                    pipe_latent = {"samples": loaded_vae.encode(_next_tensor[:, :, :, :3])}
+                                    pipe_w = step_result["image_width"]
+                                    pipe_h = step_result["image_height"]
+                                continue  # Skip the normal combo loop for this step
+
                             # --- SeedVR2 upscale mode ---
                             if mode == "seedvr2":
                                 from .image_generation import seedvr2_upscale
