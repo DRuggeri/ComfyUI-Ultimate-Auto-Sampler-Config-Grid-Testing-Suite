@@ -200,3 +200,33 @@ def _crop_image_by_mask(image, mask, padding, min_crop_resolution, max_crop_reso
     cropped_mask = mask[:, y0:y1, x0:x1].contiguous()
     bbox = (x0, y0, bw, bh)
     return cropped_image, cropped_mask, bbox
+
+
+def _paste_into_image(destination, source, mask, bbox):
+    """Paste a cropped image back into the destination using mask for alpha blending.
+
+    Args:
+        destination: torch tensor (B, H, W, C) — the full original image to paste into
+        source: torch tensor (B, h, w, C) — the cropped (and resized) image to paste
+        mask: torch tensor (B, h, w) — alpha mask for the source (0..1)
+        bbox: tuple (x0, y0, w, h) — where in destination to paste
+
+    Returns:
+        New torch tensor (B, H, W, C) with the blended result.
+    """
+    x0, y0, bw, bh = bbox
+    src_h, src_w = source.shape[1], source.shape[2]
+
+    # If source dims don't match bbox (caller error), use source dims
+    if src_h != bh or src_w != bw:
+        bh = src_h
+        bw = src_w
+
+    result = destination.clone()
+    # Broadcast (B, h, w) mask to (B, h, w, C)
+    mask_3c = mask.unsqueeze(-1).expand(-1, -1, -1, source.shape[-1])
+
+    dest_slice = destination[:, y0:y0 + bh, x0:x0 + bw, :]
+    blended = source * mask_3c + dest_slice * (1.0 - mask_3c)
+    result[:, y0:y0 + bh, x0:x0 + bw, :] = blended
+    return result

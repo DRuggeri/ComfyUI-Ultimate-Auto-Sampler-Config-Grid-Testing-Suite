@@ -92,3 +92,53 @@ def test_empty_mask_raises():
     mask = torch.zeros((1, 512, 512), dtype=torch.float32)
     with pytest.raises(ValueError):
         _crop_image_by_mask(img, mask, padding=0, min_crop_resolution=0, max_crop_resolution=99999)
+
+
+from florence2_hires import _paste_into_image
+
+
+def test_paste_with_full_mask_replaces_region():
+    """Paste with mask all-1.0 -> cropped region is fully replaced."""
+    dest = _make_image(512, 512)
+    src = torch.ones((1, 100, 100, 3), dtype=torch.float32)  # all-white 100x100
+    mask = torch.ones((1, 100, 100), dtype=torch.float32)
+    bbox = (206, 206, 100, 100)
+    result = _paste_into_image(dest, src, mask, bbox)
+    # Inside bbox: all 1.0
+    assert torch.allclose(result[0, 206:306, 206:306, :], src[0])
+    # Outside bbox: unchanged
+    assert torch.allclose(result[0, 0:100, 0:100, :], dest[0, 0:100, 0:100, :])
+
+
+def test_paste_with_zero_mask_leaves_dest_unchanged():
+    dest = _make_image(512, 512).clone()
+    src = torch.ones((1, 100, 100, 3), dtype=torch.float32)
+    mask = torch.zeros((1, 100, 100), dtype=torch.float32)
+    bbox = (206, 206, 100, 100)
+    result = _paste_into_image(dest, src, mask, bbox)
+    assert torch.allclose(result, dest)
+
+
+def test_paste_with_half_mask_blends():
+    """Mask of 0.5 -> 50/50 blend of src and dest."""
+    dest = torch.zeros((1, 512, 512, 3), dtype=torch.float32)
+    src = torch.ones((1, 100, 100, 3), dtype=torch.float32)
+    mask = torch.full((1, 100, 100), 0.5, dtype=torch.float32)
+    bbox = (200, 200, 100, 100)
+    result = _paste_into_image(dest, src, mask, bbox)
+    # Inside bbox: should be 0.5
+    assert torch.allclose(result[0, 200:300, 200:300, :], torch.full((100, 100, 3), 0.5))
+
+
+def test_round_trip_crop_then_paste_with_identity_is_lossless():
+    """Crop a region with identity mask, paste back identical -> exact match."""
+    img = _make_image(512, 512)
+    mask = torch.zeros((1, 512, 512), dtype=torch.float32)
+    mask[0, 100:200, 150:250] = 1.0
+    cropped_img, cropped_mask, bbox = _crop_image_by_mask(
+        img, mask, padding=0, min_crop_resolution=0, max_crop_resolution=99999
+    )
+    # Use full-1 mask shaped like the crop so paste is a perfect replacement
+    paste_mask = torch.ones((1, bbox[3], bbox[2]), dtype=torch.float32)
+    result = _paste_into_image(img.clone(), cropped_img, paste_mask, bbox)
+    assert torch.allclose(result, img, atol=1e-6)
