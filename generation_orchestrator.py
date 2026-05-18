@@ -1939,7 +1939,7 @@ def run_generation_loop(
                                         # it lives at ~L2324, AFTER the upscale loop. Use
                                         # create_image_metadata directly (matches the normal
                                         # hires/model upscale path at L2184).
-                                        sentinel_id = int(time.time() * 100000) + random.randint(0, 1000)
+                                        sentinel_id = int(time.time() * 100000) + upscale_random.randint(0, 1000)
                                         sentinel_meta = create_image_metadata(
                                             conf, pipe_w, pipe_h,
                                             float(step_result.get("duration", 0)),
@@ -1967,7 +1967,7 @@ def run_generation_loop(
                                     # `meta` is not yet assigned at this point in the function;
                                     # build the entry via create_image_metadata directly (matches
                                     # the normal hires/model upscale path at L2184).
-                                    upscale_id = int(time.time() * 100000) + random.randint(0, 1000)
+                                    upscale_id = int(time.time() * 100000) + upscale_random.randint(0, 1000)
                                     upscaled_filename = f"img_{upscale_id}.webp"
                                     filepath = os.path.join(paths["images"], upscaled_filename)
                                     step_result["image_pil"].save(filepath, format="WEBP", quality=95)
@@ -2032,7 +2032,7 @@ def run_generation_loop(
                                 is_final_output = is_last_step
                                 if is_final_output:
                                     # Save the upscaled image and update manifest
-                                    upscale_id = int(time.time() * 100000) + random.randint(0, 1000)
+                                    upscale_id = int(time.time() * 100000) + upscale_random.randint(0, 1000)
                                     upscaled_filename = f"img_{upscale_id}.webp"
                                     filepath = os.path.join(paths["images"], upscaled_filename)
                                     result_pil.save(filepath, quality=80)
