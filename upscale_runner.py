@@ -358,6 +358,9 @@ def _run_upscale_thread(job, target_items, upscale_config, meta, manifest_data, 
                             positive_prompt=pos_prompt,
                             negative_prompt=neg_prompt,
                             clip_skip=clip_skip,
+                            # Pass the session's already-loaded model name so Florence2 can
+                            # short-circuit duplicate loads when item.model matches it.
+                            session_model_name=meta.get("model", ""),
                         )
 
                         is_last_step = step_idx == len(expanded_steps) - 1

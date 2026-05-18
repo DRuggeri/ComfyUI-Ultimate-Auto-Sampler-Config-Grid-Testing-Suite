@@ -1927,6 +1927,9 @@ def run_generation_loop(
                                     positive_prompt=actual_positive_prompt,
                                     negative_prompt=actual_negative_prompt,
                                     clip_skip=conf.get("clip_skip", 0),
+                                    # Inline path forces model_source=from_builder above, so
+                                    # this is informational; passing it for consistency.
+                                    session_model_name=conf.get("model", ""),
                                 )
 
                                 is_last_step = step_idx == len(expanded_steps) - 1

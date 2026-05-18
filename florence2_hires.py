@@ -345,14 +345,24 @@ def _resolve_loaders():
     return _FH_CKPT_LOADER, _FH_LORA_LOADER
 
 
-def _get_or_load_checkpoint_lora(item, fallback, model_source, cache):
+def _get_or_load_checkpoint_lora(item, fallback, model_source, cache, session_model_name=None):
     """Resolve (model, clip, vae) handles for one manifest item, honoring model_source.
+
+    VRAM optimization: when the item's model matches the session's already-loaded
+    model (same `session_model_name`), we reuse the session's base weights and just
+    apply the item's LoRAs on top via `load_loras_for_preencoding`. This avoids
+    holding TWO full copies of the same checkpoint in VRAM (one loaded by
+    upscale_runner, one freshly loaded here). On 8 GB cards this duplication was
+    enough to OOM during Florence2's beam search.
 
     Args:
         item: manifest entry dict — may have 'model', 'lora_expanded' keys
         fallback: tuple (model, clip, vae) — the already-loaded session-default handles
         model_source: "from_manifest" or "from_builder"
         cache: dict — job-local cache keyed by (model_name, lora_string)
+        session_model_name: name of the model upscale_runner already loaded (for the
+            same-model short-circuit). Optional; if None, every from_manifest item
+            does a fresh load.
 
     Returns:
         Tuple (model, clip, vae).
@@ -375,6 +385,23 @@ def _get_or_load_checkpoint_lora(item, fallback, model_source, cache):
 
     ckpt_fn, lora_fn = _resolve_loaders()
 
+    # Same-model short-circuit: reuse session's base, just apply the item's LoRAs.
+    # This saves ~2-7 GiB depending on checkpoint size (SD1.5 ~2GB, SDXL ~7GB).
+    if session_model_name and model_name == session_model_name:
+        base_model, base_clip, base_vae = fallback
+        if lora_string and lora_string != "None":
+            try:
+                model, clip = lora_fn(base_model, base_clip, lora_string)
+            except Exception as e:
+                print(f"[Florence2HiResFix] Failed to apply lora '{lora_string}' on session base: {e}; using base only")
+                model, clip = base_model, base_clip
+        else:
+            model, clip = base_model, base_clip
+        result = (model, clip, base_vae)
+        cache[key] = result
+        return result
+
+    # Different model — full load.
     try:
         model, clip, vae = ckpt_fn(
             target_model_name=model_name,
@@ -386,7 +413,7 @@ def _get_or_load_checkpoint_lora(item, fallback, model_source, cache):
         cache[key] = fallback
         return fallback
 
-    if lora_string:
+    if lora_string and lora_string != "None":
         try:
             model, clip = lora_fn(model, clip, lora_string)
         except Exception as e:
@@ -408,6 +435,7 @@ def run_florence2_step(
     positive_prompt,
     negative_prompt,
     clip_skip,
+    session_model_name=None,
 ):
     """Run one Florence2 Hi-Res Fix step on one image.
 
@@ -563,6 +591,7 @@ def run_florence2_step(
         item, fallback_handles,
         model_source=step_config.get("model_source", "from_manifest"),
         cache=ckpt_cache,
+        session_model_name=session_model_name,
     )
 
     # 9. Conditioning. When the per-item clip is the SAME identity as the session's
@@ -674,6 +703,17 @@ def run_florence2_step(
     manifest_extras["image_width"] = final_pil.size[0]
     manifest_extras["image_height"] = final_pil.size[1]
     manifest_extras["duration"] = round(time.time() - t_start, 2)
+
+    # VRAM hygiene: release intermediate tensors before next item. The KSampler
+    # latents, VAE-decoded crops, and Florence2 beam-search buffers can fragment
+    # GPU memory across iterations. soft_empty_cache lets ComfyUI reclaim it.
+    # Skip in tests (mm import would pull comfy stack at module load).
+    try:
+        import comfy.model_management as _mm
+        _mm.soft_empty_cache()
+    except Exception:
+        pass
+
     return manifest_extras
 
 
