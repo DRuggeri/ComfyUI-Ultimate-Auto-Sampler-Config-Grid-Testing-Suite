@@ -313,3 +313,73 @@ def load_florence2_model(model_name):
     handle = _unwrap(result, 0)
     _FLORENCE2_MODEL_CACHE[model_name] = handle
     return handle
+
+
+# Indirection so tests can monkeypatch without importing model_loader (which
+# would pull in torch/comfy and slow the test boot). At runtime these resolve
+# to the real loaders inside _get_or_load_checkpoint_lora.
+_FH_CKPT_LOADER = None
+_FH_LORA_LOADER = None
+
+
+def _resolve_loaders():
+    """Lazy-import the real loaders. Only called from runtime path; tests
+    monkeypatch _FH_CKPT_LOADER / _FH_LORA_LOADER directly."""
+    global _FH_CKPT_LOADER, _FH_LORA_LOADER
+    if _FH_CKPT_LOADER is None or _FH_LORA_LOADER is None:
+        from model_loader import load_checkpoint, load_loras
+        _FH_CKPT_LOADER = _FH_CKPT_LOADER or load_checkpoint
+        _FH_LORA_LOADER = _FH_LORA_LOADER or load_loras
+    return _FH_CKPT_LOADER, _FH_LORA_LOADER
+
+
+def _get_or_load_checkpoint_lora(item, fallback, model_source, cache):
+    """Resolve (model, clip, vae) handles for one manifest item, honoring model_source.
+
+    Args:
+        item: manifest entry dict — may have 'model', 'lora_expanded' keys
+        fallback: tuple (model, clip, vae) — the already-loaded session-default handles
+        model_source: "from_manifest" or "from_builder"
+        cache: dict — job-local cache keyed by (model_name, lora_string)
+
+    Returns:
+        Tuple (model, clip, vae).
+    """
+    if model_source != "from_manifest":
+        return fallback
+
+    model_name = item.get("model", "").strip()
+    if not model_name:
+        # Legacy entry without model key — fall back, but only log once per job.
+        if not cache.get("_warned_missing_model"):
+            print("[Florence2HiResFix] Manifest item missing 'model' field; using session default")
+            cache["_warned_missing_model"] = True
+        return fallback
+
+    lora_string = item.get("lora_expanded", "") or ""
+    key = (model_name, lora_string)
+    if key in cache:
+        return cache[key]
+
+    ckpt_fn, lora_fn = _resolve_loaders()
+
+    try:
+        model, clip, vae = ckpt_fn(
+            target_model_name=model_name,
+            ckpt_name=model_name,
+            use_remote_vae=False,
+        )
+    except Exception as e:
+        print(f"[Florence2HiResFix] Failed to load model '{model_name}': {e}; using session default")
+        cache[key] = fallback
+        return fallback
+
+    if lora_string:
+        try:
+            model, clip = lora_fn(model, clip, lora_string)
+        except Exception as e:
+            print(f"[Florence2HiResFix] Failed to apply lora '{lora_string}': {e}; using checkpoint only")
+
+    result = (model, clip, vae)
+    cache[key] = result
+    return result
