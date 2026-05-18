@@ -1934,12 +1934,21 @@ def run_generation_loop(
 
                                 if step_result.get("status") == "no_detection":
                                     if is_final_output:
-                                        # Append sentinel entry pointing back at the base image
+                                        # Append sentinel entry pointing back at the base image.
+                                        # `meta` is not yet assigned at this point in the function —
+                                        # it lives at ~L2324, AFTER the upscale loop. Use
+                                        # create_image_metadata directly (matches the normal
+                                        # hires/model upscale path at L2184).
                                         sentinel_id = int(time.time() * 100000) + random.randint(0, 1000)
-                                        sentinel_meta = dict(meta)
+                                        sentinel_meta = create_image_metadata(
+                                            conf, pipe_w, pipe_h,
+                                            float(step_result.get("duration", 0)),
+                                            current_seed, batch_idx,
+                                            actual_positive_prompt, actual_negative_prompt,
+                                            gen_index=gen_index_offset + total_generated,
+                                        )
                                         sentinel_meta.update({
                                             "id": sentinel_id,
-                                            "gen_index": len(existing_data["items"]),
                                             "upscaled": False,
                                             "florence2_no_detection": True,
                                             "florence2_text_input": step_result.get("florence2_text_input", ""),
@@ -1954,21 +1963,26 @@ def run_generation_loop(
                                 total_upscale_duration += float(step_result.get("duration", 0))
 
                                 if is_final_output:
-                                    # Save the Florence2-fixed image and update manifest
+                                    # Save the Florence2-fixed image and update manifest.
+                                    # `meta` is not yet assigned at this point in the function;
+                                    # build the entry via create_image_metadata directly (matches
+                                    # the normal hires/model upscale path at L2184).
                                     upscale_id = int(time.time() * 100000) + random.randint(0, 1000)
                                     upscaled_filename = f"img_{upscale_id}.webp"
                                     filepath = os.path.join(paths["images"], upscaled_filename)
                                     step_result["image_pil"].save(filepath, format="WEBP", quality=95)
 
-                                    upscaled_meta = dict(meta)
+                                    upscaled_meta = create_image_metadata(
+                                        conf, step_result["image_width"], step_result["image_height"],
+                                        float(step_result.get("duration", 0)) + total_upscale_duration,
+                                        current_seed, batch_idx,
+                                        actual_positive_prompt, actual_negative_prompt,
+                                        gen_index=gen_index_offset + total_generated,
+                                    )
                                     upscaled_meta.update({
                                         "id": upscale_id,
-                                        "gen_index": len(existing_data["items"]),
                                         "file": f"/view?filename={upscaled_filename}&type=output&subfolder=benchmarks/{session_name}/images",
                                         "filename": upscaled_filename,
-                                        "width": step_result["image_width"],
-                                        "height": step_result["image_height"],
-                                        "duration": float(step_result.get("duration", 0)),
                                         "upscaled": True,
                                         "upscale_source": "inline",
                                         "upscale_pipeline": pipeline_name,
