@@ -538,8 +538,13 @@ def run_florence2_step(
 
     # 7. Megapixel resize (NHWC -> NCHW for common_upscale -> NHWC back)
     import comfy.utils
-    target_w, target_h = compute_target_dims(
-        crop_w, crop_h, float(step_config.get("target_megapixels", 1.0))
+    requested_mp = float(step_config.get("target_megapixels", 1.0))
+    target_w, target_h = compute_target_dims(crop_w, crop_h, requested_mp)
+    actual_mp = (target_w * target_h) / (1024 * 1024)
+    print(
+        f"[Florence2HiResFix] src=({source_image.shape[2]}x{source_image.shape[1]}) "
+        f"crop=({crop_w}x{crop_h}) requested_MP={requested_mp:.3f} "
+        f"-> internal_pass=({target_w}x{target_h})={actual_mp:.3f}MP"
     )
     cropped_nchw = cropped_img.movedim(-1, 1)
     resized_nchw = comfy.utils.common_upscale(

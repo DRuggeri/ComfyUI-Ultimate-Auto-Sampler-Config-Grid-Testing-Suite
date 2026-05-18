@@ -5964,13 +5964,17 @@ export function renderUpscalingSection(node, container, modelLists) {
 
                 // --- HiRes fields (multi-value: ratios, denoise) ---
                 if (showHires) {
-                    const ratiosInput = document.createElement("input");
-                    ratiosInput.type = "text";
-                    ratiosInput.className = "cb-input";
-                    ratiosInput.value = ucfg.upscale_ratios || "1.5";
-                    ratiosInput.placeholder = "1.2, 1.5, 2.0";
-                    ratiosInput.onchange = () => { ucfg.upscale_ratios = ratiosInput.value; node.saveState(); };
-                    grid.appendChild(createInputGroup("Upscale Ratios", ratiosInput));
+                    // Upscale Ratios is irrelevant for florence2_hires (it inpaints a region,
+                    // not the whole image; Target MP controls the internal pass size instead).
+                    if (!showFlorence2) {
+                        const ratiosInput = document.createElement("input");
+                        ratiosInput.type = "text";
+                        ratiosInput.className = "cb-input";
+                        ratiosInput.value = ucfg.upscale_ratios || "1.5";
+                        ratiosInput.placeholder = "1.2, 1.5, 2.0";
+                        ratiosInput.onchange = () => { ucfg.upscale_ratios = ratiosInput.value; node.saveState(); };
+                        grid.appendChild(createInputGroup("Upscale Ratios", ratiosInput));
+                    }
 
                     // NOTE: renderUpscalingSection is a session-level section (no configArray param).
                     // Cannot use isLTXConfigArray() here — left as node.state.model_type guard intentionally.
@@ -5995,13 +5999,17 @@ export function renderUpscalingSection(node, container, modelLists) {
                     grid.appendChild(createInputGroup("HiRes Steps (0=same)", stepsInput));
 
                     // --- HiRes Tiled Sampling (tile the latent for KSampler to prevent OOM on large upscales) ---
-                    const tiledSamplingCb = document.createElement("input");
-                    tiledSamplingCb.type = "checkbox";
-                    tiledSamplingCb.checked = ucfg.hires_tiled_sampling || false;
-                    tiledSamplingCb.onchange = () => { ucfg.hires_tiled_sampling = tiledSamplingCb.checked; node.saveState(); renderPipelines(); };
-                    grid.appendChild(createInputGroup("HiRes Tiled Sampling", tiledSamplingCb));
+                    // Hidden for florence2_hires — tiled sampling doesn't apply to its
+                    // crop-then-paste pipeline (crops are too small to need tiling).
+                    if (!showFlorence2) {
+                        const tiledSamplingCb = document.createElement("input");
+                        tiledSamplingCb.type = "checkbox";
+                        tiledSamplingCb.checked = ucfg.hires_tiled_sampling || false;
+                        tiledSamplingCb.onchange = () => { ucfg.hires_tiled_sampling = tiledSamplingCb.checked; node.saveState(); renderPipelines(); };
+                        grid.appendChild(createInputGroup("HiRes Tiled Sampling", tiledSamplingCb));
+                    }
 
-                    if (ucfg.hires_tiled_sampling) {
+                    if (ucfg.hires_tiled_sampling && !showFlorence2) {
                         const htWidthInput = document.createElement("input");
                         htWidthInput.type = "number";
                         htWidthInput.className = "cb-input";
