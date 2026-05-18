@@ -5395,8 +5395,8 @@ function createDefaultFlorence2Options() {
         output_mask_select: "",
         target_megapixels: 1.0,
         crop_padding: 64,
-        min_crop_resolution: 256,
-        max_crop_resolution: 1536,
+        min_crop_resolution: 0,        // No floor — Florence2's polygon decides
+        max_crop_resolution: 99999,    // No ceiling — paste-back natural cap is the image itself
         grow_expand: 32,
         feather_left: 128,
         feather_top: 128,
@@ -6420,21 +6420,12 @@ export function renderUpscalingSection(node, container, modelLists) {
                     f2PadInput.onchange = () => { f2.crop_padding = parseInt(f2PadInput.value, 10); node.saveState(); };
                     grid.appendChild(createInputGroup("Crop Padding (px)", f2PadInput));
 
-                    const f2MinCropInput = document.createElement("input");
-                    f2MinCropInput.type = "number"; f2MinCropInput.className = "cb-input";
-                    f2MinCropInput.value = f2.min_crop_resolution ?? 256;
-                    f2MinCropInput.min = 64; f2MinCropInput.max = 4096; f2MinCropInput.step = 8;
-                    f2MinCropInput.title = "Floor for crop size — prevents tiny inpaints.";
-                    f2MinCropInput.onchange = () => { f2.min_crop_resolution = parseInt(f2MinCropInput.value, 10); node.saveState(); };
-                    grid.appendChild(createInputGroup("Min Crop Res (px)", f2MinCropInput));
-
-                    const f2MaxCropInput = document.createElement("input");
-                    f2MaxCropInput.type = "number"; f2MaxCropInput.className = "cb-input";
-                    f2MaxCropInput.value = f2.max_crop_resolution ?? 1536;
-                    f2MaxCropInput.min = 64; f2MaxCropInput.max = 4096; f2MaxCropInput.step = 8;
-                    f2MaxCropInput.title = "Ceiling for crop size — prevents OOM on full-frame detections.";
-                    f2MaxCropInput.onchange = () => { f2.max_crop_resolution = parseInt(f2MaxCropInput.value, 10); node.saveState(); };
-                    grid.appendChild(createInputGroup("Max Crop Res (px)", f2MaxCropInput));
+                    // Min/Max Crop Resolution removed from UI 2026-05-18 — they were
+                    // forcing square-ish crops and could push the crop window away from
+                    // Florence2's detected region when bbox was near an image edge.
+                    // Florence2's polygon + grow_expand + crop_padding now fully determine
+                    // the crop region. The python helper still accepts the params; defaults
+                    // are unconstrained (min=0, max=very large).
 
                     // --- Group C: Mask shaping ---
                     const f2GrowInput = document.createElement("input");

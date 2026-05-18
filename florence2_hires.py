@@ -511,12 +511,16 @@ def run_florence2_step(
 
     # 6. Crop by mask (pure Python)
     try:
+        # min_crop_resolution / max_crop_resolution defaults are unconstrained
+        # (0 / 99999) — Florence2's polygon + grow_expand + crop_padding fully
+        # determine the crop region. The UI no longer exposes these fields; they
+        # remain in the function signature for backwards compat with existing tests.
         cropped_img, cropped_mask, bbox = _crop_image_by_mask(
             source_image,
             grown_mask,
             padding=int(step_config.get("crop_padding", 64)),
-            min_crop_resolution=int(step_config.get("min_crop_resolution", 256)),
-            max_crop_resolution=int(step_config.get("max_crop_resolution", 1536)),
+            min_crop_resolution=int(step_config.get("min_crop_resolution", 0)),
+            max_crop_resolution=int(step_config.get("max_crop_resolution", 99999)),
         )
     except ValueError as e:
         print(f"[Florence2HiResFix] Crop failed ({e}); skipping")
