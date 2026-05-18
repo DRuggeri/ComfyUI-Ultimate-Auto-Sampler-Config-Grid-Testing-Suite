@@ -297,7 +297,10 @@ def load_florence2_model(model_name):
     if model_name in _FLORENCE2_MODEL_CACHE:
         return _FLORENCE2_MODEL_CACHE[model_name]
 
-    from ltx_video_generation import _call_node, _unwrap
+    try:
+        from .ltx_video_generation import _call_node, _unwrap
+    except ImportError:
+        from ltx_video_generation import _call_node, _unwrap
 
     classes = get_florence2_node_classes()
     loader_cls = classes["DownloadAndLoadFlorence2Model"]
@@ -327,7 +330,10 @@ def _resolve_loaders():
     monkeypatch _FH_CKPT_LOADER / _FH_LORA_LOADER directly."""
     global _FH_CKPT_LOADER, _FH_LORA_LOADER
     if _FH_CKPT_LOADER is None or _FH_LORA_LOADER is None:
-        from model_loader import load_checkpoint, load_loras
+        try:
+            from .model_loader import load_checkpoint, load_loras
+        except ImportError:
+            from model_loader import load_checkpoint, load_loras
         _FH_CKPT_LOADER = _FH_CKPT_LOADER or load_checkpoint
         _FH_LORA_LOADER = _FH_LORA_LOADER or load_loras
     return _FH_CKPT_LOADER, _FH_LORA_LOADER
@@ -442,7 +448,10 @@ def run_florence2_step(
     florence2_model = load_florence2_model(manifest_extras["florence2_model"])
 
     # 2. Detect — call Florence2Run via _call_node
-    from ltx_video_generation import _call_node, _unwrap
+    try:
+        from .ltx_video_generation import _call_node, _unwrap
+    except ImportError:
+        from ltx_video_generation import _call_node, _unwrap
     classes = get_florence2_node_classes()
     f2r_cls = classes["Florence2Run"]
 
@@ -542,7 +551,10 @@ def run_florence2_step(
     )
 
     # 9. Conditioning (reuse the upscale_runner's cache structure)
-    from batch_encoding import encode_prompt_with_combinators
+    try:
+        from .batch_encoding import encode_prompt_with_combinators
+    except ImportError:
+        from batch_encoding import encode_prompt_with_combinators
     if positive_prompt not in conditioning_cache["positive"]:
         conditioning_cache["positive"][positive_prompt] = encode_prompt_with_combinators(
             clip_handle, positive_prompt, clip_skip
@@ -555,7 +567,10 @@ def run_florence2_step(
     neg_cond = conditioning_cache["negative"][negative_prompt]
 
     # 10. VAE encode -> generate_image (project's known-working sampling path)
-    from image_generation import generate_image, decode_latent_with_vae
+    try:
+        from .image_generation import generate_image, decode_latent_with_vae
+    except ImportError:
+        from image_generation import generate_image, decode_latent_with_vae
 
     encoded_latent = vae_handle.encode(resized_img[:, :, :, :3])
     noise_seed = int(item.get("seed", 0)) + 1  # tiny offset so face pass != base seed exactly
