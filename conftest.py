@@ -58,6 +58,12 @@ def _install_stubs():
     fp = sys.modules["folder_paths"]
     if not hasattr(fp, "get_output_directory"):
         fp.get_output_directory = lambda: os.path.join(_NODE_ROOT, "_test_output")  # type: ignore
+    if not hasattr(fp, "get_full_path"):
+        # Stub returns a synthetic path for any (folder, name) lookup so tests
+        # that don't care about file existence (e.g. mocked loaders) don't trip
+        # the "file not found -> fall back" guard in florence2_hires. Tests that
+        # specifically want to exercise the missing-file path can monkeypatch.
+        fp.get_full_path = lambda folder, name: f"<stubbed>/{folder}/{name}" if name else None  # type: ignore
 
     # server.PromptServer
     if "server" not in sys.modules:

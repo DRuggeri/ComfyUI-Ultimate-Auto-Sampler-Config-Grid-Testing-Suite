@@ -401,7 +401,25 @@ def _get_or_load_checkpoint_lora(item, fallback, model_source, cache, session_mo
         cache[key] = result
         return result
 
-    # Different model — full load.
+    # Different model — full load. Validate the file exists first; without this
+    # guard a missing checkpoint hits comfy/utils.load_torch_file(None,...) and
+    # crashes with "'NoneType' has no attribute 'lower'". Common scenario: manifest
+    # was generated on a different machine that had the per-item checkpoint
+    # installed.
+    try:
+        import folder_paths as _fp_check
+        ckpt_path_check = _fp_check.get_full_path("checkpoints", model_name)
+    except Exception:
+        ckpt_path_check = None
+    if ckpt_path_check is None:
+        print(
+            f"[Florence2HiResFix] Item references model '{model_name}' but the "
+            f"file is not installed in ComfyUI/models/checkpoints/. Falling back to "
+            f"session default."
+        )
+        cache[key] = fallback
+        return fallback
+
     try:
         model, clip, vae = ckpt_fn(
             target_model_name=model_name,

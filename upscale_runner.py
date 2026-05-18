@@ -124,8 +124,29 @@ def _run_upscale_thread(job, target_items, upscale_config, meta, manifest_data, 
         _ext = "jpg" if _fmt in ("jpg", "jpeg") else _fmt
 
         # Load model, VAE, CLIP for conditioning
-        model_name = meta.get("model", "")
+        model_name = meta.get("model", "") or ""
         vae_name = meta.get("vae", "")
+
+        # Validate the checkpoint exists before calling load_checkpoint. Without
+        # this guard, a missing file ends up at comfy/utils.py:load_torch_file(None,
+        # ...) and crashes with the cryptic "'NoneType' object has no attribute
+        # 'lower'". Common cause: manifest copied from another machine where the
+        # checkpoint isn't installed; or manifest entry has model=None.
+        try:
+            import folder_paths as _fp_check
+            ckpt_path_check = _fp_check.get_full_path("checkpoints", model_name) if model_name else None
+        except Exception:
+            ckpt_path_check = None
+        if not model_name or ckpt_path_check is None:
+            job["status"] = "error"
+            job["error"] = (
+                f"Checkpoint '{model_name or '(empty)'}' not found in "
+                f"ComfyUI/models/checkpoints/. The session manifest references it but "
+                f"the file is not installed on this machine. Copy the .safetensors "
+                f"file over, or regenerate the images on this machine first."
+            )
+            print(f"[DashboardUpscale] ❌ {job['error']}")
+            return
 
         # VRAM hygiene before load_checkpoint: the previous workflow's model handles
         # may still be Python-referenced and won't be evicted by ComfyUI's LRU on a
