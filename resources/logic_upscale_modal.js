@@ -14,6 +14,27 @@ var upscaleModalState = {
     availableModels: [],  // Upscale model list from server
 };
 
+// Default Florence2 Hi-Res Fix options — mirrors createDefaultFlorence2Options()
+// in conf-builder-config-management.js. Keep these two in sync if you change either.
+function _defaultFlorence2Options() {
+    return {
+        model: "microsoft/Florence-2-base",
+        text_input: "face",
+        output_mask_select: "",
+        target_megapixels: 1.0,
+        crop_padding: 64,
+        min_crop_resolution: 0,       // No floor — Florence2's polygon decides
+        max_crop_resolution: 99999,   // No ceiling — paste-back natural cap is the image itself
+        grow_expand: 32,
+        feather_left: 128,
+        feather_top: 128,
+        feather_right: 128,
+        feather_bottom: 128,
+        model_source: "from_manifest",
+        on_no_detection: "skip"
+    };
+}
+
 // Default SeedVR2 options — matches SeedVR2 node defaults
 function _defaultSeedVR2Options() {
     return {
@@ -63,7 +84,8 @@ function _defaultUpscaleStep() {
         hires_mask_blur: 8,
         hires_tile_padding: 32,
         hires_force_uniform_tiles: false,
-        seedvr2: _defaultSeedVR2Options()
+        seedvr2: _defaultSeedVR2Options(),
+        florence2: _defaultFlorence2Options()
     };
 }
 
@@ -89,6 +111,7 @@ function _ensureUpscaleStepFields(step) {
     if (!step.hires_tile_padding) step.hires_tile_padding = 32;
     if (step.hires_force_uniform_tiles === undefined) step.hires_force_uniform_tiles = false;
     if (!step.seedvr2) step.seedvr2 = _defaultSeedVR2Options();
+    if (!step.florence2) step.florence2 = _defaultFlorence2Options();
 }
 
 // Default config
@@ -576,6 +599,7 @@ function _renderStep(pipeBody, config, pipeline, ucfg, stepIdx, modelList, callb
         { value: 'model_only', label: 'Model Upscale Only' },
         { value: 'model_then_hires', label: 'Model + HiRes Fix' },
         { value: 'seedvr2', label: 'SeedVR2 Upscale' },
+        { value: 'florence2_hires', label: 'Florence2 Hi-Res Fix' },
     ], ucfg.mode, function(v) {
         ucfg.mode = v;
         callbacks.onUpdate();
@@ -590,15 +614,20 @@ function _renderStep(pipeBody, config, pipeline, ucfg, stepIdx, modelList, callb
         callbacks.onUpdate();
     }));
 
-    var showHires = ucfg.mode === 'hires_only' || ucfg.mode === 'model_then_hires';
+    var showHires = ucfg.mode === 'hires_only' || ucfg.mode === 'model_then_hires' || ucfg.mode === 'florence2_hires';
     var showModel = ucfg.mode === 'model_only' || ucfg.mode === 'model_then_hires';
     var showSeedVR2 = ucfg.mode === 'seedvr2';
+    var showFlorence2 = ucfg.mode === 'florence2_hires';
 
     // --- HiRes fields ---
     if (showHires) {
-        grid.appendChild(_makeInput('Ratios:', ucfg.upscale_ratios || '1.5', '1.2, 1.5, 2.0', function(v) {
-            ucfg.upscale_ratios = v; callbacks.onUpdate();
-        }));
+        // Upscale Ratios is irrelevant for florence2_hires (it inpaints a region, not
+        // the whole image; target_megapixels controls the internal pass size instead).
+        if (!showFlorence2) {
+            grid.appendChild(_makeInput('Ratios:', ucfg.upscale_ratios || '1.5', '1.2, 1.5, 2.0', function(v) {
+                ucfg.upscale_ratios = v; callbacks.onUpdate();
+            }));
+        }
         grid.appendChild(_makeInput('Denoise:', ucfg.hires_denoise || '0.3', '0.2, 0.3, 0.5', function(v) {
             ucfg.hires_denoise = v; callbacks.onUpdate();
         }));
@@ -606,12 +635,14 @@ function _renderStep(pipeBody, config, pipeline, ucfg, stepIdx, modelList, callb
             ucfg.hires_steps = v; callbacks.onUpdate();
         }));
 
-        // Tiled sampling
-        grid.appendChild(_makeCheckbox('HiRes Tiled Sampling', ucfg.hires_tiled_sampling || false, function(v) {
-            ucfg.hires_tiled_sampling = v; callbacks.onUpdate(); reRender();
-        }));
+        // Tiled sampling — hidden for florence2_hires (crops are too small to need tiling).
+        if (!showFlorence2) {
+            grid.appendChild(_makeCheckbox('HiRes Tiled Sampling', ucfg.hires_tiled_sampling || false, function(v) {
+                ucfg.hires_tiled_sampling = v; callbacks.onUpdate(); reRender();
+            }));
+        }
 
-        if (ucfg.hires_tiled_sampling) {
+        if (ucfg.hires_tiled_sampling && !showFlorence2) {
             grid.appendChild(_makeNumber('Tile Width:', ucfg.hires_tile_width || 512, 128, 2048, 64, function(v) {
                 ucfg.hires_tile_width = v; callbacks.onUpdate();
             }));
@@ -629,12 +660,14 @@ function _renderStep(pipeBody, config, pipeline, ucfg, stepIdx, modelList, callb
             }));
         }
 
-        // Tiled VAE
-        grid.appendChild(_makeCheckbox('Tiled VAE Decode', ucfg.tiled_vae || false, function(v) {
-            ucfg.tiled_vae = v; callbacks.onUpdate(); reRender();
-        }));
+        // Tiled VAE — hidden for florence2_hires (crops decode quickly without tiling).
+        if (!showFlorence2) {
+            grid.appendChild(_makeCheckbox('Tiled VAE Decode', ucfg.tiled_vae || false, function(v) {
+                ucfg.tiled_vae = v; callbacks.onUpdate(); reRender();
+            }));
+        }
 
-        if (ucfg.tiled_vae) {
+        if (ucfg.tiled_vae && !showFlorence2) {
             grid.appendChild(_makeNumber('Tile Size:', ucfg.tile_size || 512, 128, 1024, 64, function(v) {
                 ucfg.tile_size = v; callbacks.onUpdate();
             }));
@@ -792,6 +825,68 @@ function _renderStep(pipeBody, config, pipeline, ucfg, stepIdx, modelList, callb
         }
     }
 
+    // --- Florence2 Hi-Res Fix fields ---
+    if (showFlorence2) {
+        if (!ucfg.florence2) ucfg.florence2 = _defaultFlorence2Options();
+        var f2 = ucfg.florence2;
+
+        // Group A: Florence2 detection
+        var f2Models = [
+            'microsoft/Florence-2-base',
+            'microsoft/Florence-2-base-ft',
+            'microsoft/Florence-2-large',
+            'microsoft/Florence-2-large-ft'
+        ];
+        grid.appendChild(_makeSelect('Florence2 Model:', f2Models, f2.model || 'microsoft/Florence-2-base', function(v) {
+            f2.model = v; callbacks.onUpdate();
+        }));
+
+        grid.appendChild(_makeInput('Detect What?', f2.text_input || 'face', 'face, head, hands, eyes...', function(v) {
+            f2.text_input = v; callbacks.onUpdate();
+        }));
+
+        grid.appendChild(_makeInput('Mask Select:', f2.output_mask_select || '', '(empty = all)', function(v) {
+            f2.output_mask_select = v; callbacks.onUpdate();
+        }));
+
+        // Group B: Crop & resize
+        grid.appendChild(_makeNumber('Hi-Res Target MP:', f2.target_megapixels != null ? f2.target_megapixels : 1.0, 0.25, 4.0, 0.25, function(v) {
+            f2.target_megapixels = v; callbacks.onUpdate();
+        }));
+
+        grid.appendChild(_makeNumber('Crop Padding (px):', f2.crop_padding != null ? f2.crop_padding : 64, 0, 256, 8, function(v) {
+            f2.crop_padding = v; callbacks.onUpdate();
+        }));
+
+        // Group C: Mask shaping
+        grid.appendChild(_makeNumber('Grow Mask (px):', f2.grow_expand != null ? f2.grow_expand : 32, -64, 256, 1, function(v) {
+            f2.grow_expand = v; callbacks.onUpdate();
+        }));
+
+        ['left', 'top', 'right', 'bottom'].forEach(function(side) {
+            var key = 'feather_' + side;
+            var label = 'Feather ' + side.charAt(0).toUpperCase() + side.slice(1) + ' (px):';
+            grid.appendChild(_makeNumber(label, f2[key] != null ? f2[key] : 128, 0, 256, 1, function(v) {
+                f2[key] = v; callbacks.onUpdate();
+            }));
+        });
+
+        // Group E: Model/LoRA source
+        grid.appendChild(_makeSelect('Model/LoRA Source:', [
+            { value: 'from_manifest', label: 'From manifest (per-image)' },
+            { value: 'from_builder', label: 'From this Builder config' }
+        ], f2.model_source || 'from_manifest', function(v) {
+            f2.model_source = v; callbacks.onUpdate();
+        }));
+
+        // Group F: No-detection (single-option for forward-compat)
+        grid.appendChild(_makeSelect('If No Detection:', [
+            { value: 'skip', label: 'Skip + log' }
+        ], f2.on_no_detection || 'skip', function(v) {
+            f2.on_no_detection = v; callbacks.onUpdate();
+        }));
+    }
+
     card.appendChild(grid);
 
     // Iteration count display
@@ -802,6 +897,7 @@ function _renderStep(pipeBody, config, pipeline, ucfg, stepIdx, modelList, callb
     var models = Math.max(1, (ucfg.upscale_models || []).length);
     var combos = 1;
     if (showSeedVR2) combos = 1;
+    else if (showFlorence2) combos = 1; // 1 output per input (uses single hires_denoise + target_megapixels)
     else if (showHires) combos *= ratios * denoises;
     if (showModel) combos *= models;
     var repeatCount = ucfg.repeat || 1;
