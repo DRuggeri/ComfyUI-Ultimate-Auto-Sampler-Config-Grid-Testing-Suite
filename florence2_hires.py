@@ -494,8 +494,12 @@ def run_florence2_step(
     # max_new_tokens=256 (was 1024): Florence2's KV cache scales linearly with
     # sequence length × num_beams × hidden_dim × num_layers. For
     # referring_expression_segmentation outputting a face polygon (~10-50 tokens),
-    # 1024 is wildly over-provisioned and wastes GiB of VRAM on dashboard batches
-    # where the session checkpoint is already loaded.
+    # 1024 is wildly over-provisioned.
+    # keep_model_loaded=False (was True): Florence2 model is moved back to CPU after
+    # each detection. The Python handle in _FLORENCE2_MODEL_CACHE still works (next
+    # call moves it back to GPU automatically, ~1-2s). The win: Florence2 doesn't
+    # compete with KSampler or the session checkpoint for VRAM during the inpaint
+    # stage. Worth a small per-image latency to avoid OOM on 8 GiB cards.
     det_result = _call_node(
         f2r_cls,
         image=source_image,
@@ -503,7 +507,7 @@ def run_florence2_step(
         text_input=text_input,
         task="referring_expression_segmentation",
         fill_mask=True,
-        keep_model_loaded=True,
+        keep_model_loaded=False,
         max_new_tokens=256,
         num_beams=3,
         do_sample=False,

@@ -127,6 +127,21 @@ def _run_upscale_thread(job, target_items, upscale_config, meta, manifest_data, 
         model_name = meta.get("model", "")
         vae_name = meta.get("vae", "")
 
+        # VRAM hygiene before load_checkpoint: the previous workflow's model handles
+        # may still be Python-referenced and won't be evicted by ComfyUI's LRU on a
+        # new load_checkpoint call. soft_empty_cache + gc.collect releases those
+        # before we add the upscale session's checkpoint on top. Critical for
+        # Florence2 mode on small-VRAM cards (otherwise prior SDXL gen + new SDXL
+        # session + Florence2 = OOM during beam search).
+        try:
+            import gc as _gc_pre
+            _gc_pre.collect()
+            mm.soft_empty_cache()
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
+        except Exception:
+            pass
+
         print(f"[DashboardUpscale] 🔄 Loading model: {model_name}")
         loaded_model, loaded_clip, loaded_vae = load_checkpoint(
             target_model_name=model_name,
