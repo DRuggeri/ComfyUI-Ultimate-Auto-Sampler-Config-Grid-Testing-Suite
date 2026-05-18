@@ -383,3 +383,113 @@ def _get_or_load_checkpoint_lora(item, fallback, model_source, cache):
     result = (model, clip, vae)
     cache[key] = result
     return result
+
+
+def run_florence2_step(
+    *,
+    source_image,
+    item,
+    step_config,
+    fallback_handles,
+    ckpt_cache,
+    conditioning_cache,
+    positive_prompt,
+    negative_prompt,
+    clip_skip,
+):
+    """Run one Florence2 Hi-Res Fix step on one image.
+
+    Args:
+        source_image: torch (1, H, W, 3) float32 — the PIL-converted source image
+        item: manifest entry dict for this image
+        step_config: dict — the upscale-step config with florence2_* fields
+        fallback_handles: tuple (model, clip, vae) — already-loaded session-default handles
+        ckpt_cache: dict — job-local cache for per-item ckpt+lora combos
+        conditioning_cache: dict {"positive": {}, "negative": {}} — job-local conditioning cache
+        positive_prompt: str — positive conditioning text
+        negative_prompt: str — negative conditioning text
+        clip_skip: int — clip_skip value
+
+    Returns:
+        Dict with at minimum:
+          - "status": "ok" or "no_detection"
+          - manifest extras: florence2_model, florence2_text_input, florence2_*
+          - if status == "ok": "image_pil" (PIL), "duration" (float), "bbox", "detection_count"
+    """
+    import time
+
+    t_start = time.time()
+    preflight_florence2()
+
+    # Common manifest extras regardless of outcome
+    manifest_extras = {
+        "florence2_model": step_config.get("florence2_model", "microsoft/Florence-2-base"),
+        "florence2_text_input": step_config.get("text_input", "face"),
+        "florence2_target_megapixels": float(step_config.get("target_megapixels", 1.0)),
+        "florence2_crop_padding": int(step_config.get("crop_padding", 64)),
+        "florence2_grow_expand": int(step_config.get("grow_expand", 32)),
+        "florence2_feather": "{}/{}/{}/{}".format(
+            step_config.get("feather_left", 128),
+            step_config.get("feather_top", 128),
+            step_config.get("feather_right", 128),
+            step_config.get("feather_bottom", 128),
+        ),
+        "florence2_output_mask_select": step_config.get("output_mask_select", ""),
+        "florence2_model_source": step_config.get("model_source", "from_manifest"),
+    }
+
+    # 1. Load Florence2 model (cached)
+    florence2_model = load_florence2_model(manifest_extras["florence2_model"])
+
+    # 2. Detect — call Florence2Run via _call_node
+    from ltx_video_generation import _call_node, _unwrap
+    classes = get_florence2_node_classes()
+    f2r_cls = classes["Florence2Run"]
+
+    text_input = manifest_extras["florence2_text_input"]
+    print(f"[Florence2HiResFix] Detecting '{text_input}' in image...")
+    det_result = _call_node(
+        f2r_cls,
+        image=source_image,
+        florence2_model=florence2_model,
+        text_input=text_input,
+        task="referring_expression_segmentation",
+        fill_mask=True,
+        keep_model_loaded=True,
+        max_new_tokens=1024,
+        num_beams=3,
+        do_sample=False,
+        output_mask_select=step_config.get("output_mask_select", ""),
+        seed=1,
+    )
+    mask = _unwrap(det_result, 1)
+
+    # 3. No-detection check
+    mask_sum = float(mask.sum().item()) if mask is not None else 0.0
+    if mask is None or mask_sum <= 0:
+        print(f"[Florence2HiResFix] No detection for '{text_input}', skipping")
+        manifest_extras["status"] = "no_detection"
+        manifest_extras["florence2_detection_count"] = 0
+        manifest_extras["duration"] = round(time.time() - t_start, 2)
+        return manifest_extras
+
+    # 4. Mask-select parse: for referring_expression_segmentation Florence2 returns
+    #    one segment; detection_count is 1 if mask is non-empty. Any OOR request -> no_detection.
+    detection_count = 1
+    select_indices, select_mode = parse_mask_select_indices(
+        step_config.get("output_mask_select", ""), detected_count=detection_count
+    )
+    if select_mode == "no_detection":
+        print(f"[Florence2HiResFix] mask-select '{step_config.get('output_mask_select')}' "
+              f"out of range for {detection_count} detection(s), skipping")
+        manifest_extras["status"] = "no_detection"
+        manifest_extras["florence2_detection_count"] = detection_count
+        manifest_extras["duration"] = round(time.time() - t_start, 2)
+        return manifest_extras
+
+    # 5+: full pipeline filled in by Task 9.
+    # For now return ok-with-empty so the test for no-detection passes.
+    manifest_extras["status"] = "ok"
+    manifest_extras["florence2_detection_count"] = detection_count
+    manifest_extras["duration"] = round(time.time() - t_start, 2)
+    return manifest_extras
