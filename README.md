@@ -254,6 +254,11 @@ Some advanced features live in separate companion plugins:
   (saves VRAM for large latents). Install via Comfy Manager
   (search "USCG Remote VAE") or `git clone` into `custom_nodes/`.
 
+- **[ComfyUI-USCG-Distributed](https://github.com/JasonHoku/ComfyUI-USCG-Distributed)**
+  — Distribute grid generation across multiple ComfyUI machines on
+  your LAN (master + worker model). Install via Comfy Manager
+  (search "USCG Distributed") or `git clone` into `custom_nodes/`.
+
 ---
 
 ## 📦 Installation
