@@ -245,6 +245,17 @@ If you'd rather build the graph yourself:
 
 ---
 
+## Optional Companion Plugins
+
+Some advanced features live in separate companion plugins:
+
+- **[ComfyUI-USCG-RemoteVAE](https://github.com/JasonHoku/ComfyUI-USCG-RemoteVAE)**
+  — Offload VAE decoding to HuggingFace Remote VAE endpoints
+  (saves VRAM for large latents). Install via Comfy Manager
+  (search "USCG Remote VAE") or `git clone` into `custom_nodes/`.
+
+---
+
 ## 📦 Installation
 
 1. Navigate to your ComfyUI `custom_nodes` directory:
