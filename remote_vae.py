@@ -6,7 +6,6 @@ import threading
 import time
 import numpy as np
 from PIL import Image
-from .network_utils import huggingface_vae_decode, HUGGINGFACE_VAE_ENDPOINTS as HF_ENDPOINTS
 try:
     from diffusers.image_processor import VaeImageProcessor
 except ImportError as e:
@@ -17,8 +16,6 @@ except ImportError as e:
     print("[GridTester] ⚠️ If another custom node requires an older version, you may need to resolve the conflict manually.")
 
 
-
-# HF_ENDPOINTS imported from network_utils (single source of truth for allowlisted URLs)
 
 INSTALL_INSTRUCTIONS = (
     "Remote VAE requires the ComfyUI-USCG-RemoteVAE companion plugin.\n"
@@ -140,56 +137,6 @@ def detect_model_type(model, latent_channels):
         return "SD"
 
 
-def remote_decode_hf(endpoint, tensor, height, width):
-    """
-    Send latent to HuggingFace Remote VAE endpoint for decoding.
-    Uses centralized network gateway (network_utils.py).
-    """
-    try:
-        import json as _json
-
-        # Gateway handles: tensor prep, query string, urllib call, allowlist validation
-        output_tensor, resp_headers = huggingface_vae_decode(endpoint, tensor, height, width)
-
-        # Parse response — tensor shape and dtype from headers
-        shape_header = resp_headers.get("shape", "")
-
-        if shape_header:
-            try:
-                shape = _json.loads(shape_header)
-            except Exception:
-                shape = [int(x.strip()) for x in shape_header.split(",")]
-        else:
-            raise RuntimeError("No shape header in response")
-
-        dtype_str = resp_headers.get("dtype", "float32")
-        dtype_map = {
-            "float32": torch.float32,
-            "float16": torch.float16,
-            "bfloat16": torch.bfloat16,
-        }
-        dtype = dtype_map.get(dtype_str, torch.float32)
-
-        # Map to numpy dtype for frombuffer
-        numpy_dtype_map = {
-            "float32": np.float32,
-            "float16": np.float16,
-            "bfloat16": np.float32,  # NumPy doesn't support bfloat16
-        }
-        numpy_dtype = numpy_dtype_map.get(dtype_str, np.float32)
-
-        # Convert bytes back to tensor using correct dtype
-        tensor_np = np.frombuffer(output_tensor, dtype=numpy_dtype)
-        result = torch.from_numpy(tensor_np).reshape(shape).to(dtype)
-
-        return result
-
-    except Exception as e:
-        import traceback
-        traceback.print_exc()
-        raise
-
-
 class RemoteVAEDecodeWorker:
     """
     Background worker thread for async remote VAE decoding
@@ -231,7 +178,7 @@ class RemoteVAEDecodeWorker:
                     print(f"[GridTester] 🌐 Added batch dim: {latent_tensor.shape}")
                 
                 # Remote decode - returns [B, C, H, W] tensor
-                decoded = remote_decode_hf(self.endpoint, latent_tensor, height, width)
+                decoded = _companion_decode(self.endpoint, latent_tensor, height, width)
                 
                 # print(f"[GridTester] 🌐 Decoded shape: {decoded.shape}")
                 # print(f"[GridTester] 🌐 Decoded dtype: {decoded.dtype}")
