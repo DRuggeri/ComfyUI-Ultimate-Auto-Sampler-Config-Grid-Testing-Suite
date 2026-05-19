@@ -32,7 +32,7 @@ from .image_generation import (
 from .config_utils import sanitize_session_name
 from .html_generator import get_html_template
 from .conditioning_cache import ConditioningCache
-from .remote_vae import RemoteVAEDecodeWorker, is_remote_vae_available, get_endpoint_names
+from .remote_vae import RemoteVAEDecodeWorker, is_remote_vae_available, get_endpoint_names, INSTALL_INSTRUCTIONS
 
 try:
     from server import PromptServer
@@ -93,9 +93,19 @@ def is_remote_vae(vae_string):
     return isinstance(vae_string, str) and vae_string.startswith(REMOTE_VAE_PREFIX)
 
 def extract_remote_vae_url(vae_string):
-    """Extract the URL from a remote VAE string like 'remote:http://...'."""
+    """Extract the URL from a remote VAE string like 'remote:http://...'.
+
+    If the URL is empty:
+      - When the companion plugin is NOT installed, raise RuntimeError with
+        install instructions (the most likely user state — Builder UI shows
+        install card so URL field is empty).
+      - When the companion IS installed, raise ValueError asking the user to
+        pick a preset or enter a URL.
+    """
     url = vae_string[len(REMOTE_VAE_PREFIX):]
     if not url:
+        if not is_remote_vae_available():
+            raise RuntimeError(INSTALL_INSTRUCTIONS)
         raise ValueError(
             "[GridTester] Per-config remote VAE URL is empty.\n"
             "Please provide a valid endpoint URL in the config builder's VAE section."
