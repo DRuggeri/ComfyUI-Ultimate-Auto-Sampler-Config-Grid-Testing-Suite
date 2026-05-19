@@ -316,7 +316,7 @@ function _makeNumber(label, currentVal, min, max, step, onChange) {
     inp.max = max;
     inp.step = step;
     inp.style.cssText = 'flex: 1; background: #1a1a1a; color: #ccc; border: 1px solid #444; border-radius: 4px; padding: 3px 6px; font-size: 11px; max-width: 80px;';
-    inp.onchange = function() { var v = parseInt(inp.value); onChange(isNaN(v) ? min : Math.max(min, Math.min(max, v))); };
+    inp.onchange = function() { var v = parseFloat(inp.value); onChange(isNaN(v) ? min : Math.max(min, Math.min(max, v))); };
     row.appendChild(lbl);
     row.appendChild(inp);
     return row;
@@ -564,9 +564,9 @@ function _renderStep(pipeBody, config, pipeline, ucfg, stepIdx, modelList, callb
     var repeatInput = document.createElement('input');
     repeatInput.type = 'number';
     repeatInput.value = ucfg.repeat || 1;
-    repeatInput.min = 1; repeatInput.max = 20; repeatInput.step = 1;
+    repeatInput.min = 0; repeatInput.max = 20; repeatInput.step = "any";
     repeatInput.style.cssText = 'width: 44px; padding: 1px 3px; font-size: 10px; background: #1a1a1a; color: #ccc; border: 1px solid #444; border-radius: 3px;';
-    repeatInput.onchange = function() { ucfg.repeat = Math.max(1, parseInt(repeatInput.value) || 1); callbacks.onUpdate(); reRender(); };
+    repeatInput.onchange = function() { ucfg.repeat = Math.max(1, parseFloat(repeatInput.value) || 1); callbacks.onUpdate(); reRender(); };
     cardLeft.appendChild(repeatInput);
 
     if (ucfg.repeat > 1) {
@@ -855,8 +855,10 @@ function _renderStep(pipeBody, config, pipeline, ucfg, stepIdx, modelList, callb
             f2.max_new_tokens = v; callbacks.onUpdate();
         }));
 
-        grid.appendChild(_makeNumber('Florence2 Input MP:', f2.florence2_input_mp != null ? f2.florence2_input_mp : 0.5, 0, 4.0, 0.25, function(v) {
+        grid.appendChild(_makeNumber('Florence2 Input MP:', f2.florence2_input_mp != null ? f2.florence2_input_mp : 0.5, 0, 4.0, 0.01, function(v) {
+            console.log(f2.florence2_input_mp, v);
             f2.florence2_input_mp = v; callbacks.onUpdate();
+            console.log(f2.florence2_input_mp, v);
         }));
 
         // Group B: Crop & resize
