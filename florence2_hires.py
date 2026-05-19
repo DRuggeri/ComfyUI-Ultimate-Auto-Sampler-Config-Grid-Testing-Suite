@@ -378,7 +378,22 @@ def _get_or_load_checkpoint_lora(item, fallback, model_source, cache, session_mo
             cache["_warned_missing_model"] = True
         return fallback
 
-    lora_string = item.get("lora_expanded", "") or ""
+    # Read lora_expanded (post-folder-expansion concrete file paths) with fallback to
+    # the original 'lora' field for legacy manifests written before lora_expanded was
+    # tracked. Both formats are accepted by parse_lora_definition.
+    # Also normalize: strip whitespace, collapse any trailing " + " (which can leak
+    # from " + ".join(parts) where parts has empty trailing entries from expand_lora_folder).
+    raw_lora = item.get("lora_expanded") or item.get("lora") or ""
+    lora_string = str(raw_lora).strip()
+    # Strip trailing "+", " +", "+ ", " + " — these break parse_lora_definition's
+    # float parsing on the last entry (float("0.20 +") -> ValueError).
+    while lora_string.endswith("+") or lora_string.endswith(" "):
+        lora_string = lora_string.rstrip("+ ").rstrip()
+    # Same for leading.
+    while lora_string.startswith("+") or lora_string.startswith(" "):
+        lora_string = lora_string.lstrip("+ ").lstrip()
+    if not lora_string:
+        lora_string = "None"
     key = (model_name, lora_string)
     if key in cache:
         return cache[key]
