@@ -20,6 +20,51 @@ except ImportError as e:
 
 # HF_ENDPOINTS imported from network_utils (single source of truth for allowlisted URLs)
 
+INSTALL_INSTRUCTIONS = (
+    "Remote VAE requires the ComfyUI-USCG-RemoteVAE companion plugin.\n"
+    "Install via Comfy Manager (search 'USCG Remote VAE') or:\n"
+    "  git clone https://github.com/JasonHoku/ComfyUI-USCG-RemoteVAE\n"
+    "into your ComfyUI/custom_nodes/ directory."
+)
+
+
+def is_remote_vae_available():
+    """Return True if the ComfyUI-USCG-RemoteVAE companion plugin is loaded."""
+    try:
+        import comfyui_uscg_remote_vae  # noqa: F401
+        return True
+    except ImportError:
+        return False
+
+
+def get_endpoint_names():
+    """Return list of HF endpoint names for UI dropdown.
+    Empty list if companion not installed."""
+    try:
+        from comfyui_uscg_remote_vae import list_endpoints
+        return [name for name, _url in list_endpoints()]
+    except ImportError:
+        return []
+
+
+def _companion_decode(endpoint, tensor, height, width):
+    """Forward a decode call to the companion plugin.
+
+    Raises:
+        RuntimeError: companion not installed (with install instructions)
+                      or companion version too old.
+    """
+    try:
+        from comfyui_uscg_remote_vae import decode, __version__
+    except ImportError:
+        raise RuntimeError(INSTALL_INSTRUCTIONS)
+    if tuple(map(int, __version__.split(".")[:2])) < (0, 1):
+        raise RuntimeError(
+            f"ComfyUI-USCG-RemoteVAE >= 0.1.0 required (found {__version__}). "
+            "Update via Comfy Manager."
+        )
+    return decode(endpoint, tensor, height, width)
+
 
 def detect_model_type(model, latent_channels):
     """

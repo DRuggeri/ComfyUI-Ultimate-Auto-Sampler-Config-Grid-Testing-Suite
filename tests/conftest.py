@@ -29,6 +29,11 @@ _COMFY_STUBS = [
     "comfy.sd",
     "comfy.model_management",
     "comfy.samplers",
+    # diffusers triggers a torchvision.__spec__ is None ValueError when imported
+    # outside ComfyUI.  Stub it out so remote_vae.py's try/except catches the
+    # ImportError and sets VaeImageProcessor = None.
+    "diffusers",
+    "diffusers.image_processor",
 ]
 
 for _mod_name in _COMFY_STUBS:
@@ -131,8 +136,34 @@ _GEN_ORCH_DEPS = {
     "remote_vae": {
         "RemoteVAEDecodeWorker": type("RemoteVAEDecodeWorker", (), {}),
         "HF_ENDPOINTS": {},
+        # Facade functions — inline real implementations so tests can exercise
+        # them without needing to load the full remote_vae.py module.
+        "INSTALL_INSTRUCTIONS": (
+            "Remote VAE requires the ComfyUI-USCG-RemoteVAE companion plugin.\n"
+            "Install via Comfy Manager (search 'USCG Remote VAE') or:\n"
+            "  git clone https://github.com/JasonHoku/ComfyUI-USCG-RemoteVAE\n"
+            "into your ComfyUI/custom_nodes/ directory."
+        ),
     },
 }
+
+# network_utils.py uses only stdlib — always load the real module and register
+# it under both the bare name and the package-qualified name.  This ensures the
+# relative import `from .network_utils import huggingface_vae_decode, ...` in
+# remote_vae.py resolves correctly regardless of what pytest has pre-loaded.
+import importlib.util as _ilu  # imported here; re-used below for gen_orch and remote_vae
+_NETWORK_UTILS_FQ = f"{_PKG_NAME}.network_utils"
+_NU_PATH = os.path.join(_NODE_ROOT, "network_utils.py")
+_nu_spec = _ilu.spec_from_file_location(_NETWORK_UTILS_FQ, _NU_PATH,
+                                        submodule_search_locations=[])
+_nu_spec.submodule_search_locations = None
+_nu_mod = _ilu.module_from_spec(_nu_spec)
+_nu_mod.__package__ = _PKG_NAME
+# Unconditionally replace any prior stub — we need the real attributes.
+sys.modules[_NETWORK_UTILS_FQ] = _nu_mod
+sys.modules["network_utils"] = _nu_mod
+setattr(sys.modules[_PKG_NAME], "network_utils", _nu_mod)
+_nu_spec.loader.exec_module(_nu_mod)
 
 for _bare, _attrs in _GEN_ORCH_DEPS.items():
     _fq = f"{_PKG_NAME}.{_bare}"
@@ -151,7 +182,6 @@ for _bare, _attrs in _GEN_ORCH_DEPS.items():
 # imports (`from .trigger_words import ...`) resolve correctly.  Once loaded
 # under the package name it is also registered as a top-level alias so
 # `from generation_orchestrator import get_model_cache_key` works.
-import importlib.util as _ilu
 _GO_PATH = os.path.join(_NODE_ROOT, "generation_orchestrator.py")
 _GO_FQ = f"{_PKG_NAME}.generation_orchestrator"
 if "generation_orchestrator" not in sys.modules:
@@ -163,3 +193,22 @@ if "generation_orchestrator" not in sys.modules:
     sys.modules[_GO_FQ] = _go_mod
     sys.modules["generation_orchestrator"] = _go_mod
     _spec.loader.exec_module(_go_mod)
+
+# Pre-load the real remote_vae module so that test_remote_vae_facade.py gets
+# the actual functions (is_remote_vae_available, get_endpoint_names,
+# _companion_decode) rather than the lightweight stub registered above.
+# remote_vae.py uses `from .network_utils import ...`; we satisfy that via the
+# network_utils stub already registered in sys.modules.
+_RV_PATH = os.path.join(_NODE_ROOT, "remote_vae.py")
+_RV_FQ = f"{_PKG_NAME}.remote_vae"
+_rv_spec = _ilu.spec_from_file_location(_RV_FQ, _RV_PATH,
+                                        submodule_search_locations=[])
+_rv_spec.submodule_search_locations = None
+_rv_mod = _ilu.module_from_spec(_rv_spec)
+_rv_mod.__package__ = _PKG_NAME
+# Replace the earlier stub with the real module BEFORE exec so that any
+# internal import resolution finds the real object.
+sys.modules[_RV_FQ] = _rv_mod
+sys.modules["remote_vae"] = _rv_mod
+setattr(sys.modules[_PKG_NAME], "remote_vae", _rv_mod)
+_rv_spec.loader.exec_module(_rv_mod)
