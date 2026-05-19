@@ -5394,6 +5394,7 @@ function createDefaultFlorence2Options() {
         text_input: "face",
         output_mask_select: "",
         max_new_tokens: 1024,
+        florence2_input_mp: 0.5,
         target_megapixels: 1.0,
         crop_padding: 64,
         min_crop_resolution: 0,        // No floor — Florence2's polygon decides
@@ -6419,6 +6420,14 @@ export function renderUpscalingSection(node, container, modelLists) {
                     f2MaxTokInput.title = "Florence2 beam-search budget. Default 1024 (kijai stock). Model emits EOS when the polygon is complete (typically ~50-100 tokens for a face) — the cap is just a ceiling. Lowering too far causes truncated polygons (mask doesn't cover the full detected region). Only reduce if you're VRAM-constrained AND comfortable with potentially partial polygons.";
                     f2MaxTokInput.onchange = () => { f2.max_new_tokens = parseInt(f2MaxTokInput.value, 10); node.saveState(); };
                     grid.appendChild(createInputGroup("Max New Tokens", f2MaxTokInput));
+
+                    const f2InMpInput = document.createElement("input");
+                    f2InMpInput.type = "number"; f2InMpInput.className = "cb-input";
+                    f2InMpInput.value = f2.florence2_input_mp != null ? f2.florence2_input_mp : 0.5;
+                    f2InMpInput.min = 0; f2InMpInput.max = 4.0; f2InMpInput.step = 0.25;
+                    f2InMpInput.title = "Resize source image to this MP BEFORE Florence2 detection. Florence2's vision encoder activations scale with input dims — 0.5 MP cuts encoder VRAM ~4x with negligible detection-accuracy loss. The mask gets scaled back up to source resolution after detection, so the crop/inpaint/paste-back still runs at full quality. Set 0 to disable. Only takes effect when source > this MP.";
+                    f2InMpInput.onchange = () => { f2.florence2_input_mp = parseFloat(f2InMpInput.value); node.saveState(); };
+                    grid.appendChild(createInputGroup("Florence2 Input MP", f2InMpInput));
 
                     // --- Group B: Crop & resize ---
                     const f2MpInput = document.createElement("input");

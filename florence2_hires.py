@@ -523,22 +523,47 @@ def run_florence2_step(
     f2r_cls = classes["Florence2Run"]
 
     text_input = manifest_extras["florence2_text_input"]
-    # max_new_tokens default 1024 (kijai's stock value). I briefly tried 256 to cut
-    # KV cache size and it caused polygon truncation — Florence2 needs ~50-100 tokens
-    # for a typical face polygon but won't EOS cleanly if the cap is too tight, and
-    # ends up burning the whole budget on garbage continuations. The original OOM was
-    # actually the duplicate model load (fixed via same-model short-circuit in
-    # _get_or_load_checkpoint_lora) + stale prior-gen models (fixed via
-    # soft_empty_cache at upscale_runner start), not the KV cache.
-    # keep_model_loaded=False: Florence2 moves to CPU after each detection. The Python
-    # handle in _FLORENCE2_MODEL_CACHE still works (next call moves it back to GPU,
-    # ~1-2s). Florence2 stops competing with KSampler / session checkpoint for VRAM.
     max_new_tokens = int(step_config.get("max_new_tokens", 1024) or 1024)
     manifest_extras["florence2_max_new_tokens"] = max_new_tokens
-    print(f"[Florence2HiResFix] Detecting '{text_input}' in image... (max_new_tokens={max_new_tokens})")
+
+    # Optional pre-detect resize: Florence2's vision encoder activations scale with
+    # input dims. Down-scaling the image before detection cuts the encoder's peak
+    # VRAM substantially while preserving detection accuracy (faces are detectable
+    # at 0.5 MP or lower without quality loss because we crop+inpaint at full source
+    # resolution afterward — the mask just needs to find the region). Set
+    # florence2_input_mp=0 to disable the resize.
+    import comfy.utils as _cu
+    src_h, src_w = int(source_image.shape[1]), int(source_image.shape[2])
+    src_mp = (src_w * src_h) / (1024 * 1024)
+    detect_input_mp = float(step_config.get("florence2_input_mp", 0.5) or 0)
+    detect_image = source_image
+    detect_resized = False
+    if detect_input_mp > 0 and detect_input_mp < src_mp:
+        det_w, det_h = compute_target_dims(src_w, src_h, detect_input_mp)
+        det_nchw = source_image.movedim(-1, 1)
+        det_resized_nchw = _cu.common_upscale(det_nchw, det_w, det_h, "lanczos", "disabled")
+        detect_image = det_resized_nchw.movedim(1, -1)
+        detect_resized = True
+        print(
+            f"[Florence2HiResFix] Detecting '{text_input}' "
+            f"(src={src_w}x{src_h}={src_mp:.2f}MP -> detect={det_w}x{det_h}={detect_input_mp:.2f}MP, "
+            f"max_new_tokens={max_new_tokens})"
+        )
+    else:
+        print(
+            f"[Florence2HiResFix] Detecting '{text_input}' "
+            f"(src={src_w}x{src_h}={src_mp:.2f}MP, no pre-resize, max_new_tokens={max_new_tokens})"
+        )
+    manifest_extras["florence2_input_mp"] = detect_input_mp
+    manifest_extras["florence2_detect_resized"] = detect_resized
+
+    # max_new_tokens=1024 default (kijai stock). 256 caused polygon truncation —
+    # Florence2 won't EOS cleanly under a tight cap and burns the budget on
+    # garbage continuations. With detect-side resize taking the heat instead,
+    # the KV cache at 1024 fits comfortably.
     det_result = _call_node(
         f2r_cls,
-        image=source_image,
+        image=detect_image,
         florence2_model=florence2_model,
         text_input=text_input,
         task="referring_expression_segmentation",
@@ -551,6 +576,15 @@ def run_florence2_step(
         seed=1,
     )
     mask = _unwrap(det_result, 1)
+
+    # If we ran Florence2 on a down-scaled image, the returned mask is at the
+    # smaller dims. Upscale it back to the original source dims so the crop /
+    # grow / feather pipeline operates at full resolution. Bilinear is fine for
+    # mask resize — feather + grow downstream will smooth any edge quantization.
+    if detect_resized and mask is not None and mask.numel() > 0:
+        m_nchw = mask.unsqueeze(1)  # (B, H, W) -> (B, 1, H, W)
+        m_up_nchw = _cu.common_upscale(m_nchw, src_w, src_h, "bilinear", "disabled")
+        mask = m_up_nchw.squeeze(1)
 
     # 3. No-detection check
     mask_sum = float(mask.sum().item()) if mask is not None else 0.0

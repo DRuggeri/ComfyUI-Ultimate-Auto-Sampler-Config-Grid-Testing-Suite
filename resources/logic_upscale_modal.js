@@ -22,6 +22,7 @@ function _defaultFlorence2Options() {
         text_input: "face",
         output_mask_select: "",
         max_new_tokens: 1024,
+        florence2_input_mp: 0.5,
         target_megapixels: 1.0,
         crop_padding: 64,
         min_crop_resolution: 0,       // No floor — Florence2's polygon decides
@@ -852,6 +853,10 @@ function _renderStep(pipeBody, config, pipeline, ucfg, stepIdx, modelList, callb
 
         grid.appendChild(_makeNumber('Max New Tokens:', f2.max_new_tokens != null ? f2.max_new_tokens : 1024, 64, 2048, 32, function(v) {
             f2.max_new_tokens = v; callbacks.onUpdate();
+        }));
+
+        grid.appendChild(_makeNumber('Florence2 Input MP:', f2.florence2_input_mp != null ? f2.florence2_input_mp : 0.5, 0, 4.0, 0.25, function(v) {
+            f2.florence2_input_mp = v; callbacks.onUpdate();
         }));
 
         // Group B: Crop & resize
