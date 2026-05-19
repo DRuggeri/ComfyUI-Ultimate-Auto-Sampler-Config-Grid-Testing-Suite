@@ -1308,12 +1308,12 @@ These endpoints are used internally by the distribution system:
 
 | Method | Route | Purpose |
 |--------|-------|---------|
-| GET | `/distribution/claim_job` | Worker claims next pending job (200 + job JSON, 204 = no jobs, 503 = inactive) |
-| POST | `/distribution/submit_result` | Worker uploads completed image (multipart: metadata + image) |
-| GET | `/distribution/status` | Get distribution status and worker stats |
-| POST | `/distribution/register_worker` | Worker registration with master |
-| GET | `/distribution/download_model` | Download model file for model sync |
-| POST | `/distribution/heartbeat` | Worker keepalive signal |
+| GET | `/uscg-distribution/claim_job` | Worker claims next pending job (200 + job JSON, 204 = no jobs, 503 = inactive) |
+| POST | `/uscg-distribution/submit_result` | Worker uploads completed image (multipart: metadata + image) |
+| GET | `/uscg-distribution/status` | Get distribution status and worker stats |
+| POST | `/uscg-distribution/register_worker` | Worker registration with master |
+| GET | `/uscg-distribution/download_model` | Download model file for model sync |
+| POST | `/uscg-distribution/heartbeat` | Worker keepalive signal |
 
 ---
 

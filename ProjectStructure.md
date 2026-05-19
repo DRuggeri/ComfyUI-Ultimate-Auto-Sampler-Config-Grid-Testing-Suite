@@ -211,12 +211,12 @@ All routes registered via `PromptServer.instance.routes`.
 
 | Method | Route | Purpose |
 |---|---|---|
-| GET | `/distribution/claim_job` | Worker claims next pending job (200 + job JSON, 204 = no jobs, 503 = inactive) |
-| POST | `/distribution/submit_result` | Worker uploads completed image (multipart: {metadata, image}) |
-| GET | `/distribution/status` | Get distribution status, worker stats, job counts |
-| POST | `/distribution/register_worker` | Worker registration with master |
-| GET | `/distribution/download_model` | Download model file for model sync `{category, filename}` |
-| POST | `/distribution/heartbeat` | Worker keepalive signal |
+| GET | `/uscg-distribution/claim_job` | Worker claims next pending job (200 + job JSON, 204 = no jobs, 503 = inactive) |
+| POST | `/uscg-distribution/submit_result` | Worker uploads completed image (multipart: {metadata, image}) |
+| GET | `/uscg-distribution/status` | Get distribution status, worker stats, job counts |
+| POST | `/uscg-distribution/register_worker` | Worker registration with master |
+| GET | `/uscg-distribution/download_model` | Download model file for model sync `{category, filename}` |
+| POST | `/uscg-distribution/heartbeat` | Worker keepalive signal |
 
 ---
 
@@ -338,12 +338,12 @@ All routes registered via `PromptServer.instance.routes`.
 
 * **`distribution_worker.py`** (813 lines)
   * **Class:** `WorkerThread(threading.Thread)` — daemon thread on remote instances
-  * Polls `/distribution/claim_job` every 2s, processes locally, uploads results
+  * Polls `/uscg-distribution/claim_job` every 2s, processes locally, uploads results
   * Caches model/CLIP/VAE between jobs, supports model sync from master
   * Exits after 30 empty polls or 503 response
 
 * **`distribution_routes.py`** (640 lines)
-  * Registers `/distribution/*` endpoints on PromptServer
+  * Registers `/uscg-distribution/*` endpoints on PromptServer
   * Global state: `_distribution_manager` (master), `_worker_thread` (worker)
 
 ---
@@ -616,10 +616,10 @@ iframe postMessage({type: 'toggle_fullscreen', node_id})
 Master:
   1. generation_orchestrator → DistributionManager.populate_jobs()
   2. [Optional] _preencode_all_conditionings() → manager.set_encoded_conditionings()
-  3. POST /distribution/register_worker on each worker
-  4. Workers poll GET /distribution/claim_job
+  3. POST /uscg-distribution/register_worker on each worker
+  4. Workers poll GET /uscg-distribution/claim_job
   5. manager._job_to_dict() attaches encoded_positive/encoded_negative if available
-  6. Worker processes job → POST /distribution/submit_result (multipart: metadata + image)
+  6. Worker processes job → POST /uscg-distribution/submit_result (multipart: metadata + image)
   7. Master saves image + updates manifest
 ```
 
