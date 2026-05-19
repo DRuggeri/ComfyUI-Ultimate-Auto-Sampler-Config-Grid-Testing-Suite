@@ -22,10 +22,8 @@ import numpy as np
 
 # Import from split modules
 from .remote_vae import (
-    HF_ENDPOINTS, 
-    detect_model_type, 
-    remote_decode_hf, 
-    RemoteVAEDecodeWorker
+    detect_model_type,
+    RemoteVAEDecodeWorker,
 )
 from .lora_utils import load_and_save_tags
 from .config_utils import (
