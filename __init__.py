@@ -14,8 +14,14 @@ from .config_builder_node import UltimateConfigBuilder
 from .json_text_node import SmartJSONTextNode
 from .metadata_packer import pack_metadata_into_image
 from .directory_scanner import scan_directory_for_images
-# Import distribution_routes to register /distribution/* API endpoints at module load time
-from . import distribution_routes
+import sys
+
+# Register a sys.modules alias for cross-companion imports.
+# The Distributed companion (ComfyUI-USCG-Distributed) lazy-imports main USCG
+# modules via `from comfyui_uscg_main.<module> import <func>`. The folder name
+# 'ComfyUI-Ultimate-Auto-Sampler-Config-Grid-Testing-Suite' has hyphens (not
+# valid identifiers), so we publish the underscored alias for Python imports.
+sys.modules["comfyui_uscg_main"] = sys.modules[__name__]
 
 
 # --- PATH SECURITY HELPERS ---
