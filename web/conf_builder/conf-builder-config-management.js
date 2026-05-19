@@ -66,14 +66,42 @@ const RESOLUTION_PRESETS = {
     }
 };
 
-// HF Remote VAE endpoint presets (mirrors remote_vae.py HF_ENDPOINTS)
-const REMOTE_VAE_PRESETS = {
-    "Custom": "",
-    "HF-SD": "https://q1bj3bpq6kzilnsu.us-east-1.aws.endpoints.huggingface.cloud/",
-    "HF-SDXL": "https://x2dmsqunjd6k9prw.us-east-1.aws.endpoints.huggingface.cloud/",
-    "HF-Flux": "https://whhx50ex1aryqvw6.us-east-1.aws.endpoints.huggingface.cloud/",
-    "HF-HunyuanVideo": "https://o7ywnmrahorts457.us-east-1.aws.endpoints.huggingface.cloud/"
-};
+// =============================================================================
+// REMOTE VAE COMPANION DETECTION
+//
+// The HuggingFace Remote VAE feature lives in a separate optional plugin:
+// ComfyUI-USCG-RemoteVAE. We detect its presence by fetching /uscg-remote-vae/health
+// (200 means installed, 404 means missing) and load the endpoint list from
+// /uscg-remote-vae/endpoints.
+//
+// Both promises are cached per Builder load. The "Re-check after install"
+// button in the install card clears them.
+// =============================================================================
+
+let _remoteVaeStatusPromise = null;
+function isRemoteVaeAvailable() {
+    if (_remoteVaeStatusPromise === null) {
+        _remoteVaeStatusPromise = fetch('/uscg-remote-vae/health')
+            .then(r => r.ok)
+            .catch(() => false);
+    }
+    return _remoteVaeStatusPromise;
+}
+
+let _remoteVaeEndpointsPromise = null;
+function loadRemoteVaeEndpoints() {
+    if (_remoteVaeEndpointsPromise === null) {
+        _remoteVaeEndpointsPromise = fetch('/uscg-remote-vae/endpoints')
+            .then(r => r.ok ? r.json() : [])
+            .catch(() => []);
+    }
+    return _remoteVaeEndpointsPromise;
+}
+
+function _resetRemoteVaeCaches() {
+    _remoteVaeStatusPromise = null;
+    _remoteVaeEndpointsPromise = null;
+}
 
 // Debounced renderUI to batch rapid state changes and avoid redundant full rebuilds
 // Pass optional arrayIdx for partial re-render of just one config section
