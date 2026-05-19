@@ -3697,6 +3697,159 @@ export function renderExtraModelSamplingSection(node, div, configArray, arrayIdx
     div.appendChild(sectionGrid);
 }
 
+// --- VAE ELEMENT CREATOR HELPERS ---
+
+function _renderRemoteVaeInstallCard(node) {
+    const card = document.createElement('div');
+    card.className = 'cb-remote-vae-install-card';
+    card.style.cssText = [
+        "border: 1px solid #b07530",
+        "background: rgba(176, 117, 48, 0.08)",
+        "border-radius: 4px",
+        "padding: 8px 10px",
+        "margin: 4px 0",
+        "font-size: 11px",
+        "color: #ddd",
+        "line-height: 1.4",
+    ].join(';');
+
+    const header = document.createElement('div');
+    header.style.fontWeight = "600";
+    header.style.marginBottom = "6px";
+    header.style.color = "#f0a050";
+    header.textContent = "⚠ Remote VAE requires the companion plugin";
+    card.appendChild(header);
+
+    const intro = document.createElement('div');
+    intro.textContent = "Install via:";
+    card.appendChild(intro);
+
+    const list = document.createElement('ul');
+    list.style.margin = "4px 0 4px 16px";
+    list.style.padding = "0";
+
+    const liManager = document.createElement('li');
+    liManager.appendChild(document.createTextNode("Comfy Manager — search "));
+    const bold = document.createElement('b');
+    bold.textContent = "USCG Remote VAE";
+    liManager.appendChild(bold);
+    list.appendChild(liManager);
+
+    const liManual = document.createElement('li');
+    liManual.appendChild(document.createTextNode("Manual: "));
+    const codeClone = document.createElement('code');
+    codeClone.style.fontSize = "10px";
+    codeClone.textContent = "git clone";
+    liManual.appendChild(codeClone);
+    liManual.appendChild(document.createTextNode(" the repo into "));
+    const codeDir = document.createElement('code');
+    codeDir.style.fontSize = "10px";
+    codeDir.textContent = "custom_nodes/";
+    liManual.appendChild(codeDir);
+    list.appendChild(liManual);
+
+    card.appendChild(list);
+
+    const restart = document.createElement('div');
+    restart.style.marginTop = "6px";
+    restart.textContent = "Then restart ComfyUI.";
+    card.appendChild(restart);
+
+    const buttonRow = document.createElement('div');
+    buttonRow.style.marginTop = "8px";
+    buttonRow.style.display = "flex";
+    buttonRow.style.gap = "8px";
+
+    const ghLink = document.createElement('a');
+    ghLink.href = "https://github.com/JasonHoku/ComfyUI-USCG-RemoteVAE";
+    ghLink.target = "_blank";
+    ghLink.rel = "noopener";
+    ghLink.style.cssText = "background:#444;color:#ddd;padding:4px 8px;border-radius:3px;text-decoration:none;font-size:11px;";
+    ghLink.textContent = "Open on GitHub ↗";
+    buttonRow.appendChild(ghLink);
+
+    const recheckBtn = document.createElement('button');
+    recheckBtn.type = "button";
+    recheckBtn.className = "cb-button";
+    recheckBtn.style.fontSize = "11px";
+    recheckBtn.style.padding = "4px 8px";
+    recheckBtn.textContent = "Re-check after install";
+    recheckBtn.addEventListener('click', () => {
+        _resetRemoteVaeCaches();
+        debouncedRenderUI(node);
+    });
+    buttonRow.appendChild(recheckBtn);
+
+    card.appendChild(buttonRow);
+
+    return card;
+}
+
+function _renderRemoteVaeControls(node, arrayIdx, vaeIdx, vaeName, endpoints) {
+    // endpoints: list of {name, url} from companion plugin's /uscg-remote-vae/endpoints
+    const wrap = document.createElement('div');
+
+    const presetSelect = document.createElement('select');
+    presetSelect.className = 'cb-select';
+    presetSelect.style.marginBottom = '4px';
+
+    const currentUrl = vaeName.replace(/^remote:/, '');
+
+    // "Custom URL" sentinel option first.
+    const customOpt = document.createElement('option');
+    customOpt.value = '';
+    customOpt.textContent = 'Custom URL';
+    if (!endpoints.some(e => e.url === currentUrl)) customOpt.selected = true;
+    presetSelect.appendChild(customOpt);
+
+    endpoints.forEach(({ name, url }) => {
+        const opt = document.createElement('option');
+        opt.value = url;
+        opt.textContent = name;
+        if (currentUrl === url) opt.selected = true;
+        presetSelect.appendChild(opt);
+    });
+
+    const urlInput = document.createElement('input');
+    urlInput.className = 'cb-input';
+    urlInput.type = 'text';
+    urlInput.placeholder = 'https://your-endpoint.huggingface.cloud/';
+    urlInput.value = currentUrl;
+    urlInput.style.fontFamily = 'monospace';
+    urlInput.style.fontSize = '12px';
+
+    urlInput.onchange = () => {
+        const url = urlInput.value.trim();
+        node.state.config_arrays[arrayIdx].vaes[vaeIdx] = url ? `remote:${url}` : 'remote:';
+        node.saveState();
+        const match = endpoints.find(e => e.url === url);
+        presetSelect.value = match ? match.url : '';
+    };
+    urlInput.onblur = urlInput.onchange;
+
+    presetSelect.onchange = () => {
+        const selectedUrl = presetSelect.value;
+        if (selectedUrl) {
+            urlInput.value = selectedUrl;
+            node.state.config_arrays[arrayIdx].vaes[vaeIdx] = `remote:${selectedUrl}`;
+            node.saveState();
+        } else {
+            urlInput.value = '';
+            urlInput.focus();
+        }
+    };
+
+    wrap.appendChild(presetSelect);
+    wrap.appendChild(urlInput);
+
+    const helper = document.createElement('div');
+    helper.style.cssText = 'font-size: 9px; color: #666; padding: 2px 4px;';
+    helper.textContent = 'Select a preset or enter an allowlisted endpoint URL';
+    wrap.appendChild(helper);
+
+    return wrap;
+}
+
 // --- VAE ELEMENT CREATOR ---
 
 function createVAEElement(node, vaeName, arrayIdx, vaeIdx, vaeList, vFolders) {
@@ -3847,60 +4000,25 @@ function createVAEElement(node, vaeName, arrayIdx, vaeIdx, vaeList, vFolders) {
     contentDiv.appendChild(typeSelect);
 
     if (isRemote) {
-        // Presets dropdown for known HF Remote VAE endpoints
-        const presetSelect = document.createElement("select");
-        presetSelect.className = "cb-select";
-        presetSelect.style.marginBottom = "4px";
-        const currentUrl = vaeName.replace(/^remote:/, "");
-        Object.entries(REMOTE_VAE_PRESETS).forEach(([label, url]) => {
-            const opt = document.createElement("option");
-            opt.value = url;
-            opt.textContent = label;
-            // Select matching preset, or "Custom" if URL doesn't match any preset
-            if (url && currentUrl === url) opt.selected = true;
-            else if (!url && !Object.values(REMOTE_VAE_PRESETS).includes(currentUrl)) opt.selected = true;
-            presetSelect.appendChild(opt);
-        });
+        // Async render: drop a placeholder, then swap based on companion availability.
+        const placeholder = document.createElement('div');
+        placeholder.style.fontSize = "9px";
+        placeholder.style.color = "#666";
+        placeholder.style.padding = "2px 4px";
+        placeholder.textContent = "Checking for Remote VAE companion plugin...";
+        contentDiv.appendChild(placeholder);
 
-        // Text input for remote VAE endpoint URL
-        const urlInput = document.createElement("input");
-        urlInput.className = "cb-input";
-        urlInput.type = "text";
-        urlInput.placeholder = "http://192.168.1.100:8080/decode";
-        urlInput.value = currentUrl;
-        urlInput.style.fontFamily = "monospace";
-        urlInput.style.fontSize = "12px";
-        urlInput.onchange = () => {
-            const url = urlInput.value.trim();
-            node.state.config_arrays[arrayIdx].vaes[vaeIdx] = url ? `remote:${url}` : "remote:";
-            node.saveState();
-            // Update preset dropdown to match
-            const matchingPreset = Object.entries(REMOTE_VAE_PRESETS).find(([, u]) => u && u === url);
-            presetSelect.value = matchingPreset ? matchingPreset[1] : "";
-        };
-        urlInput.onblur = urlInput.onchange;
-
-        presetSelect.onchange = () => {
-            const selectedUrl = presetSelect.value;
-            if (selectedUrl) {
-                urlInput.value = selectedUrl;
-                node.state.config_arrays[arrayIdx].vaes[vaeIdx] = `remote:${selectedUrl}`;
-                node.saveState();
+        isRemoteVaeAvailable().then(available => {
+            if (!available) {
+                placeholder.replaceWith(_renderRemoteVaeInstallCard(node));
             } else {
-                // "Custom" selected - clear URL for manual entry
-                urlInput.value = "";
-                urlInput.focus();
+                loadRemoteVaeEndpoints().then(endpoints => {
+                    placeholder.replaceWith(
+                        _renderRemoteVaeControls(node, arrayIdx, vaeIdx, vaeName, endpoints)
+                    );
+                });
             }
-        };
-
-        contentDiv.appendChild(presetSelect);
-        contentDiv.appendChild(urlInput);
-
-        // Helper text
-        const helperText = document.createElement("div");
-        helperText.style.cssText = "font-size: 9px; color: #666; padding: 2px 4px;";
-        helperText.textContent = "Select a preset or enter a custom endpoint URL for your remote VAE decode server";
-        contentDiv.appendChild(helperText);
+        });
     } else {
         // Searchable Select for VAE file or folder
         const options = isFolder ? vFolders : vaeList;
