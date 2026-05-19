@@ -6,12 +6,142 @@
 
 import { createInputGroup, createSlider, createSectionHeader } from './conf-builder-ui-components.js';
 
+// =============================================================================
+// DISTRIBUTED COMPANION DETECTION
+//
+// Distribution feature lives in ComfyUI-USCG-Distributed companion plugin.
+// 200 from /uscg-distribution/health -> installed. 404 -> missing.
+//
+// Cached per Builder load. Cleared by the "Re-check after install" button.
+// =============================================================================
+
+let _distributedStatusPromise = null;
+function isDistributedAvailable() {
+    if (_distributedStatusPromise === null) {
+        _distributedStatusPromise = fetch('/uscg-distribution/health')
+            .then(r => r.ok)
+            .catch(() => false);
+    }
+    return _distributedStatusPromise;
+}
+
+function _resetDistributedCache() {
+    _distributedStatusPromise = null;
+}
+
+function _renderDistributedInstallCard(node) {
+    const card = document.createElement('div');
+    card.className = 'cb-distributed-install-card';
+    card.style.cssText = [
+        "border: 1px solid #b07530",
+        "background: rgba(176, 117, 48, 0.08)",
+        "border-radius: 4px",
+        "padding: 8px 10px",
+        "margin: 4px 0",
+        "font-size: 11px",
+        "color: #ddd",
+        "line-height: 1.4",
+    ].join(';');
+
+    const header = document.createElement('div');
+    header.style.fontWeight = "600";
+    header.style.marginBottom = "6px";
+    header.style.color = "#f0a050";
+    header.textContent = "⚠ Distributed multi-machine generation requires the companion plugin";
+    card.appendChild(header);
+
+    const intro = document.createElement('div');
+    intro.textContent = "Install via:";
+    card.appendChild(intro);
+
+    const list = document.createElement('ul');
+    list.style.margin = "4px 0 4px 16px";
+    list.style.padding = "0";
+
+    const liManager = document.createElement('li');
+    liManager.appendChild(document.createTextNode("Comfy Manager — search "));
+    const bold = document.createElement('b');
+    bold.textContent = "USCG Distributed";
+    liManager.appendChild(bold);
+    list.appendChild(liManager);
+
+    const liManual = document.createElement('li');
+    liManual.appendChild(document.createTextNode("Manual: "));
+    const codeClone = document.createElement('code');
+    codeClone.style.fontSize = "10px";
+    codeClone.textContent = "git clone";
+    liManual.appendChild(codeClone);
+    liManual.appendChild(document.createTextNode(" the repo into "));
+    const codeDir = document.createElement('code');
+    codeDir.style.fontSize = "10px";
+    codeDir.textContent = "custom_nodes/";
+    liManual.appendChild(codeDir);
+    list.appendChild(liManual);
+
+    card.appendChild(list);
+
+    const restart = document.createElement('div');
+    restart.style.marginTop = "6px";
+    restart.textContent = "Then restart ComfyUI.";
+    card.appendChild(restart);
+
+    const buttonRow = document.createElement('div');
+    buttonRow.style.marginTop = "8px";
+    buttonRow.style.display = "flex";
+    buttonRow.style.gap = "8px";
+
+    const ghLink = document.createElement('a');
+    ghLink.href = "https://github.com/JasonHoku/ComfyUI-USCG-Distributed";
+    ghLink.target = "_blank";
+    ghLink.rel = "noopener";
+    ghLink.style.cssText = "background:#444;color:#ddd;padding:4px 8px;border-radius:3px;text-decoration:none;font-size:11px;";
+    ghLink.textContent = "Open on GitHub ↗";
+    buttonRow.appendChild(ghLink);
+
+    const recheckBtn = document.createElement('button');
+    recheckBtn.type = "button";
+    recheckBtn.className = "cb-button";
+    recheckBtn.style.fontSize = "11px";
+    recheckBtn.style.padding = "4px 8px";
+    recheckBtn.textContent = "Re-check after install";
+    recheckBtn.addEventListener('click', () => {
+        _resetDistributedCache();
+        if (typeof debouncedRenderUI === 'function') {
+            debouncedRenderUI(node);
+        }
+    });
+    buttonRow.appendChild(recheckBtn);
+
+    card.appendChild(buttonRow);
+
+    return card;
+}
+
 // --- DISTRIBUTION SECTION RENDERER ---
 
 export function renderDistributionSection(node, container) {
+    const placeholder = document.createElement('div');
+    placeholder.style.cssText = "font-size: 9px; color: #666; padding: 2px 4px;";
+    placeholder.textContent = "Checking for Distributed companion plugin...";
+    container.appendChild(placeholder);
+
+    isDistributedAvailable().then(available => {
+        if (!available) {
+            placeholder.replaceWith(_renderDistributedInstallCard(node));
+        } else {
+            placeholder.remove();
+            _renderDistributionSectionReal(node, container);
+        }
+    });
+}
+
+function _renderDistributionSectionReal(node, container) {
     const section = document.createElement("div");
     section.className = "cb-section";
-    section.innerHTML = '<div class="cb-section-title">🌐 Distribution</div>';
+    const sectionTitle = document.createElement("div");
+    sectionTitle.className = "cb-section-title";
+    sectionTitle.textContent = "🌐 Distribution";
+    section.appendChild(sectionTitle);
     const content = document.createElement("div");
 
     // Ensure distribution state defaults exist
@@ -57,7 +187,7 @@ export function renderDistributionSection(node, container) {
         workerList.style.cssText = "display: flex; flex-direction: column; gap: 6px; margin-bottom: 10px;";
 
         const renderWorkerEntries = () => {
-            workerList.innerHTML = "";
+            while (workerList.firstChild) workerList.removeChild(workerList.firstChild);
 
             node.state.worker_urls.forEach((url, idx) => {
                 const row = document.createElement("div");
@@ -229,6 +359,22 @@ export function renderDistributionSection(node, container) {
 // Used by the new top-bar layout (distribution toggle is in Settings dropdown)
 
 export function renderDistributionSettingsSection(node, container) {
+    const placeholder = document.createElement('div');
+    placeholder.style.cssText = "font-size: 9px; color: #666; padding: 2px 4px;";
+    placeholder.textContent = "Checking for Distributed companion plugin...";
+    container.appendChild(placeholder);
+
+    isDistributedAvailable().then(available => {
+        if (!available) {
+            placeholder.replaceWith(_renderDistributedInstallCard(node));
+        } else {
+            placeholder.remove();
+            _renderDistributionSettingsSectionReal(node, container);
+        }
+    });
+}
+
+function _renderDistributionSettingsSectionReal(node, container) {
     // Ensure distribution state defaults exist
     if (!node.state.worker_urls) node.state.worker_urls = [];
     if (node.state.claim_timeout === undefined) node.state.claim_timeout = 600;
@@ -282,7 +428,7 @@ export function renderDistributionSettingsSection(node, container) {
     workerList.style.cssText = "display: flex; flex-direction: column; gap: 6px; margin-bottom: 10px;";
 
     const renderWorkerEntries = () => {
-        workerList.innerHTML = "";
+        while (workerList.firstChild) workerList.removeChild(workerList.firstChild);
 
         node.state.worker_urls.forEach((url, idx) => {
             const row = document.createElement("div");
