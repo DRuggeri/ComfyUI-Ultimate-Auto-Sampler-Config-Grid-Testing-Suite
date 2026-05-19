@@ -270,7 +270,7 @@ function _renderDistributionSectionReal(node, container) {
                 try {
                     // Proxy through master backend to avoid CORS issues
                     // (browser can't fetch cross-origin worker URLs directly)
-                    const resp = await fetch("/distribution/test_worker", {
+                    const resp = await fetch("/uscg-distribution/test_worker", {
                         method: "POST",
                         headers: { "Content-Type": "application/json" },
                         body: JSON.stringify({ worker_url: url })
@@ -511,7 +511,7 @@ function _renderDistributionSettingsSectionReal(node, container) {
             try {
                 // Proxy through master backend to avoid CORS issues
                 // (browser can't fetch cross-origin worker URLs directly)
-                const resp = await fetch("/distribution/test_worker", {
+                const resp = await fetch("/uscg-distribution/test_worker", {
                     method: "POST",
                     headers: { "Content-Type": "application/json" },
                     body: JSON.stringify({ worker_url: url })
