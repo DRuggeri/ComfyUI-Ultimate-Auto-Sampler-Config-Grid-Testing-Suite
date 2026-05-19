@@ -135,9 +135,11 @@ _GEN_ORCH_DEPS = {
     },
     "remote_vae": {
         "RemoteVAEDecodeWorker": type("RemoteVAEDecodeWorker", (), {}),
-        "HF_ENDPOINTS": {},
-        # Facade functions — inline real implementations so tests can exercise
-        # them without needing to load the full remote_vae.py module.
+        # Facade functions added in B2 — stub returns safe defaults so
+        # generation_orchestrator can import and tests run without the
+        # companion plugin present.
+        "is_remote_vae_available": lambda: False,
+        "get_endpoint_names": lambda: ["SD", "SDXL", "Flux", "HunyuanVideo"],
         "INSTALL_INSTRUCTIONS": (
             "Remote VAE requires the ComfyUI-USCG-RemoteVAE companion plugin.\n"
             "Install via Comfy Manager (search 'USCG Remote VAE') or:\n"

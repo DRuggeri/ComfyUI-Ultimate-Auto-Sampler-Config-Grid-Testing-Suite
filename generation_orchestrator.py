@@ -32,7 +32,7 @@ from .image_generation import (
 from .config_utils import sanitize_session_name
 from .html_generator import get_html_template
 from .conditioning_cache import ConditioningCache
-from .remote_vae import RemoteVAEDecodeWorker, HF_ENDPOINTS
+from .remote_vae import RemoteVAEDecodeWorker, is_remote_vae_available, get_endpoint_names
 
 try:
     from server import PromptServer
@@ -62,8 +62,10 @@ def initialize_remote_vae(remote_vae_endpoint, img_dir, manifest_path, existing_
         return None
 
     if remote_vae_endpoint in ["SD", "SDXL", "Flux", "HunyuanVideo"]:
-        actual_endpoint = HF_ENDPOINTS.get(remote_vae_endpoint)
-        print(f"[GridTester] 🌐 Using {remote_vae_endpoint} endpoint: {actual_endpoint}")
+        # Pass the endpoint NAME through to the worker; the companion plugin
+        # (ComfyUI-USCG-RemoteVAE) resolves the name to the actual URL.
+        actual_endpoint = remote_vae_endpoint
+        print(f"[GridTester] 🌐 Using {remote_vae_endpoint} remote VAE (resolved by companion plugin)")
     elif remote_vae_endpoint == "Auto (Experimental)":
         print(f"[GridTester] 🌐 Auto mode selected - worker will initialize on first flush")
         return None
