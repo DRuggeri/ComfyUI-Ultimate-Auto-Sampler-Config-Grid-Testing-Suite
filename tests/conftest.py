@@ -147,6 +147,16 @@ _GEN_ORCH_DEPS = {
             "into your ComfyUI/custom_nodes/ directory."
         ),
     },
+    "distribution": {
+        "INSTALL_INSTRUCTIONS": "stub",
+        "is_distribution_available": lambda: False,
+        "create_manager": lambda *a, **kw: None,
+        "set_active_manager": lambda m: None,
+        "clear_active_manager": lambda: None,
+        "notify_workers_to_start": lambda *a, **kw: [],
+        "stop_all_workers": lambda u: None,
+        "get_master_url": lambda: "http://127.0.0.1:8188",
+    },
 }
 
 # network_utils.py uses only stdlib — always load the real module and register
@@ -214,3 +224,18 @@ sys.modules[_RV_FQ] = _rv_mod
 sys.modules["remote_vae"] = _rv_mod
 setattr(sys.modules[_PKG_NAME], "remote_vae", _rv_mod)
 _rv_spec.loader.exec_module(_rv_mod)
+
+# Pre-load the real distribution.py facade so test_distribution_facade.py exercises
+# actual code rather than a stub. (Same pattern as remote_vae loading above —
+# Phase 2 addition.)
+_DIST_PATH = os.path.join(_NODE_ROOT, "distribution.py")
+_DIST_FQ = f"{_PKG_NAME}.distribution"
+_dist_spec = _ilu.spec_from_file_location(_DIST_FQ, _DIST_PATH,
+                                          submodule_search_locations=[])
+_dist_spec.submodule_search_locations = None
+_dist_mod = _ilu.module_from_spec(_dist_spec)
+_dist_mod.__package__ = _PKG_NAME
+sys.modules[_DIST_FQ] = _dist_mod
+sys.modules["distribution"] = _dist_mod
+setattr(sys.modules[_PKG_NAME], "distribution", _dist_mod)
+_dist_spec.loader.exec_module(_dist_mod)
