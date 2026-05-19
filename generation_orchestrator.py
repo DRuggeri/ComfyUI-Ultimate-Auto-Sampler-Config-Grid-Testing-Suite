@@ -33,6 +33,7 @@ from .config_utils import sanitize_session_name
 from .html_generator import get_html_template
 from .conditioning_cache import ConditioningCache
 from .remote_vae import RemoteVAEDecodeWorker, is_remote_vae_available, get_endpoint_names, INSTALL_INSTRUCTIONS
+from . import distribution
 
 try:
     from server import PromptServer
@@ -2574,28 +2575,6 @@ def run_generation_loop(
     return (html,)
 
 
-def _get_master_url():
-    """Detect this ComfyUI instance's URL for remote workers to connect to."""
-    import socket
-    try:
-        # Get local IP by connecting to external (doesn't actually send data)
-        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-        s.connect(("8.8.8.8", 80))
-        local_ip = s.getsockname()[0]
-        s.close()
-    except Exception:
-        local_ip = "127.0.0.1"
-
-    port = 8188
-    try:
-        import comfy.cli_args
-        port = comfy.cli_args.args.port
-    except Exception:
-        pass
-
-    return f"http://{local_ip}:{port}"
-
-
 # === Conditioning Serialization Helpers ===
 # These convert ComfyUI conditioning tensors to/from JSON-serializable dicts
 # for transmitting pre-encoded conditionings from master to workers.
@@ -2824,6 +2803,21 @@ def _preencode_all_conditionings(
     return encoded_all
 
 
+def _send_distribution_status(manager):
+    """Send distribution status update to the dashboard."""
+    try:
+        status = manager.get_status()
+        status["active"] = manager.is_active
+        import server as _server
+        _server.PromptServer.instance.send_sync("ultimate_grid.distribution_status", {
+            "node": manager.unique_id,
+            "session_name": manager.session_name,
+            **status
+        })
+    except Exception:
+        pass
+
+
 def _run_distributed_generation(
     self, distribution_config, expanded, input_jobs, existing_data,
     overwrite_existing, has_optional_inputs, lora_triggerwords_mode,
@@ -2845,11 +2839,11 @@ def _run_distributed_generation(
     - Waits for all remote workers to finish
     - Returns the final HTML dashboard
     """
-    from .distribution_manager import DistributionManager, JobState
-    from .distribution_routes import (
-        set_distribution_manager, notify_workers_to_start,
-        stop_all_workers, _send_distribution_status
-    )
+    if not distribution.is_distribution_available():
+        raise RuntimeError(distribution.INSTALL_INSTRUCTIONS)
+
+    # JobState is needed for direct job-state manipulation in timeout/cleanup paths.
+    JobState = distribution._require_companion().usrv_dist_manager.JobState
 
     worker_urls = distribution_config.get("worker_urls", [])
     claim_timeout = distribution_config.get("claim_timeout", 600)
@@ -2859,12 +2853,15 @@ def _run_distributed_generation(
         conf["_lora_triggerwords_mode"] = lora_triggerwords_mode
 
     # === Create and populate distribution manager ===
-    manager = DistributionManager(
+    manager = distribution.create_manager(
         session_name=session_name,
         paths=paths,
         unique_id=unique_id,
         existing_data=existing_data,
-        claim_timeout_seconds=claim_timeout
+        job_completed_check=check_if_job_completed,
+        claim_timeout_seconds=claim_timeout,
+        build_prompt_with_triggers=build_prompt_with_triggers,
+        get_model_cache_key=get_model_cache_key,
     )
 
     # Pass session-level settings (cooldown, etc.) to manager for worker passthrough
@@ -2882,7 +2879,7 @@ def _run_distributed_generation(
     )
 
     # Make manager accessible to API endpoints
-    set_distribution_manager(manager)
+    distribution.set_active_manager(manager)
     _send_distribution_status(manager)
 
     # === Master pre-encoding phase (if enabled) ===
@@ -2912,7 +2909,7 @@ def _run_distributed_generation(
     if initial_status["total"] == 0:
         print(f"[Distribution] ⏭️ All jobs already completed, nothing to distribute")
         manager.deactivate()
-        set_distribution_manager(None)
+        distribution.clear_active_manager()
 
         existing_data["meta"] = {
             "positive": positive_text, "negative": negative_text,
@@ -2927,7 +2924,7 @@ def _run_distributed_generation(
         return (html,)
 
     # === Notify remote workers ===
-    master_url = _get_master_url()
+    master_url = distribution.get_master_url()
     print(f"[Distribution] 🌐 Master URL: {master_url}")
     print(f"[Distribution] 🌐 Notifying {len(worker_urls)} worker(s)...")
 
@@ -2936,7 +2933,7 @@ def _run_distributed_generation(
         manager.sync_models_to_workers = True
         print(f"[Distribution] ☁️ Model sync enabled — workers will download missing models from master")
 
-    worker_results = notify_workers_to_start(worker_urls, master_url, session_name, sync_models_to_workers=sync_models)
+    worker_results = distribution.notify_workers_to_start(worker_urls, master_url, session_name, sync_models_to_workers=sync_models)
     successful_workers = sum(1 for _, ok, _ in worker_results if ok)
     print(f"[Distribution] ✅ {successful_workers}/{len(worker_urls)} workers started")
 
@@ -3265,9 +3262,9 @@ def _run_distributed_generation(
                 manager.complete_job(jid)
 
         # Stop remote workers and deactivate manager
-        stop_all_workers(worker_urls)
+        distribution.stop_all_workers(worker_urls)
         manager.deactivate()
-        set_distribution_manager(None)
+        distribution.clear_active_manager()
 
         _cleanup_per_config_remote_workers(per_config_remote_workers)
         if remote_vae_worker:
@@ -3325,9 +3322,9 @@ def _run_distributed_generation(
                 import comfy.model_management as mm
                 if mm.processing_interrupted():
                     print(f"\n[Distribution] 🛑 INTERRUPTED while waiting for workers")
-                    stop_all_workers(worker_urls)
+                    distribution.stop_all_workers(worker_urls)
                     manager.deactivate()
-                    set_distribution_manager(None)
+                    distribution.clear_active_manager()
 
                     _cleanup_per_config_remote_workers(per_config_remote_workers)
                     if remote_vae_worker:
@@ -3376,10 +3373,10 @@ def _run_distributed_generation(
                     print(f"[Distribution] ⚠️ Abandoned job {job.job_id} (was {job.state})")
 
     # === Finalization ===
-    stop_all_workers(worker_urls)
+    distribution.stop_all_workers(worker_urls)
     manager.deactivate()
 
-    # Don't set_distribution_manager(None) immediately — a slow worker may still
+    # Don't clear_active_manager() immediately — a slow worker may still
     # be in the middle of submitting a result. The submit_result route only needs
     # manager != None (it does NOT check is_active). Deactivation already prevents
     # new job claims (claim_job returns 503). Delay the cleanup with a daemon thread
@@ -3400,7 +3397,7 @@ def _run_distributed_generation(
                         break
             if not any_alive:
                 break
-        set_distribution_manager(None)
+        distribution.clear_active_manager()
 
     threading.Thread(target=_delayed_manager_cleanup, daemon=True).start()
 
