@@ -650,7 +650,7 @@ class WorkerThread(threading.Thread):
 
         if _remote_vae_url:
             # Remote VAE: send latents to HuggingFace endpoint for decoding
-            from .remote_vae import remote_decode_hf
+            from .remote_vae import _companion_decode as remote_decode_hf
             from PIL import Image as PILImage
             import numpy as np
             if latent_for_decode.ndim == 3:
