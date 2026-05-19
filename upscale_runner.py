@@ -127,6 +127,17 @@ def _run_upscale_thread(job, target_items, upscale_config, meta, manifest_data, 
         model_name = meta.get("model", "") or ""
         vae_name = meta.get("vae", "")
 
+        # If meta.model is empty/missing (legacy manifests, manifests written before
+        # meta.model was recorded), fall back to the first non-empty item.model in
+        # the target set. Items always store their own model name.
+        if not model_name:
+            for _it in target_items:
+                _it_model = (_it.get("model", "") or "").strip()
+                if _it_model:
+                    model_name = _it_model
+                    print(f"[DashboardUpscale] meta.model is empty; using first item's model: {model_name}")
+                    break
+
         # Validate the checkpoint exists before calling load_checkpoint. Without
         # this guard, a missing file ends up at comfy/utils.py:load_torch_file(None,
         # ...) and crashes with the cryptic "'NoneType' object has no attribute
