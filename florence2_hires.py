@@ -523,15 +523,17 @@ def run_florence2_step(
     f2r_cls = classes["Florence2Run"]
 
     text_input = manifest_extras["florence2_text_input"]
-    # max_new_tokens default 256 (kijai default is 1024): controls Florence2's KV cache
-    # size, which scales as max_new_tokens × num_beams × hidden_dim × num_layers.
-    # For referring_expression_segmentation outputting a face polygon (~10-50 tokens),
-    # 256 leaves 5x headroom for complex multi-face scenes while cutting the cache 4x.
-    # User can bump higher in the UI if they're hitting truncation on complex polygons.
+    # max_new_tokens default 1024 (kijai's stock value). I briefly tried 256 to cut
+    # KV cache size and it caused polygon truncation — Florence2 needs ~50-100 tokens
+    # for a typical face polygon but won't EOS cleanly if the cap is too tight, and
+    # ends up burning the whole budget on garbage continuations. The original OOM was
+    # actually the duplicate model load (fixed via same-model short-circuit in
+    # _get_or_load_checkpoint_lora) + stale prior-gen models (fixed via
+    # soft_empty_cache at upscale_runner start), not the KV cache.
     # keep_model_loaded=False: Florence2 moves to CPU after each detection. The Python
     # handle in _FLORENCE2_MODEL_CACHE still works (next call moves it back to GPU,
     # ~1-2s). Florence2 stops competing with KSampler / session checkpoint for VRAM.
-    max_new_tokens = int(step_config.get("max_new_tokens", 256) or 256)
+    max_new_tokens = int(step_config.get("max_new_tokens", 1024) or 1024)
     manifest_extras["florence2_max_new_tokens"] = max_new_tokens
     print(f"[Florence2HiResFix] Detecting '{text_input}' in image... (max_new_tokens={max_new_tokens})")
     det_result = _call_node(

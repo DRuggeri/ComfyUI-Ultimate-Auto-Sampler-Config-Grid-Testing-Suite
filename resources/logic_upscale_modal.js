@@ -21,7 +21,7 @@ function _defaultFlorence2Options() {
         model: "microsoft/Florence-2-base",
         text_input: "face",
         output_mask_select: "",
-        max_new_tokens: 256,
+        max_new_tokens: 1024,
         target_megapixels: 1.0,
         crop_padding: 64,
         min_crop_resolution: 0,       // No floor — Florence2's polygon decides
@@ -850,7 +850,7 @@ function _renderStep(pipeBody, config, pipeline, ucfg, stepIdx, modelList, callb
             f2.output_mask_select = v; callbacks.onUpdate();
         }));
 
-        grid.appendChild(_makeNumber('Max New Tokens:', f2.max_new_tokens != null ? f2.max_new_tokens : 256, 32, 2048, 32, function(v) {
+        grid.appendChild(_makeNumber('Max New Tokens:', f2.max_new_tokens != null ? f2.max_new_tokens : 1024, 64, 2048, 32, function(v) {
             f2.max_new_tokens = v; callbacks.onUpdate();
         }));
 
