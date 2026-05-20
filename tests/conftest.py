@@ -157,6 +157,10 @@ _GEN_ORCH_DEPS = {
         "stop_all_workers": lambda u: None,
         "get_master_url": lambda: "http://127.0.0.1:8188",
     },
+    "civitai": {
+        "is_civitai_available": lambda: False,
+        "civitai_fetch_by_hash": lambda h: None,
+    },
 }
 
 # network_utils.py uses only stdlib — always load the real module and register
@@ -239,3 +243,17 @@ sys.modules[_DIST_FQ] = _dist_mod
 sys.modules["distribution"] = _dist_mod
 setattr(sys.modules[_PKG_NAME], "distribution", _dist_mod)
 _dist_spec.loader.exec_module(_dist_mod)
+
+# Pre-load the real civitai.py facade so test_civitai_facade.py exercises
+# actual code rather than a stub. (Same pattern as remote_vae + distribution.)
+_CIVITAI_PATH = os.path.join(_NODE_ROOT, "civitai.py")
+_CIVITAI_FQ = f"{_PKG_NAME}.civitai"
+_civitai_spec = _ilu.spec_from_file_location(_CIVITAI_FQ, _CIVITAI_PATH,
+                                              submodule_search_locations=[])
+_civitai_spec.submodule_search_locations = None
+_civitai_mod = _ilu.module_from_spec(_civitai_spec)
+_civitai_mod.__package__ = _PKG_NAME
+sys.modules[_CIVITAI_FQ] = _civitai_mod
+sys.modules["civitai"] = _civitai_mod
+setattr(sys.modules[_PKG_NAME], "civitai", _civitai_mod)
+_civitai_spec.loader.exec_module(_civitai_mod)
