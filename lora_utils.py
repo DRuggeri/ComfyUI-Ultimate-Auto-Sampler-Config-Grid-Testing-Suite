@@ -1,6 +1,6 @@
 import json
 import hashlib
-from .network_utils import civitai_fetch_by_hash
+from .civitai import civitai_fetch_by_hash
 import folder_paths
 import os
 

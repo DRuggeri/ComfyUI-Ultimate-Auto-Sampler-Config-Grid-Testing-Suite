@@ -14,7 +14,7 @@ from typing import List, Dict, Any
 import server
 from aiohttp import web
 import hashlib
-from .network_utils import civitai_fetch_by_hash
+from .civitai import civitai_fetch_by_hash
 
 
 def safe_print(*args, **kwargs):
