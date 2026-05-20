@@ -943,17 +943,19 @@ class UltimateConfigBuilder:
 async def lookup_triggers_endpoint(request):
     """API endpoint to lookup trigger words for LoRAs"""
     try:
+        from . import civitai as _civitai  # local import keeps top of file clean
         data = await request.json()
         lora_list = data.get("loras", [])
-        
+
         print(f"[ConfigBuilder] 🔍 Lookup request for {len(lora_list)} LoRAs")
-        
+
         trigger_map = UltimateConfigBuilder.lookup_lora_triggers(lora_list)
-        
+
         print(f"[ConfigBuilder] ✅ Found triggers for {len(trigger_map)} LoRAs")
-        
+
         return web.json_response({
-            "triggers": trigger_map
+            "triggers": trigger_map,
+            "civitai_available": _civitai.is_civitai_available(),
         })
     except Exception as e:
         print(f"[ConfigBuilder] ❌ Error in lookup_triggers endpoint: {e}")
