@@ -601,28 +601,31 @@ def run_florence2_step(
         pass
     _vram_log("after unload, entering Florence2 detect")
 
-    # do_sample=True + num_beams=12 matches kijai's reference standalone workflow.
-    # do_sample=False routes HF transformers through beam_search(), which has a
-    # documented _reorder_cache memory pattern that briefly duplicates past_key_values
-    # per layer per step — empirically blew us up to 29GB on a 16GB card vs ~5GB on
-    # the same image in the standalone workflow. do_sample=True takes the beam_sample()
-    # path, which is the same kijai UI default and avoids that duplication.
-    # Determinism: torch.manual_seed(seed) is pinned to 1 inside kijai's encode(), so
-    # same image -> same mask within a session.
-    det_result = _call_node(
-        f2r_cls,
-        image=detect_image,
-        florence2_model=florence2_model,
-        text_input=text_input,
-        task="referring_expression_segmentation",
-        fill_mask=True,
-        keep_model_loaded=False,
-        max_new_tokens=max_new_tokens,
-        num_beams=12,
-        do_sample=True,
-        output_mask_select=step_config.get("output_mask_select", ""),
-        seed=1,
-    )
+    # MUST wrap in torch.inference_mode() to match how ComfyUI's executor invokes
+    # nodes (execution.py:732). Without this wrapper, autograd's version-counter
+    # and reference-keeping machinery prevents HF transformers from freeing
+    # intermediate beam-search activations / past_key_values efficiently — we
+    # measured 29-31GB OOM on a 16GB card vs <5GB on the same image in kijai's
+    # standalone workflow. Inference_mode is STRICTER than torch.no_grad() and
+    # is what makes HF's generate() actually release memory between beam steps.
+    # Settings: do_sample=True + num_beams=12 mirror kijai's reference workflow.
+    # Determinism: torch.manual_seed(seed=1) is pinned inside kijai's encode().
+    import torch as _torch_detect
+    with _torch_detect.inference_mode():
+        det_result = _call_node(
+            f2r_cls,
+            image=detect_image,
+            florence2_model=florence2_model,
+            text_input=text_input,
+            task="referring_expression_segmentation",
+            fill_mask=True,
+            keep_model_loaded=False,
+            max_new_tokens=max_new_tokens,
+            num_beams=12,
+            do_sample=True,
+            output_mask_select=step_config.get("output_mask_select", ""),
+            seed=1,
+        )
     mask = _unwrap(det_result, 1)
     _vram_log("after Florence2 detect")
 
