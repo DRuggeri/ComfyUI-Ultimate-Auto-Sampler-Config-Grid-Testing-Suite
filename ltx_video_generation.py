@@ -2,6 +2,31 @@
 LTX 2.3 Video Generation Module
 Two-stage SamplerCustomAdvanced pipeline with parallel audio rail.
 
+============================================================================
+🚨 CRITICAL: _call_node() WRAPS EVERY INVOCATION IN torch.inference_mode() 🚨
+============================================================================
+The _call_node() helper in THIS file is what every ComfyUI node call in USCG
+goes through (florence2_hires.py and this file's 21 LTX node invocations).
+That helper applies `torch.inference_mode()` around the underlying execute()
+or FUNCTION call — mirroring ComfyUI/execution.py:732 which wraps every node
+in the prompt executor's inference_mode block.
+
+DO NOT remove the inference_mode wrap from _call_node. Without it the
+SamplerCustomAdvanced stage 1+2, VAEDecodeTiled, LTXVLatentUpsampler, CLIP
+encode calls, and all other model-forward nodes leak intermediate
+activations across diffusion steps. We measured a 6× VRAM blowup on
+Florence2 from this exact missing wrapper (29GB on a 16GB card vs <5GB
+in the standalone workflow on the same image, May 2026). Same root cause
+applies to every other model-inference path that doesn't go through
+ComfyUI's prompt executor.
+
+If you add new node invocations that DON'T go through _call_node (e.g.,
+direct `.execute()` or `instance.FUNCTION()` calls), wrap them yourself
+in `with torch.inference_mode():` — or better, route them through
+_call_node so the wrapper is automatic.
+============================================================================
+
+
 Pinned LTX node pack version: TBD — set during first smoke test.
 Required nodes (looked up via nodes.NODE_CLASS_MAPPINGS):
 - DiffusionModelLoaderKJ
