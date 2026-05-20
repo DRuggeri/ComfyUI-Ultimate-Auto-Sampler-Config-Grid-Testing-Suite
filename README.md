@@ -259,6 +259,11 @@ Some advanced features live in separate companion plugins:
   your LAN (master + worker model). Install via Comfy Manager
   (search "USCG Distributed") or `git clone` into `custom_nodes/`.
 
+- **[ComfyUI-USCG-CivitAI](https://github.com/JasonHoku/ComfyUI-USCG-CivitAI)**
+  — Auto-detect LoRA trigger words and look up model/LoRA metadata from
+  CivitAI (by file hash). Install via Comfy Manager (search "USCG CivitAI")
+  or `git clone` into `custom_nodes/`.
+
 ---
 
 ## 📦 Installation
