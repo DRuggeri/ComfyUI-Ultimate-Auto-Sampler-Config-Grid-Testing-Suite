@@ -103,6 +103,43 @@ function _resetRemoteVaeCaches() {
     _remoteVaeEndpointsPromise = null;
 }
 
+// =============================================================================
+// CIVITAI COMPANION DETECTION
+//
+// CivitAI metadata lookup lives in ComfyUI-USCG-CivitAI companion plugin.
+// 200 from /uscg-civitai/health → installed. 404 → missing.
+//
+// Cached per Builder load.
+// =============================================================================
+
+let _civitaiStatusPromise = null;
+function isCivitaiAvailable() {
+    if (_civitaiStatusPromise === null) {
+        _civitaiStatusPromise = fetch('/uscg-civitai/health')
+            .then(r => r.ok)
+            .catch(() => false);
+    }
+    return _civitaiStatusPromise;
+}
+
+function _renderCivitaiCompanionNotice() {
+    /** Small inline notice shown when CivitAI companion is missing.
+     *  DOM methods only — no innerHTML (security hook trips on it). */
+    const notice = document.createElement('div');
+    notice.className = 'cb-civitai-notice';
+    notice.style.cssText = "font-size: 10px; color: #888; font-style: italic; padding: 4px 6px; margin: 2px 0;";
+    notice.appendChild(document.createTextNode("ℹ️ Plugin feature — install "));
+    const link = document.createElement('a');
+    link.href = "https://github.com/JasonHoku/ComfyUI-USCG-CivitAI";
+    link.target = "_blank";
+    link.rel = "noopener";
+    link.style.cssText = "color: #6aa9ff; text-decoration: underline;";
+    link.textContent = "ComfyUI-USCG-CivitAI";
+    notice.appendChild(link);
+    notice.appendChild(document.createTextNode(" for auto-trigger detection + metadata lookup."));
+    return notice;
+}
+
 // Debounced renderUI to batch rapid state changes and avoid redundant full rebuilds
 // Pass optional arrayIdx for partial re-render of just one config section
 let _renderUITimer = null;
@@ -1528,6 +1565,11 @@ export function createModelElement(node, modelEntry, arrayIdx, modelIdx, modelLi
         metadataBtn.onclick = async () => await showModelMetadataModal(node, arrayIdx, modelPath, modelType);
         moreOptionsContent.appendChild(metadataBtn);
 
+        // Show inline notice when CivitAI companion is missing (async)
+        isCivitaiAvailable().then(available => {
+            if (!available) moreOptionsContent.appendChild(_renderCivitaiCompanionNotice());
+        });
+
         moreOptionsSection.appendChild(moreOptionsContent);
         contentDiv.appendChild(moreOptionsSection);
     }
@@ -1946,6 +1988,11 @@ export function createLoraElement(node, loraStr, arrayIdx, loraIdx, availableLor
         dontAppendInfo.textContent = "ℹ️ 'Don't Append' adds all trigger words to the omit list";
         triggerSubSection.appendChild(dontAppendInfo);
 
+        // Show inline notice when CivitAI companion is missing (async)
+        isCivitaiAvailable().then(available => {
+            if (!available) triggerSubSection.appendChild(_renderCivitaiCompanionNotice());
+        });
+
         moreOptionsContent.appendChild(triggerSubSection);
 
         // 3. LoRA Metadata Lookup Button
@@ -1955,6 +2002,11 @@ export function createLoraElement(node, loraStr, arrayIdx, loraIdx, availableLor
         metadataBtn.textContent = "🔍 Lookup LoRA Metadata from CivitAI";
         metadataBtn.onclick = async () => await showLoraMetadataModal(node, arrayIdx, parsed.name);
         moreOptionsContent.appendChild(metadataBtn);
+
+        // Show inline notice when CivitAI companion is missing (async)
+        isCivitaiAvailable().then(available => {
+            if (!available) moreOptionsContent.appendChild(_renderCivitaiCompanionNotice());
+        });
 
         // 4. Edit Trigger Words Button
         const editTriggersBtn = document.createElement("button");
