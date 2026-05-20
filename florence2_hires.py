@@ -601,31 +601,23 @@ def run_florence2_step(
         pass
     _vram_log("after unload, entering Florence2 detect")
 
-    # MUST wrap in torch.inference_mode() to match how ComfyUI's executor invokes
-    # nodes (execution.py:732). Without this wrapper, autograd's version-counter
-    # and reference-keeping machinery prevents HF transformers from freeing
-    # intermediate beam-search activations / past_key_values efficiently — we
-    # measured 29-31GB OOM on a 16GB card vs <5GB on the same image in kijai's
-    # standalone workflow. Inference_mode is STRICTER than torch.no_grad() and
-    # is what makes HF's generate() actually release memory between beam steps.
     # Settings: do_sample=True + num_beams=12 mirror kijai's reference workflow.
     # Determinism: torch.manual_seed(seed=1) is pinned inside kijai's encode().
-    import torch as _torch_detect
-    with _torch_detect.inference_mode():
-        det_result = _call_node(
-            f2r_cls,
-            image=detect_image,
-            florence2_model=florence2_model,
-            text_input=text_input,
-            task="referring_expression_segmentation",
-            fill_mask=True,
-            keep_model_loaded=False,
-            max_new_tokens=max_new_tokens,
-            num_beams=12,
-            do_sample=True,
-            output_mask_select=step_config.get("output_mask_select", ""),
-            seed=1,
-        )
+    # NOTE: torch.inference_mode() is applied inside _call_node — see its docstring.
+    det_result = _call_node(
+        f2r_cls,
+        image=detect_image,
+        florence2_model=florence2_model,
+        text_input=text_input,
+        task="referring_expression_segmentation",
+        fill_mask=True,
+        keep_model_loaded=False,
+        max_new_tokens=max_new_tokens,
+        num_beams=12,
+        do_sample=True,
+        output_mask_select=step_config.get("output_mask_select", ""),
+        seed=1,
+    )
     mask = _unwrap(det_result, 1)
     _vram_log("after Florence2 detect")
 

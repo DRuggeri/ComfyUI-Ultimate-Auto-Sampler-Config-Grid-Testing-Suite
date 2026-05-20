@@ -137,32 +137,46 @@ def _call_node(node_cls, **kwargs):
     """Call a Comfy node regardless of V1/V3 API. Returns whatever the node returns
     (typically a tuple, but V3 nodes return an object with .output).
 
+    CRITICAL: Wraps the invocation in torch.inference_mode() to mirror ComfyUI's
+    PromptExecutor (ComfyUI/execution.py:732). ComfyUI's executor wraps every node
+    call in a global inference_mode block; when we call nodes directly via this
+    helper we bypass that wrapper, which leaves autograd's version-counter and
+    reference-keeping machinery active. For pure tensor-op nodes (GrowMask,
+    FeatherMask) that's a small overhead; for inference-heavy nodes (Florence2Run
+    beam search, LTX SamplerCustomAdvanced stage 1/2, VAEDecodeTiled, etc.) it
+    means intermediate activations and past_key_values can't be released between
+    steps — measured as a 6x VRAM blowup on Florence2 (29GB on a 16GB card vs <5GB
+    in the standalone workflow on the same image, May 2026). Wrapping here fixes
+    every existing and future _call_node site at once.
+
     V3 (io.ComfyNode subclass): class-level .execute() classmethod — must be inside
         a CurrentNodeContext block.
     V1 (legacy): node has a FUNCTION attribute naming an instance method; instantiate
         the class then call that method on the instance. KJ nodes and most core ComfyUI
         nodes work this way.
     """
-    # Try V3 first via subclass check (avoids triggering AttributeError noise on V1 nodes
-    # that may also happen to have an unrelated `execute` attribute somewhere).
-    try:
-        from comfy_api.latest import io
-        if isinstance(node_cls, type) and issubclass(node_cls, io.ComfyNode):
+    import torch as _torch_ic
+    with _torch_ic.inference_mode():
+        # Try V3 first via subclass check (avoids triggering AttributeError noise on V1 nodes
+        # that may also happen to have an unrelated `execute` attribute somewhere).
+        try:
+            from comfy_api.latest import io
+            if isinstance(node_cls, type) and issubclass(node_cls, io.ComfyNode):
+                return node_cls.execute(**kwargs)
+        except (ImportError, TypeError):
+            pass
+
+        # V1 path: FUNCTION attribute names the instance method to invoke
+        fn_name = getattr(node_cls, "FUNCTION", None)
+        if fn_name:
+            inst = node_cls()
+            return getattr(inst, fn_name)(**kwargs)
+
+        # Last-resort fallback: try class-level .execute()
+        if hasattr(node_cls, "execute"):
             return node_cls.execute(**kwargs)
-    except (ImportError, TypeError):
-        pass
 
-    # V1 path: FUNCTION attribute names the instance method to invoke
-    fn_name = getattr(node_cls, "FUNCTION", None)
-    if fn_name:
-        inst = node_cls()
-        return getattr(inst, fn_name)(**kwargs)
-
-    # Last-resort fallback: try class-level .execute()
-    if hasattr(node_cls, "execute"):
-        return node_cls.execute(**kwargs)
-
-    raise RuntimeError("Cannot determine entry method for node " + repr(node_cls))
+        raise RuntimeError("Cannot determine entry method for node " + repr(node_cls))
 
 
 def _unwrap(result, idx=0):
