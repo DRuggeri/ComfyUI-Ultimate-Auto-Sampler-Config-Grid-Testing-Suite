@@ -6647,7 +6647,7 @@ export function renderUpscalingSection(node, container, modelLists) {
                     const f2InMpInput = document.createElement("input");
                     f2InMpInput.type = "number"; f2InMpInput.className = "cb-input";
                     f2InMpInput.value = f2.florence2_input_mp != null ? f2.florence2_input_mp : 0.5;
-                    f2InMpInput.min = 0; f2InMpInput.max = 4.0; f2InMpInput.step = 0.25;
+                    f2InMpInput.min = 0; f2InMpInput.max = 4.0; f2InMpInput.step = 0.01;
                     f2InMpInput.title = "Resize source image to this MP BEFORE Florence2 detection. Florence2's vision encoder activations scale with input dims — 0.5 MP cuts encoder VRAM ~4x with negligible detection-accuracy loss. The mask gets scaled back up to source resolution after detection, so the crop/inpaint/paste-back still runs at full quality. Set 0 to disable. Only takes effect when source > this MP.";
                     f2InMpInput.onchange = () => { f2.florence2_input_mp = parseFloat(f2InMpInput.value); node.saveState(); };
                     grid.appendChild(createInputGroup("Florence2 Input MP", f2InMpInput));

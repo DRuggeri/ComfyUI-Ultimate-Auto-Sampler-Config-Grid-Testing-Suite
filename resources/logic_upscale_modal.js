@@ -856,9 +856,7 @@ function _renderStep(pipeBody, config, pipeline, ucfg, stepIdx, modelList, callb
         }));
 
         grid.appendChild(_makeNumber('Florence2 Input MP:', f2.florence2_input_mp != null ? f2.florence2_input_mp : 0.5, 0, 4.0, 0.01, function(v) {
-            console.log(f2.florence2_input_mp, v);
             f2.florence2_input_mp = v; callbacks.onUpdate();
-            console.log(f2.florence2_input_mp, v);
         }));
 
         // Group B: Crop & resize
