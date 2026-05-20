@@ -601,6 +601,14 @@ def run_florence2_step(
         pass
     _vram_log("after unload, entering Florence2 detect")
 
+    # do_sample=True + num_beams=12 matches kijai's reference standalone workflow.
+    # do_sample=False routes HF transformers through beam_search(), which has a
+    # documented _reorder_cache memory pattern that briefly duplicates past_key_values
+    # per layer per step — empirically blew us up to 29GB on a 16GB card vs ~5GB on
+    # the same image in the standalone workflow. do_sample=True takes the beam_sample()
+    # path, which is the same kijai UI default and avoids that duplication.
+    # Determinism: torch.manual_seed(seed) is pinned to 1 inside kijai's encode(), so
+    # same image -> same mask within a session.
     det_result = _call_node(
         f2r_cls,
         image=detect_image,
@@ -610,8 +618,8 @@ def run_florence2_step(
         fill_mask=True,
         keep_model_loaded=False,
         max_new_tokens=max_new_tokens,
-        num_beams=3,
-        do_sample=False,
+        num_beams=12,
+        do_sample=True,
         output_mask_select=step_config.get("output_mask_select", ""),
         seed=1,
     )
