@@ -123,17 +123,27 @@ function isCivitaiAvailable() {
 }
 
 function _renderCivitaiCompanionNotice() {
-    /** Small inline notice shown when CivitAI companion is missing.
+    /** Eye-catching dark-red notice shown when CivitAI companion is missing.
      *  DOM methods only — no innerHTML (security hook trips on it). */
     const notice = document.createElement('div');
     notice.className = 'cb-civitai-notice';
-    notice.style.cssText = "font-size: 10px; color: #888; font-style: italic; padding: 4px 6px; margin: 2px 0;";
+    notice.style.cssText = [
+        "border-left: 4px solid #ee4444",
+        "background: rgba(180, 40, 40, 0.18)",
+        "border-radius: 4px",
+        "padding: 8px 12px",
+        "margin: 6px 0",
+        "font-size: 11px",
+        "font-weight: 500",
+        "color: #ffdddd",
+        "line-height: 1.4",
+    ].join(';');
     notice.appendChild(document.createTextNode("ℹ️ Plugin feature — install "));
     const link = document.createElement('a');
     link.href = "https://github.com/JasonHoku/ComfyUI-USCG-CivitAI";
     link.target = "_blank";
     link.rel = "noopener";
-    link.style.cssText = "color: #6aa9ff; text-decoration: underline;";
+    link.style.cssText = "color: #ffaaaa; text-decoration: underline; font-weight: 600;";
     link.textContent = "ComfyUI-USCG-CivitAI";
     notice.appendChild(link);
     notice.appendChild(document.createTextNode(" for auto-trigger detection + metadata lookup."));
@@ -2101,6 +2111,13 @@ async function showLoraMetadataModal(node, arrayIdx, loraName, forceRefresh = fa
     title.textContent = "🔍 LoRA Metadata Lookup";
     title.style.cssText = "margin: 0 0 15px 0; color: #9966cc;";
     modal.appendChild(title);
+
+    // CivitAI companion notice — shows when companion missing
+    const _modalNoticeSlot = document.createElement('div');
+    modal.appendChild(_modalNoticeSlot);
+    isCivitaiAvailable().then(available => {
+        if (!available) _modalNoticeSlot.replaceWith(_renderCivitaiCompanionNotice());
+    });
 
     const status = document.createElement("div");
     status.textContent = `🔄 Fetching metadata for: ${loraName.split('/').pop()} (This could take a few seconds the fist time)`;
@@ -4884,6 +4901,14 @@ export async function showTriggerLookupModal(node, arrayIdx) {
     title.textContent = "🔎 LoRA Trigger Words Lookup";
     title.style.cssText = "margin: 0 0 15px 0; color: #0066cc;";
     modal.appendChild(title);
+
+    // CivitAI companion notice — shows when companion missing
+    const _twLookupNoticeSlot = document.createElement('div');
+    modal.appendChild(_twLookupNoticeSlot);
+    isCivitaiAvailable().then(available => {
+        if (!available) _twLookupNoticeSlot.replaceWith(_renderCivitaiCompanionNotice());
+    });
+
     const status = document.createElement("div");
     status.textContent = "🔄 Fetching trigger words from CivitAI...";
     status.style.cssText = "margin-bottom: 15px; color: #aaa;";
@@ -6983,6 +7008,27 @@ export function renderRunSettingsSection(node, container) {
     _addRunSetting(content, { stateKey: "lora_triggerwords_mode", label: "LoRA Triggerwords Mode", kind: "select",
         options: ["None", "Append To End", "Append To Start", "Read From Config"], defaultValue: "None",
         tooltip: "None = Don't fetch/append trigger words. Append To End = Add triggers at end of prompt (default behavior). Append To Start = Add triggers at start of prompt. Read From Config = Use lora_triggerwords_append_settings in config JSON to specify per-lora placement." });
+
+    // CivitAI companion notice — shows when mode is not "None" AND companion missing
+    const _twModeNoticeSlot = document.createElement('div');
+    content.appendChild(_twModeNoticeSlot);
+    const _twModeRow = content.children[content.children.length - 2];  // the row just appended by _addRunSetting
+    const _twModeSelect = _twModeRow ? _twModeRow.querySelector('select') : null;
+    const _updateTwModeNotice = () => {
+        _twModeNoticeSlot.replaceChildren();
+        const currentVal = (node.state.lora_triggerwords_mode || "None");
+        if (currentVal === "None") return;
+        isCivitaiAvailable().then(available => {
+            // Re-check current value at notice-render time (user may have changed back)
+            if ((node.state.lora_triggerwords_mode || "None") === "None") return;
+            if (!available) _twModeNoticeSlot.appendChild(_renderCivitaiCompanionNotice());
+        });
+    };
+    if (_twModeSelect) {
+        _twModeSelect.addEventListener('change', _updateTwModeNotice);
+    }
+    _updateTwModeNotice();  // initial check on render
+
     _addRunSetting(content, { stateKey: "save_conditioning_cache_to_file", label: "Save Conditioning Cache To File", kind: "bool",
         tooltip: "Save CLIP conditioning cache to disk. Useful when experimenting with the same prompts/models — skips text encoding on resume. WARNING: Can create very large files in output/benchmarks. Automatically disabled when optional inputs (model/clip/conditioning) are connected." });
     _addRunSetting(content, { stateKey: "enable_model_cache", label: "Enable Model Cache", kind: "bool",
