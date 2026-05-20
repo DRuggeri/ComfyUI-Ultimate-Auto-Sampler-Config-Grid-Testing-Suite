@@ -39,6 +39,23 @@ def safe_print(*args, **kwargs):
 print = safe_print
 
 
+def _vram_log(label):
+    """Diagnostic VRAM probe. Prints current CUDA allocated + reserved memory.
+    Used to characterize the per-image VRAM curve of Florence2 Hi-Res Fix —
+    pinpoints whether OOMs come from a cumulative leak across the batch or a
+    one-shot peak on a runaway image. Safe no-op if torch isn't available or
+    CUDA isn't present (CPU-only test runs).
+    """
+    try:
+        import torch as _t
+        if _t.cuda.is_available():
+            alloc = _t.cuda.memory_allocated() / 1024**3
+            reserved = _t.cuda.memory_reserved() / 1024**3
+            safe_print(f"[Florence2HiResFix VRAM] {label}: alloc={alloc:.2f}GB reserved={reserved:.2f}GB")
+    except Exception:
+        pass
+
+
 def compute_target_dims(src_w, src_h, target_megapixels):
     """Compute target (width, height) for a megapixel-based resize.
 
@@ -561,6 +578,29 @@ def run_florence2_step(
     # Florence2 won't EOS cleanly under a tight cap and burns the budget on
     # garbage continuations. With detect-side resize taking the heat instead,
     # the KV cache at 1024 fits comfortably.
+
+    # VRAM hygiene before Florence2 detect: evict SDXL/CLIP/VAE from VRAM so the
+    # vision encoder + beam-search KV cache get full headroom. The standalone
+    # kijai Florence2 workflow uses ~65% of 16GB at 4K/1024 tokens — but only
+    # because nothing else is resident. In USCG's batch flow, SDXL (~7GB) sits
+    # alongside it, leaving only ~9GB for Florence2 — under its 10GB peak on
+    # runaway-token images → OOM. ComfyUI auto-reloads SDXL on the next
+    # generate_image / vae.encode call below (~1-2s overhead per image).
+    _vram_log("before unload + Florence2 detect")
+    try:
+        import comfy.model_management as _mm_pre_detect
+        _mm_pre_detect.unload_all_models()
+        _mm_pre_detect.soft_empty_cache()
+        try:
+            import torch as _torch_pre_detect
+            if _torch_pre_detect.cuda.is_available():
+                _torch_pre_detect.cuda.empty_cache()
+        except Exception:
+            pass
+    except Exception:
+        pass
+    _vram_log("after unload, entering Florence2 detect")
+
     det_result = _call_node(
         f2r_cls,
         image=detect_image,
@@ -576,6 +616,7 @@ def run_florence2_step(
         seed=1,
     )
     mask = _unwrap(det_result, 1)
+    _vram_log("after Florence2 detect")
 
     # If we ran Florence2 on a down-scaled image, the returned mask is at the
     # smaller dims. Upscale it back to the original source dims so the crop /
@@ -739,6 +780,7 @@ def run_florence2_step(
         height=target_h,
     )
     decoded_pil = decode_latent_with_vae(vae_handle, hires_latent_dict["samples"])
+    _vram_log("after sample + VAE decode")
 
     # Convert PIL back to tensor for paste-back
     import numpy as np
@@ -801,6 +843,7 @@ def run_florence2_step(
             pass
     except Exception:
         pass
+    _vram_log("end of image (after cleanup)")
 
     return manifest_extras
 
