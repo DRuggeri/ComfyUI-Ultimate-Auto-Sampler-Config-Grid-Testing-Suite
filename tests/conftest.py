@@ -163,23 +163,7 @@ _GEN_ORCH_DEPS = {
     },
 }
 
-# network_utils.py uses only stdlib — always load the real module and register
-# it under both the bare name and the package-qualified name.  This ensures the
-# relative import `from .network_utils import huggingface_vae_decode, ...` in
-# remote_vae.py resolves correctly regardless of what pytest has pre-loaded.
-import importlib.util as _ilu  # imported here; re-used below for gen_orch and remote_vae
-_NETWORK_UTILS_FQ = f"{_PKG_NAME}.network_utils"
-_NU_PATH = os.path.join(_NODE_ROOT, "network_utils.py")
-_nu_spec = _ilu.spec_from_file_location(_NETWORK_UTILS_FQ, _NU_PATH,
-                                        submodule_search_locations=[])
-_nu_spec.submodule_search_locations = None
-_nu_mod = _ilu.module_from_spec(_nu_spec)
-_nu_mod.__package__ = _PKG_NAME
-# Unconditionally replace any prior stub — we need the real attributes.
-sys.modules[_NETWORK_UTILS_FQ] = _nu_mod
-sys.modules["network_utils"] = _nu_mod
-setattr(sys.modules[_PKG_NAME], "network_utils", _nu_mod)
-_nu_spec.loader.exec_module(_nu_mod)
+import importlib.util as _ilu  # used below for gen_orch, remote_vae, distribution, civitai
 
 for _bare, _attrs in _GEN_ORCH_DEPS.items():
     _fq = f"{_PKG_NAME}.{_bare}"
@@ -213,8 +197,6 @@ if "generation_orchestrator" not in sys.modules:
 # Pre-load the real remote_vae module so that test_remote_vae_facade.py gets
 # the actual functions (is_remote_vae_available, get_endpoint_names,
 # _companion_decode) rather than the lightweight stub registered above.
-# remote_vae.py uses `from .network_utils import ...`; we satisfy that via the
-# network_utils stub already registered in sys.modules.
 _RV_PATH = os.path.join(_NODE_ROOT, "remote_vae.py")
 _RV_FQ = f"{_PKG_NAME}.remote_vae"
 _rv_spec = _ilu.spec_from_file_location(_RV_FQ, _RV_PATH,

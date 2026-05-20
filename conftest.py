@@ -112,14 +112,6 @@ def _install_stubs():
             setattr(sys.modules[bare], k, v)
             setattr(sys.modules[fq], k, v)
 
-    # 2b. Stub network_utils (used by config_builder_node via relative import)
-    for _nu_name in ("network_utils", f"{_PKG_NAME}.network_utils"):
-        if _nu_name not in sys.modules:
-            _nu = types.ModuleType(_nu_name)
-            sys.modules[_nu_name] = _nu
-        if not hasattr(sys.modules[_nu_name], "civitai_fetch_by_hash"):
-            sys.modules[_nu_name].civitai_fetch_by_hash = lambda *a, **kw: None
-
     # 3. Pre-register the package itself
     if _PKG_NAME not in sys.modules:
         pkg_stub = types.ModuleType(_PKG_NAME)
