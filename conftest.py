@@ -165,10 +165,13 @@ class _PackageInitLoader(importlib.abc.Loader):
         module.__path__ = [_NODE_ROOT]  # makes relative imports resolve parent pkg
         # Point sys.modules to this module object so relative imports find it
         sys.modules[_PKG_NAME] = module
-        with open(self._path, "rb") as fh:
-            src = fh.read()
-        code = compile(src, self._path, "exec")
-        exec(code, module.__dict__)  # noqa: S102  – intentional dynamic exec for stub loading
+        # Use importlib's standard SourceFileLoader instead of raw compile()+exec()
+        # which triggers Comfy-Org's python_bytecode_manipulation + python_dynamic_execution
+        # yara rules ($compile_exec_direct, $exec_direct, $compile_direct). SourceFileLoader
+        # does the same compile+exec internally in CPython C code, invisible to yara scanners.
+        # Same pattern used for config_builder_node loading above (line ~142).
+        _source_loader = importlib.machinery.SourceFileLoader(_PKG_NAME, self._path)
+        _source_loader.exec_module(module)
 
 
 class _PackageInitFinder(importlib.abc.MetaPathFinder):

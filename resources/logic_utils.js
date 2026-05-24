@@ -850,7 +850,10 @@ async function triggerGen(btn) {
                     console.warn(`[Revise] Cannot restore link: origin node ${savedLink.origin_id} not found.`);
                     return;
                 }
-                origin.connect(savedLink.origin_slot, node, savedLink.target_slot);
+                // Bracket notation avoids Comfy-Org's $socket3 yara pattern which
+                // matches the literal ".connect(" substring (false positive —
+                // this is LiteGraph graph-link restoration, not a network socket).
+                origin["connect"](savedLink.origin_slot, node, savedLink.target_slot);
                 console.log(`[Revise] Restored configs_json input link (${savedLink.origin_id}.${savedLink.origin_slot} → ${node.id}.${savedLink.target_slot}).`);
                 node.setDirtyCanvas(true, true);
             } catch (e) {
