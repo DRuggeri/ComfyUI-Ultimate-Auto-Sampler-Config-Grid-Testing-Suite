@@ -876,6 +876,10 @@ class UltimateConfigBuilder:
         # session_name moves into session_settings too so the Generator's
         # session_name widget can be removed (Phase 2).
         session_settings["session_name"] = str(state.get("session_name", "my_session"))
+        try:
+            session_settings["add_random_seeds_to_gens"] = int(state.get("add_random_seeds_to_gens", 0))
+        except (TypeError, ValueError):
+            session_settings["add_random_seeds_to_gens"] = 0
 
         if session_settings:
             output_obj["_session_settings"] = session_settings
