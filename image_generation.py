@@ -1,6 +1,47 @@
 """
 Image Generation and Sampling Module
-Handles the core image generation, decoding, and batch management
+Handles the core image generation, decoding, and batch management.
+
+============================================================================
+🚨 CRITICAL: torch.inference_mode() WRAPPING — DO NOT REMOVE 🚨
+============================================================================
+Every top-level GPU-inference entry point in this module is decorated with
+`@torch.inference_mode()`. This mirrors ComfyUI's PromptExecutor which wraps
+every node execution in inference_mode (ComfyUI/execution.py:732).
+
+WHY THIS MATTERS:
+  We are an out-of-graph caller — we invoke ComfyUI's sampling / VAE / upscale
+  models directly from a background thread (the dashboard upscale runner) and
+  from our orchestrator, bypassing the normal prompt executor. Without
+  inference_mode wrapping, autograd's version-counter and reference-keeping
+  machinery stays active. For diffusion sampling, beam-search generation,
+  VAE encode/decode, and upscale-model inference, that means intermediate
+  activations and past_key_values can't be released — measured as a 6× VRAM
+  blowup on Florence2 (29GB on a 16GB card vs <5GB in the standalone workflow
+  on the same image, May 2026). Same pattern applies to SDXL sampling,
+  SeedVR2 diffusion, and ESRGAN-style upscalers, just at a smaller magnitude.
+
+  torch.inference_mode() is STRICTER than torch.no_grad():
+    - no_grad: disables gradient tracking, but version counters and autograd
+      machinery stay partly active
+    - inference_mode: tensors are entirely outside autograd, true read-only —
+      this is what lets HF generate() actually release KV cache between beam
+      steps and what lets ComfyUI's sample loop reclaim activations between
+      diffusion steps
+
+WHERE IT'S APPLIED:
+  - @torch.inference_mode() on generate_image, upscale_image,
+    decode_latent_with_vae, seedvr2_upscale (this file)
+  - Inside _call_node() in ltx_video_generation.py (covers all 25 ComfyUI
+    node invocations across florence2_hires.py + ltx_video_generation.py)
+
+IF YOU ADD A NEW INFERENCE ENTRY POINT:
+  Wrap it in @torch.inference_mode() (decorator) or
+  `with torch.inference_mode():` (context). Symptom of missing it: GPU OOM
+  on workloads that work fine in a standalone ComfyUI workflow, or sudden
+  VRAM growth that doesn't match the model size. See
+  ComfyUI/execution.py:732 for the canonical pattern.
+============================================================================
 """
 
 import time
@@ -13,6 +54,10 @@ import numpy as np
 from PIL import Image
 
 
+# NOTE: torch.inference_mode() decorator — see module docstring above for why
+# this is REQUIRED on all out-of-graph inference entry points. Removing it
+# will reintroduce the same 6× VRAM blowup we fixed in May 2026.
+@torch.inference_mode()
 def generate_image(
     patched_model,
     seed,
@@ -478,6 +523,9 @@ def tiled_hires_sample(latent_input, patched_model, config, positive_conditionin
     return {"samples": result_samples}
 
 
+# @torch.inference_mode() — see module docstring. Covers KSampler hires fix,
+# ImageUpscaleWithModel (ESRGAN-style), and VAE encode/decode in this function.
+@torch.inference_mode()
 def upscale_image(result_latent, vae, patched_model, upscaling_config, config, positive_conditioning, negative_conditioning, width, height):
     """
     Apply upscaling to a generated latent based on upscaling settings.
@@ -668,6 +716,9 @@ def upscale_image(result_latent, vae, patched_model, upscaling_config, config, p
         return result_latent, 0
 
 
+# @torch.inference_mode() — see module docstring. VAE decode is a model forward
+# pass and needs inference_mode to avoid pinning intermediate activations.
+@torch.inference_mode()
 def decode_latent_with_vae(vae, latent_samples):
     """
     Decode latent samples to pixel space using VAE.
@@ -699,9 +750,10 @@ def decode_latent_with_vae(vae, latent_samples):
             print(f"[GridTester] ✅ float32 retry succeeded")
 
     # Convert to PIL Image
-    # .detach() is required because the tensor may have requires_grad=True
-    # (e.g., when called from distributed worker threads outside ComfyUI's
-    # normal execution context where autograd state may differ)
+    # .detach() is a defensive no-op under @torch.inference_mode() (tensors are
+    # already non-grad). Kept for safety in case this function is ever called
+    # without the decorator, but inference_mode is the primary defense — see
+    # module docstring for why.
     img_np = decoded.detach().cpu().float().numpy()
 
     # Remove extra dimensions (handle shapes like (1, 1, H, W, C) or (1, H, W, C))
@@ -1027,6 +1079,11 @@ def flush_batch_with_remote_vae(pending_batch, remote_vae_worker, existing_data,
 # Requires ComfyUI-SeedVR2_VideoUpscaler to be installed as a dependency.
 # =============================================================================
 
+# @torch.inference_mode() — see module docstring. SeedVR2 is a diffusion-based
+# upscaler with its own iterative sampling loop, identical autograd concerns
+# to SDXL KSampler. The CurrentNodeContext below sets up V3-API execution but
+# does NOT include inference_mode — that's our job at the function boundary.
+@torch.inference_mode()
 def seedvr2_upscale(pil_image, seedvr2_config):
     """
     Upscale an image using SeedVR2 diffusion-based upscaler.
